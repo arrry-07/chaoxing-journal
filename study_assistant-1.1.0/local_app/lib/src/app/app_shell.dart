@@ -7,7 +7,9 @@ import 'package:go_router/go_router.dart';
 
 import '../features/widgets/journal_floating_nav_bar.dart';
 import '../features/widgets/update_scope.dart';
+import '../models/sync_report.dart';
 import '../services/assignment_store.dart';
+import '../services/clawd_companion_controller.dart';
 import '../services/interaction_feedback_service.dart';
 import 'app_back_navigation_policy.dart';
 import 'journal.dart';
@@ -25,6 +27,7 @@ class AppShell extends StatefulWidget {
     this.clock,
     this.onExitApp,
     this.overlayResetListenable,
+    this.onClawdBubbleTap,
   });
 
   final AssignmentStore assignmentStore;
@@ -33,6 +36,7 @@ class AppShell extends StatefulWidget {
   final DateTime Function()? clock;
   final Future<void> Function()? onExitApp;
   final Listenable? overlayResetListenable;
+  final ValueChanged<ClawdPageContextSnapshot>? onClawdBubbleTap;
 
   static const Set<String> primaryTabPaths = {
     '/assignments',
@@ -72,6 +76,7 @@ class AppShell extends StatefulWidget {
 }
 
 class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
+  late final ClawdCompanionController _clawdController;
   Timer? _returnTimer;
   UnsavedEditGuard? _leaveGuard;
   GoRouter? _boundRouter;
@@ -83,19 +88,51 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   late int _lastAccountEpoch;
   String? _lastAccountHash;
   bool? _lastRouteIsCurrent;
+  bool _appResumed = true;
+  bool _tickerEnabled = true;
+  bool _reducedMotion = false;
 
   @override
   void initState() {
     super.initState();
+    _appResumed =
+        (WidgetsBinding.instance.lifecycleState ?? AppLifecycleState.resumed) ==
+            AppLifecycleState.resumed;
+    _clawdController = ClawdCompanionController(
+      clock: widget.clock,
+      onBubbleTapExtension: widget.onClawdBubbleTap,
+    );
     _backPolicy = AppBackNavigationPolicy(clock: widget.clock);
     _lastAccountEpoch = widget.assignmentStore.accountEpoch;
     _lastAccountHash = widget.assignmentStore.accountHash;
     widget.assignmentStore.addListener(_handleStoreIdentityChange);
     widget.overlayResetListenable?.addListener(_handleOverlayReset);
     WidgetsBinding.instance.addObserver(this);
+    _syncClawdEnvironment(notify: false);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) widget.assignmentStore.runDueAutoSync();
     });
+  }
+
+  void _syncClawdEnvironment({bool notify = true}) {
+    final store = widget.assignmentStore;
+    final isSyncing =
+        store.isLoading || store.syncReport.phase == SyncPhase.running;
+    final hasError = !isSyncing &&
+        (store.syncReport.phase == SyncPhase.failed ||
+            store.syncReport.phase == SyncPhase.partial ||
+            store.hasNonQuietServiceWarning ||
+            store.recoveryWarning != null ||
+            store.operationError != null);
+    _clawdController.updateEnvironment(
+      displayPrefs: store.display,
+      appResumed: _appResumed,
+      tickerEnabled: _tickerEnabled,
+      reducedMotion: _reducedMotion,
+      isSyncing: isSyncing,
+      hasSyncErrorOrPending: hasError,
+      notify: notify,
+    );
   }
 
   @override
@@ -104,11 +141,16 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     if (oldWidget.clock != widget.clock) {
       _backPolicy = AppBackNavigationPolicy(clock: widget.clock);
     }
+    if (oldWidget.onClawdBubbleTap != widget.onClawdBubbleTap) {
+      _clawdController.onBubbleTapExtension = widget.onClawdBubbleTap;
+    }
     if (oldWidget.assignmentStore != widget.assignmentStore) {
       oldWidget.assignmentStore.removeListener(_handleStoreIdentityChange);
       _lastAccountEpoch = widget.assignmentStore.accountEpoch;
       _lastAccountHash = widget.assignmentStore.accountHash;
       widget.assignmentStore.addListener(_handleStoreIdentityChange);
+      _clawdController.resetForAccountChange();
+      _syncClawdEnvironment();
       _resetExitWindow();
     }
     if (oldWidget.overlayResetListenable != widget.overlayResetListenable) {
@@ -122,6 +164,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   void didChangeDependencies() {
     super.didChangeDependencies();
     _leaveGuard = widget.leaveGuard ?? UnsavedEditGuardScope.maybeOf(context);
+    _tickerEnabled = TickerMode.valuesOf(context).enabled;
+    _reducedMotion = MediaQuery.disableAnimationsOf(context);
+    _syncClawdEnvironment(notify: false);
     final isCurrent = ModalRoute.of(context)?.isCurrent ?? true;
     if (_lastRouteIsCurrent != null && _lastRouteIsCurrent != isCurrent) {
       _resetExitWindow();
@@ -136,6 +181,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     widget.overlayResetListenable?.removeListener(_handleOverlayReset);
     _routerListenable?.removeListener(_handleRouteChange);
     _exitFeedback.dispose();
+    _clawdController.dispose();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -156,8 +202,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     if (epoch != _lastAccountEpoch || hash != _lastAccountHash) {
       _lastAccountEpoch = epoch;
       _lastAccountHash = hash;
+      _clawdController.resetForAccountChange();
       _resetExitWindow();
     }
+    _syncClawdEnvironment();
     final confirmation =
         widget.assignmentStore.consumeReturnCheckConfirmation();
     if (confirmation != null &&
@@ -166,6 +214,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         widget.assignmentStore.display,
         kind: InteractionSoundKind.complete,
       );
+      _clawdController.triggerCheer(withSound: false);
     }
   }
 
@@ -175,11 +224,29 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     final nextUri = AppShell.currentUriOf(router).toString();
     if (nextUri == _lastKnownUri) return;
     _lastKnownUri = nextUri;
+    final path = AppShell.currentLocationOf(router);
+    final tab = switch (path) {
+      '/assignments' => ClawdPrimaryTab.home,
+      '/calendar' => ClawdPrimaryTab.calendar,
+      '/stats' => ClawdPrimaryTab.stats,
+      '/profile' => ClawdPrimaryTab.profile,
+      _ => null,
+    };
+    if (tab != null) {
+      _clawdController.handleTabChanged(tab);
+    } else {
+      _clawdController.dismissBubble();
+    }
     _resetExitWindow();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    final nextResumed = state == AppLifecycleState.resumed;
+    if (_appResumed != nextResumed) {
+      _appResumed = nextResumed;
+      _syncClawdEnvironment();
+    }
     if (state == AppLifecycleState.resumed) {
       _resetExitWindow();
       _returnTimer?.cancel();
@@ -217,71 +284,75 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         final canPopRoute = router.canPop();
         final updates = AppUpdateScope.maybeOf(context);
 
-        return PopScope(
-          canPop: canPopRoute,
-          onPopInvokedWithResult: (didPop, _) {
-            if (didPop) return;
-            unawaited(_handleRootBack(router));
-          },
-          child: Scaffold(
-            extendBody: showTabBar,
-            body: SafeArea(bottom: !showTabBar, child: widget.child),
-            bottomNavigationBar: SafeArea(
-              top: false,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  AnimatedBuilder(
-                    animation: widget.assignmentStore,
-                    builder: (context, _) {
-                      final message = widget.assignmentStore.returnCheckMessage;
-                      if (message == null) return const SizedBox.shrink();
-                      final epoch = widget.assignmentStore.accountEpoch;
-                      return TimedReturnCheck(
-                        key: ValueKey((epoch, message)),
-                        message: message,
-                        onDismiss: () {
-                          if (widget.assignmentStore.accountEpoch == epoch &&
-                              widget.assignmentStore.returnCheckMessage ==
-                                  message) {
-                            widget.assignmentStore.dismissReturnCheck();
-                          }
-                        },
-                      );
-                    },
-                  ),
-                  if (updates != null)
-                    UpdateDownloadBanner(controller: updates),
-                  AnimatedSwitcher(
-                    duration: JournalMotion.duration(
-                      context,
-                      const Duration(milliseconds: 200),
+        return ClawdCompanionScope(
+          controller: _clawdController,
+          child: PopScope(
+            canPop: canPopRoute,
+            onPopInvokedWithResult: (didPop, _) {
+              if (didPop) return;
+              unawaited(_handleRootBack(router));
+            },
+            child: Scaffold(
+              extendBody: showTabBar,
+              body: SafeArea(bottom: !showTabBar, child: widget.child),
+              bottomNavigationBar: SafeArea(
+                top: false,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    AnimatedBuilder(
+                      animation: widget.assignmentStore,
+                      builder: (context, _) {
+                        final message =
+                            widget.assignmentStore.returnCheckMessage;
+                        if (message == null) return const SizedBox.shrink();
+                        final epoch = widget.assignmentStore.accountEpoch;
+                        return TimedReturnCheck(
+                          key: ValueKey((epoch, message)),
+                          message: message,
+                          onDismiss: () {
+                            if (widget.assignmentStore.accountEpoch == epoch &&
+                                widget.assignmentStore.returnCheckMessage ==
+                                    message) {
+                              widget.assignmentStore.dismissReturnCheck();
+                            }
+                          },
+                        );
+                      },
                     ),
-                    // Leaving a primary tab removes the bar at once: an outgoing
-                    // bar would keep reserving layout height for 200ms and then
-                    // make the pushed page jump when it finally disappeared.
-                    reverseDuration: Duration.zero,
-                    switchInCurve: JournalMotion.easeOut,
-                    switchOutCurve: JournalMotion.easeOut,
-                    transitionBuilder: (child, animation) => SlideTransition(
-                      position: Tween<Offset>(
-                        begin: const Offset(0, 0.35),
-                        end: Offset.zero,
-                      ).animate(animation),
-                      child: FadeTransition(opacity: animation, child: child),
+                    if (updates != null)
+                      UpdateDownloadBanner(controller: updates),
+                    AnimatedSwitcher(
+                      duration: JournalMotion.duration(
+                        context,
+                        const Duration(milliseconds: 200),
+                      ),
+                      // Leaving a primary tab removes the bar at once: an outgoing
+                      // bar would keep reserving layout height for 200ms and then
+                      // make the pushed page jump when it finally disappeared.
+                      reverseDuration: Duration.zero,
+                      switchInCurve: JournalMotion.easeOut,
+                      switchOutCurve: JournalMotion.easeOut,
+                      transitionBuilder: (child, animation) => SlideTransition(
+                        position: Tween<Offset>(
+                          begin: const Offset(0, 0.35),
+                          end: Offset.zero,
+                        ).animate(animation),
+                        child: FadeTransition(opacity: animation, child: child),
+                      ),
+                      child: showTabBar
+                          ? JournalFloatingNavBar(
+                              key: const ValueKey('journal-floating-nav'),
+                              selectedIndex: _indexFor(location),
+                              onSelected: (index) =>
+                                  unawaited(_selectDestination(index)),
+                            )
+                          : const SizedBox.shrink(
+                              key: ValueKey('journal-floating-nav-hidden'),
+                            ),
                     ),
-                    child: showTabBar
-                        ? JournalFloatingNavBar(
-                            key: const ValueKey('journal-floating-nav'),
-                            selectedIndex: _indexFor(location),
-                            onSelected: (index) =>
-                                unawaited(_selectDestination(index)),
-                          )
-                        : const SizedBox.shrink(
-                            key: ValueKey('journal-floating-nav-hidden'),
-                          ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),

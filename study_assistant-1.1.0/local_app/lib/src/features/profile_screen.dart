@@ -1,5 +1,9 @@
+import 'dart:math' as math;
+
 import 'display_settings_screen.dart';
 import 'widgets/appearance_controls.dart';
+import 'widgets/clawd_speech_bubble.dart';
+import 'widgets/clawd_title_stage.dart';
 import 'widgets/update_scope.dart';
 import 'widgets/update_dialog.dart';
 import 'open_source_screen.dart';
@@ -10,12 +14,15 @@ import 'package:go_router/go_router.dart';
 
 import '../app/app_version.dart';
 import '../app/journal.dart';
+import '../app/journal_motion.dart';
 import '../app/transient_feedback.dart';
+import '../models/sync_report.dart';
 import '../services/app_update_service.dart';
 import '../services/assignment_store.dart';
+import '../services/clawd_companion_controller.dart';
 import '../services/external_link_service.dart';
 
-class ProfileScreen extends StatelessWidget {
+class ProfileScreen extends StatefulWidget {
   const ProfileScreen({
     super.key,
     required this.store,
@@ -30,6 +37,112 @@ class ProfileScreen extends StatelessWidget {
   final ExternalLinkService? externalLinkService;
 
   @override
+  State<ProfileScreen> createState() => _ProfileScreenState();
+}
+
+class _ProfileScreenState extends State<ProfileScreen>
+    with WidgetsBindingObserver {
+  ClawdCompanionController? _clawdController;
+  ClawdCompanionController? _localClawdController;
+  bool _appResumed = true;
+  bool _tickerEnabled = true;
+  bool _reducedMotion = false;
+  late int _lastAccountEpoch;
+  String? _lastAccount;
+
+  ClawdCompanionController _ensureClawdController() {
+    if (_clawdController != null) return _clawdController!;
+    return _localClawdController ??= ClawdCompanionController();
+  }
+
+  void _onStoreChanged() {
+    if (_lastAccountEpoch != widget.store.accountEpoch ||
+        _lastAccount != widget.store.account) {
+      _lastAccountEpoch = widget.store.accountEpoch;
+      _lastAccount = widget.store.account;
+      _clawdController?.resetForAccountChange();
+    }
+    _syncClawdEnvironment();
+  }
+
+  void _syncClawdEnvironment({bool notify = true}) {
+    final controller = _clawdController;
+    if (controller == null) return;
+    final busy = widget.store.isLoading;
+    final hasError = !busy &&
+        (widget.store.syncReport.phase == SyncPhase.failed ||
+            widget.store.syncReport.phase == SyncPhase.partial ||
+            widget.store.operationError != null);
+    controller.updateEnvironment(
+      displayPrefs: widget.store.display,
+      appResumed: _appResumed,
+      tickerEnabled: _tickerEnabled,
+      reducedMotion: _reducedMotion,
+      isSyncing: busy,
+      hasSyncErrorOrPending: hasError,
+      notify: notify,
+    );
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _appResumed =
+        (WidgetsBinding.instance.lifecycleState ?? AppLifecycleState.resumed) ==
+            AppLifecycleState.resumed;
+    _lastAccountEpoch = widget.store.accountEpoch;
+    _lastAccount = widget.store.account;
+    widget.store.addListener(_onStoreChanged);
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _tickerEnabled = TickerMode.valuesOf(context).enabled;
+    _reducedMotion = JournalMotion.isReducedMotion(context);
+    final scoped = ClawdCompanionScope.maybeOf(context);
+    _clawdController =
+        scoped ?? (_localClawdController ??= ClawdCompanionController());
+    _syncClawdEnvironment(notify: false);
+  }
+
+  @override
+  void didUpdateWidget(covariant ProfileScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.store != widget.store) {
+      oldWidget.store.removeListener(_onStoreChanged);
+      _lastAccountEpoch = widget.store.accountEpoch;
+      _lastAccount = widget.store.account;
+      widget.store.addListener(_onStoreChanged);
+      _clawdController?.resetForAccountChange();
+      _syncClawdEnvironment();
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final nextResumed = state == AppLifecycleState.resumed;
+    if (_appResumed != nextResumed) {
+      _appResumed = nextResumed;
+      _syncClawdEnvironment();
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    widget.store.removeListener(_onStoreChanged);
+    _localClawdController?.dispose();
+    super.dispose();
+  }
+
+  AssignmentStore get store => widget.store;
+  AppUpdateService? get updateService => widget.updateService;
+  ExternalLinkService? get externalLinkService => widget.externalLinkService;
+  static const _githubUrl = ProfileScreen._githubUrl;
+
+  @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
       animation: store,
@@ -39,222 +152,291 @@ class ProfileScreen extends StatelessWidget {
             store.notebook.entries.where((e) => !e.done).length;
         final doneAgendaCount =
             store.notebook.entries.length - activeAgendaCount;
-        return ListView(
-          padding: EdgeInsets.zero,
+        final followedCourses =
+            store.courses.where((c) => store.follows(c.key)).length;
+        final controller = _ensureClawdController();
+        final showCameo = store.display.showClawdOnSecondaryTabs;
+        final profileSnapshot = ClawdPageContextSnapshot(
+          tab: ClawdPrimaryTab.profile,
+          followedCourseCount: followedCourses,
+          activeAgendaCount: activeAgendaCount,
+        );
+        controller.syncContextQuietly(
+          displayPrefs: store.display,
+          appResumed: _appResumed,
+          tickerEnabled: _tickerEnabled,
+          reducedMotion: _reducedMotion,
+          isSyncing: store.isLoading,
+          hasSyncErrorOrPending: !store.isLoading &&
+              (store.syncReport.phase == SyncPhase.failed ||
+                  store.syncReport.phase == SyncPhase.partial ||
+                  store.operationError != null),
+          snapshot: profileSnapshot,
+        );
+
+        return Stack(
           children: [
-            _ProfileHeader(
-              displayName: store.profileDisplayName,
-              avatarUrl: store.profileAvatarUrl,
-              accountLabel: _maskAccount(store.account),
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 18),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Card(
-                    key: const ValueKey('profile-group-courses'),
-                    color: journal.sheet,
-                    clipBehavior: Clip.antiAlias,
-                    child: IconTheme.merge(
-                      data: IconThemeData(color: journal.ink),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          _SettingsTile(
-                            icon: Icons.school_outlined,
-                            title: '我的课程',
-                            subtitle: store.courses.isEmpty
-                                ? '暂无课程，前往查看与同步'
-                                : '已同步 ${store.courses.length} 门课程',
-                            compactSubtitle: true,
-                            onTap: () => context.push('/courses'),
-                          ),
-                          Divider(
-                            height: 1,
-                            indent: 56,
-                            endIndent: 16,
-                            color: journal.divider,
-                          ),
-                          _SettingsTile(
-                            icon: Icons.library_books_outlined,
-                            title: '课程通知与章节',
-                            subtitle: store.courseNotices.items.isEmpty &&
-                                    store.courseChapters.byCourse.isEmpty
-                                ? '手动查看课程通知与章节任务点进度'
-                                : '未读通知 ${store.unreadCourseNoticeCount} 条 · 待完成小节 ${store.pendingChapterSectionCount} 处',
-                            compactSubtitle: true,
-                            onTap: () => context.push('/course-hub'),
-                          ),
-                          Divider(
-                            height: 1,
-                            indent: 56,
-                            endIndent: 16,
-                            color: journal.divider,
-                          ),
-                          _SettingsTile(
-                            icon: Icons.event_note_outlined,
-                            title: '个人待办与考试',
-                            subtitle: store.notebook.entries.isEmpty
-                                ? '手动记录待办与考试'
-                                : '进行中 $activeAgendaCount 项 · 已完成 $doneAgendaCount 项',
-                            compactSubtitle: true,
-                            onTap: () => context.push('/agenda'),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  Padding(
-                    padding: EdgeInsets.fromLTRB(4, 4, 4, 8),
-                    child: Text('设置', style: journal.section),
-                  ),
-                  AppearanceControls(
-                    store: store,
-                    onMore: () {
-                      final router = GoRouter.maybeOf(context);
-                      if (router != null) {
-                        router.push('/profile/display');
-                      } else {
-                        Navigator.of(context, rootNavigator: true).push(
-                          MaterialPageRoute<void>(
-                            builder: (_) => DisplaySettingsScreen(store: store),
-                          ),
-                        );
-                      }
-                    },
-                  ),
-                  const SizedBox(height: 12),
-                  _SettingsCard(
-                    title: '同步与提醒',
-                    accentColor: journal.ink,
-                    headerColor: journal.sage,
+            ListView(
+              padding: EdgeInsets.zero,
+              children: [
+                _ProfileHeader(
+                  displayName: store.profileDisplayName,
+                  avatarUrl: store.profileAvatarUrl,
+                  accountLabel: _maskAccount(store.account),
+                  titleTrailing: showCameo
+                      ? ClawdTabCameo(
+                          key: const ValueKey('profile-pixel-buddy'),
+                          controller: controller,
+                          snapshotBuilder: () => profileSnapshot,
+                        )
+                      : null,
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 18),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      _SettingsTile(
-                        icon: Icons.sync,
-                        title: '同步学习通',
-                        subtitle: '更新课业与调整白天后台检查',
-                        compactSubtitle: true,
-                        onTap: () => context.push('/sync'),
+                      Card(
+                        key: const ValueKey('profile-group-courses'),
+                        color: journal.sheet,
+                        clipBehavior: Clip.antiAlias,
+                        child: IconTheme.merge(
+                          data: IconThemeData(color: journal.ink),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              _SettingsTile(
+                                icon: Icons.school_outlined,
+                                title: '我的课程',
+                                subtitle: store.courses.isEmpty
+                                    ? '暂无课程，前往查看与同步'
+                                    : '已同步 ${store.courses.length} 门课程',
+                                compactSubtitle: true,
+                                onTap: () => context.push('/courses'),
+                              ),
+                              Divider(
+                                height: 1,
+                                indent: 56,
+                                endIndent: 16,
+                                color: journal.divider,
+                              ),
+                              _SettingsTile(
+                                icon: Icons.library_books_outlined,
+                                title: '课程通知与章节',
+                                subtitle: store.courseNotices.items.isEmpty &&
+                                        store.courseChapters.byCourse.isEmpty
+                                    ? '手动查看课程通知与章节任务点进度'
+                                    : '未读通知 ${store.unreadCourseNoticeCount} 条 · 待完成小节 ${store.pendingChapterSectionCount} 处',
+                                compactSubtitle: true,
+                                onTap: () => context.push('/course-hub'),
+                              ),
+                              Divider(
+                                height: 1,
+                                indent: 56,
+                                endIndent: 16,
+                                color: journal.divider,
+                              ),
+                              _SettingsTile(
+                                icon: Icons.event_note_outlined,
+                                title: '个人待办与考试',
+                                subtitle: store.notebook.entries.isEmpty
+                                    ? '手动记录待办与考试'
+                                    : '进行中 $activeAgendaCount 项 · 已完成 $doneAgendaCount 项',
+                                compactSubtitle: true,
+                                onTap: () => context.push('/agenda'),
+                              ),
+                            ],
+                          ),
+                        ),
                       ),
-                      _SettingsTile(
-                        icon: Icons.notifications_none_rounded,
-                        title: '提醒与通知',
-                        subtitle: '权限状态、提前提醒时间与每日摘要',
-                        compactSubtitle: true,
-                        onTap: () => context.push('/reminders'),
+                      const SizedBox(height: 14),
+                      Padding(
+                        padding: EdgeInsets.fromLTRB(4, 4, 4, 8),
+                        child: Text('设置', style: journal.section),
                       ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  _SettingsCard(
-                    title: '记录与备份',
-                    accentColor: journal.ink,
-                    headerColor: journal.sage,
-                    children: [
-                      _SettingsTile(
-                        icon: Icons.inventory_2_outlined,
-                        title: '学习记录',
-                        subtitle:
-                            '${store.localRecordGroups.length} 项课业 · ${store.changes.length} 条变化',
-                        onTap: () => context.push('/profile/records'),
-                      ),
-                      _SettingsTile(
-                        icon: Icons.enhanced_encryption_outlined,
-                        title: '加密备份与恢复',
-                        subtitle: '仅备份本机课业记录，不含登录凭据',
-                        onTap: () => context.push('/backup'),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  _SettingsCard(
-                    title: '关于与更新',
-                    accentColor: journal.ink,
-                    headerColor: journal.sage,
-                    children: [
-                      _SettingsTile(
-                        icon: Icons.help_outline,
-                        title: '帮助与反馈',
-                        subtitle: '查看使用说明，反馈问题与建议',
-                        compactSubtitle: true,
-                        onTap: () => context.push('/help'),
-                      ),
-                      _SettingsTile(
-                        icon: Icons.info_outline,
-                        title: '关于我们',
-                        subtitle:
-                            'arrry-07 · MIT License · v${AppVersion.display}',
-                        onTap: () => _showAbout(context),
-                      ),
-                      _SettingsTile(
-                        icon: Icons.description_outlined,
-                        title: '开源许可',
-                        subtitle: '查看应用使用的开源组件及许可证',
-                        compactSubtitle: true,
-                        onTap: () {
+                      AppearanceControls(
+                        store: store,
+                        onMore: () {
                           final router = GoRouter.maybeOf(context);
                           if (router != null) {
-                            router.push('/open-source');
+                            router.push('/profile/display');
                           } else {
                             Navigator.of(context, rootNavigator: true).push(
                               MaterialPageRoute<void>(
-                                builder: (_) => const OpenSourceScreen(),
+                                builder: (_) =>
+                                    DisplaySettingsScreen(store: store),
                               ),
                             );
                           }
                         },
                       ),
-                      _SettingsTile(
-                        icon: Icons.system_update_alt,
-                        title: '检查更新',
-                        subtitle: '在应用内检查版本和下载更新',
-                        onTap: () => _checkForUpdates(context),
+                      const SizedBox(height: 12),
+                      _SettingsCard(
+                        title: '同步与提醒',
+                        accentColor: journal.ink,
+                        headerColor: journal.sage,
+                        children: [
+                          _SettingsTile(
+                            icon: Icons.sync,
+                            title: '同步学习通',
+                            subtitle: '更新课业与调整白天后台检查',
+                            compactSubtitle: true,
+                            onTap: () => context.push('/sync'),
+                          ),
+                          _SettingsTile(
+                            icon: Icons.notifications_none_rounded,
+                            title: '提醒与通知',
+                            subtitle: '权限状态、提前提醒时间与每日摘要',
+                            compactSubtitle: true,
+                            onTap: () => context.push('/reminders'),
+                          ),
+                        ],
                       ),
-                      _SettingsTile(
-                        icon: Icons.code,
-                        title: 'GitHub 源码',
-                        subtitle: 'github.com/arrry-07/chaoxing-journal',
-                        trailing: Icons.open_in_new,
-                        onTap: () async {
-                          await Clipboard.setData(
-                              const ClipboardData(text: _githubUrl));
-                          if (context.mounted) {
-                            showJournalMessage(context, '链接已复制');
-                          }
-                        },
-                        trailingOnPressed: () => _openGithub(context),
+                      const SizedBox(height: 12),
+                      _SettingsCard(
+                        title: '记录与备份',
+                        accentColor: journal.ink,
+                        headerColor: journal.sage,
+                        children: [
+                          _SettingsTile(
+                            icon: Icons.inventory_2_outlined,
+                            title: '学习记录',
+                            subtitle:
+                                '${store.localRecordGroups.length} 项课业 · ${store.changes.length} 条变化',
+                            onTap: () => context.push('/profile/records'),
+                          ),
+                          _SettingsTile(
+                            icon: Icons.enhanced_encryption_outlined,
+                            title: '加密备份与恢复',
+                            subtitle: '仅备份本机课业记录，不含登录凭据',
+                            onTap: () => context.push('/backup'),
+                          ),
+                        ],
                       ),
+                      const SizedBox(height: 12),
+                      _SettingsCard(
+                        title: '关于与更新',
+                        accentColor: journal.ink,
+                        headerColor: journal.sage,
+                        children: [
+                          _SettingsTile(
+                            icon: Icons.help_outline,
+                            title: '帮助与反馈',
+                            subtitle: '查看使用说明，反馈问题与建议',
+                            compactSubtitle: true,
+                            onTap: () => context.push('/help'),
+                          ),
+                          _SettingsTile(
+                            icon: Icons.info_outline,
+                            title: '关于我们',
+                            subtitle:
+                                'arrry-07 · MIT License · v${AppVersion.display}',
+                            onTap: () => _showAbout(context),
+                          ),
+                          _SettingsTile(
+                            icon: Icons.description_outlined,
+                            title: '开源许可',
+                            subtitle: '查看应用使用的开源组件及许可证',
+                            compactSubtitle: true,
+                            onTap: () {
+                              final router = GoRouter.maybeOf(context);
+                              if (router != null) {
+                                router.push('/open-source');
+                              } else {
+                                Navigator.of(context, rootNavigator: true).push(
+                                  MaterialPageRoute<void>(
+                                    builder: (_) => const OpenSourceScreen(),
+                                  ),
+                                );
+                              }
+                            },
+                          ),
+                          _SettingsTile(
+                            icon: Icons.system_update_alt,
+                            title: '检查更新',
+                            subtitle: '在应用内检查版本和下载更新',
+                            onTap: () => _checkForUpdates(context),
+                          ),
+                          _SettingsTile(
+                            icon: Icons.code,
+                            title: 'GitHub 源码',
+                            subtitle: 'github.com/arrry-07/chaoxing-journal',
+                            trailing: Icons.open_in_new,
+                            onTap: () async {
+                              await Clipboard.setData(
+                                  const ClipboardData(text: _githubUrl));
+                              if (context.mounted) {
+                                showJournalMessage(context, '链接已复制');
+                              }
+                            },
+                            trailingOnPressed: () => _openGithub(context),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 18),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton(
+                          onPressed: store.isLoading
+                              ? null
+                              : () => _confirmLogout(context),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: journal.ink,
+                            side: BorderSide(color: journal.rule, width: 0.8),
+                            backgroundColor: journal.sheet,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 16,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                          ),
+                          child: const Text(
+                            '退出登录并清理本机记录',
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                      ),
+                      SizedBox(
+                          height: JournalLayout.floatingNavClearance(context)),
                     ],
                   ),
-                  const SizedBox(height: 18),
-                  SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton(
-                      onPressed: store.isLoading
-                          ? null
-                          : () => _confirmLogout(context),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: journal.ink,
-                        side: BorderSide(color: journal.rule, width: 0.8),
-                        backgroundColor: journal.sheet,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 16,
-                        ),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                      ),
-                      child: const Text(
-                        '退出登录并清理本机记录',
-                        textAlign: TextAlign.center,
+                ),
+              ],
+            ),
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: AnimatedBuilder(
+                animation: controller,
+                builder: (context, _) {
+                  final bubble = controller.activeBubble;
+                  if (!showCameo ||
+                      bubble == null ||
+                      bubble.tab != ClawdPrimaryTab.profile) {
+                    return const SizedBox.shrink();
+                  }
+                  final maxW = math.min(
+                    220.0,
+                    math.max(110.0, MediaQuery.sizeOf(context).width - 48.0),
+                  );
+                  return Align(
+                    alignment: Alignment.topRight,
+                    child: Padding(
+                      padding: const EdgeInsets.only(right: 18, top: 54),
+                      child: ClawdSpeechBubble(
+                        key: const ValueKey('clawd-speech-bubble'),
+                        message: bubble,
+                        maxWidth: maxW,
+                        pointerDirection: ClawdBubblePointerDirection.up,
+                        pointerOffsetFromLeft: maxW - 22.0,
+                        onTap: controller.onBubbleTapped,
                       ),
                     ),
-                  ),
-                  SizedBox(height: JournalLayout.floatingNavClearance(context)),
-                ],
+                  );
+                },
               ),
             ),
           ],
@@ -352,11 +534,13 @@ class _ProfileHeader extends StatelessWidget {
     required this.displayName,
     required this.avatarUrl,
     required this.accountLabel,
+    this.titleTrailing,
   });
 
   final String displayName;
   final String? avatarUrl;
   final String accountLabel;
+  final Widget? titleTrailing;
 
   @override
   Widget build(BuildContext context) {
@@ -367,9 +551,11 @@ class _ProfileHeader extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const JournalHeading(
+          JournalHeading(
             '我的手帐',
             bookTitle: true,
+            trailing: titleTrailing,
+            trailingWidth: titleTrailing != null ? 44 : 0,
           ),
           const SizedBox(height: 14),
           Row(

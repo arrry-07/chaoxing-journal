@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -20,6 +21,7 @@ import '../models/sync_report.dart';
 import '../services/assignment_query.dart';
 import '../services/assignment_store.dart';
 import '../services/assignment_web_link.dart';
+import '../services/clawd_companion_controller.dart';
 import '../services/external_link_service.dart';
 import '../services/home_course_filter.dart';
 import '../services/home_manual_timeline.dart';
@@ -29,6 +31,8 @@ import '../services/interaction_feedback_service.dart';
 import '../services/todo_copy_formatter.dart';
 import 'widgets/appearance_controls.dart';
 import 'widgets/assignment_card.dart';
+import 'widgets/clawd_speech_bubble.dart';
+import 'widgets/clawd_title_stage.dart';
 import 'widgets/home_manual_actions.dart';
 import 'widgets/home_course_filter_row.dart';
 import 'widgets/home_manual_sections.dart';
@@ -113,7 +117,10 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
   Timer? _clock;
   final _scrollController = ScrollController();
   final ValueNotifier<double> _scrollOffset = ValueNotifier<double>(0.0);
-  final ValueNotifier<int> _syncSpinnerTick = ValueNotifier<int>(0);
+  final ValueNotifier<ClawdStageAnchor> _stageAnchor =
+      ValueNotifier<ClawdStageAnchor>(
+    const ClawdStageAnchor(centerX: 140.0, bottomY: 42.0, safeWidth: 160.0),
+  );
   final _feedback = TransientFeedbackController();
   final Map<String, int> _pinPulseByKey = <String, int>{};
   final Set<String> _completingManualIds = <String>{};
@@ -124,13 +131,8 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
   String? _feedbackAccount;
   HomeFilters? _preExamStripFilters;
   int? _preExamStripEpoch;
-  String? _buddyWhisper;
-  Timer? _buddyWhisperTimer;
-  Timer? _buddyComboResetTimer;
-  Timer? _syncSpinnerTimer;
-  int _buddyTapCount = 0;
-  int _buddyComboCount = 0;
-  int _buddyCelebratePulse = 0;
+  ClawdCompanionController? _clawdController;
+  ClawdCompanionController? _localClawdController;
   bool _appResumed = true;
   bool _tickerEnabled = true;
   bool _reducedMotion = false;
@@ -151,26 +153,29 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             store.serviceWarnings.any((w) => w.contains('小组件')));
   }
 
-  void _clearBuddyCombo() {
-    _buddyComboResetTimer?.cancel();
-    _buddyComboResetTimer = null;
-    _buddyComboCount = 0;
+  ClawdCompanionController _ensureClawdController() {
+    if (_clawdController != null) return _clawdController!;
+    return _localClawdController ??=
+        ClawdCompanionController(clock: widget.clock);
+  }
+
+  void _syncClawdEnvironment({bool notify = true}) {
+    final controller = _clawdController;
+    if (controller == null) return;
+    controller.updateEnvironment(
+      displayPrefs: store.display,
+      appResumed: _appResumed,
+      tickerEnabled: _tickerEnabled,
+      reducedMotion: _reducedMotion,
+      isSyncing: _isBusy,
+      hasSyncErrorOrPending: _hasStoreSyncErrorOrPending,
+      notify: notify,
+    );
   }
 
   void _triggerBuddyCheer() {
     if (!mounted || _reducedMotion) return;
-    setState(() => _buddyCelebratePulse++);
-  }
-
-  void _clearBuddyWhisper({bool notify = false}) {
-    _buddyWhisperTimer?.cancel();
-    _buddyWhisperTimer = null;
-    if (_buddyWhisper == null) return;
-    if (notify && mounted) {
-      setState(() => _buddyWhisper = null);
-    } else {
-      _buddyWhisper = null;
-    }
+    _ensureClawdController().triggerCheer();
   }
 
   void _clearCompletingManual({String? entryId, bool notify = false}) {
@@ -222,8 +227,8 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
     _completingManualTimers.remove(entryId)?.cancel();
     setState(() {
       _completingManualIds.add(entryId);
-      _buddyCelebratePulse++;
     });
+    _ensureClawdController().triggerCheer();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_completingManualIds.contains(entryId)) return;
       _completingManualTimers.remove(entryId)?.cancel();
@@ -245,60 +250,16 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
     WidgetsBinding.instance.ensureVisualUpdate();
   }
 
-  void _reconcileSyncSpinner({
-    bool? busyOverride,
-    bool? showBuddyOverride,
-    bool? reducedOverride,
-  }) {
-    final busy = busyOverride ?? _isBusy;
-    final showBuddy = showBuddyOverride ?? store.display.showPixelBuddy;
-    final reduced = reducedOverride ?? _reducedMotion;
-    final shouldRun = mounted &&
-        busy &&
-        showBuddy &&
-        !reduced &&
-        _tickerEnabled &&
-        _appResumed;
-    if (!shouldRun) {
-      _syncSpinnerTimer?.cancel();
-      _syncSpinnerTimer = null;
-      return;
-    }
-    _syncSpinnerTimer ??= Timer.periodic(
-      const Duration(milliseconds: 180),
-      (_) {
-        if (!mounted ||
-            !_isBusy ||
-            !store.display.showPixelBuddy ||
-            _reducedMotion ||
-            !_tickerEnabled ||
-            !_appResumed) {
-          _syncSpinnerTimer?.cancel();
-          _syncSpinnerTimer = null;
-          return;
-        }
-        _syncSpinnerTick.value = (_syncSpinnerTick.value + 1) & 0x3fffffff;
-      },
-    );
-  }
-
   void _onStoreChanged() {
     _checkFeedbackAccount();
-    if (_isBusy ||
-        !store.display.showPixelBuddy ||
-        _hasStoreSyncErrorOrPending) {
-      _clearBuddyWhisper();
-      _clearBuddyCombo();
-    }
-    _reconcileSyncSpinner();
+    _syncClawdEnvironment();
   }
 
   void _checkFeedbackAccount() {
     if (_feedbackEpoch != store.accountEpoch ||
         _feedbackAccount != store.account) {
       _feedback.dismiss();
-      _clearBuddyWhisper();
-      _clearBuddyCombo();
+      _clawdController?.resetForAccountChange();
       _clearCompletingManual();
       _pinPulseByKey.clear();
       _preExamStripFilters = null;
@@ -324,14 +285,13 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
     if (oldWidget.store != store) {
       oldWidget.store.removeListener(_onStoreChanged);
       _feedback.dismiss();
-      _clearBuddyWhisper();
-      _clearBuddyCombo();
+      _clawdController?.resetForAccountChange();
       _clearCompletingManual();
       _pinPulseByKey.clear();
       _feedbackEpoch = store.accountEpoch;
       _feedbackAccount = store.account;
       store.addListener(_onStoreChanged);
-      _reconcileSyncSpinner();
+      _syncClawdEnvironment();
     }
   }
 
@@ -356,15 +316,17 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
     super.didChangeDependencies();
     _tickerEnabled = TickerMode.valuesOf(context).enabled;
     _reducedMotion = JournalMotion.isReducedMotion(context);
-    if (!_tickerEnabled) {
-      _clearBuddyWhisper();
-      _clearBuddyCombo();
+    final scoped = ClawdCompanionScope.maybeOf(context);
+    if (scoped != null) {
+      _clawdController = scoped;
+    } else {
+      _clawdController = _localClawdController ??=
+          ClawdCompanionController(clock: widget.clock);
     }
     if (_reducedMotion) {
-      _clearBuddyCombo();
       _clearCompletingManual();
     }
-    _reconcileSyncSpinner();
+    _syncClawdEnvironment(notify: false);
   }
 
   @override
@@ -373,13 +335,8 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
     _scrollOffset.dispose();
-    _syncSpinnerTimer?.cancel();
-    _syncSpinnerTimer = null;
-    _syncSpinnerTick.dispose();
-    _buddyWhisperTimer?.cancel();
-    _buddyWhisperTimer = null;
-    _buddyComboResetTimer?.cancel();
-    _buddyComboResetTimer = null;
+    _stageAnchor.dispose();
+    _localClawdController?.dispose();
     _clearCompletingManual();
     store.removeListener(_onStoreChanged);
     _feedback.dispose();
@@ -392,11 +349,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
     final nextResumed = state == AppLifecycleState.resumed;
     if (_appResumed != nextResumed) {
       _appResumed = nextResumed;
-      if (!nextResumed) {
-        _clearBuddyWhisper(notify: true);
-        _clearBuddyCombo();
-      }
-      _reconcileSyncSpinner();
+      _syncClawdEnvironment();
     }
     if (nextResumed && mounted) setState(() {});
   }
@@ -793,7 +746,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
         store.syncReport.phase == SyncPhase.running) {
       return;
     }
-    _clearBuddyWhisper();
+    _clawdController?.dismissBubble();
     setState(() => _refreshing = true);
     final before = store.syncReport;
     final epoch = store.accountEpoch;
@@ -1034,16 +987,8 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                 : sync.summary;
         final reduceMotion = MediaQuery.disableAnimationsOf(context);
         _reducedMotion = reduceMotion;
-        if (busy) {
-          _clearBuddyWhisper();
-          _clearBuddyCombo();
-        }
         final showPixelBuddy = store.display.showPixelBuddy;
-        _reconcileSyncSpinner(
-          busyOverride: busy,
-          showBuddyOverride: showPixelBuddy,
-          reducedOverride: reduceMotion,
-        );
+        final controller = _ensureClawdController();
         final syncAction = sync.action == HomeSyncAction.login ||
                 sync.action == HomeSyncAction.verify
             ? sync.action
@@ -1235,53 +1180,41 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                 sync.action == HomeSyncAction.login ||
                 sync.action == HomeSyncAction.verify ||
                 sync.action == HomeSyncAction.settings);
-        if (syncErrorOrPending || !showPixelBuddy) {
-          _clearBuddyWhisper();
-          _clearBuddyCombo();
-        }
         final syncBusyWithBuddy = busy && showPixelBuddy;
-        final activeWhisper = (!busy && !syncErrorOrPending && showPixelBuddy)
-            ? _buddyWhisper
-            : null;
+        final followedCourses =
+            store.courses.where((c) => store.follows(c.key)).length;
+        final activeAgenda =
+            store.notebook.entries.where((e) => !e.done).length;
+        final homeSnapshot = ClawdPageContextSnapshot(
+          tab: ClawdPrimaryTab.home,
+          dueToday: dueSummary.dueToday,
+          dueIn3Days: dueSummary.dueIn3Days,
+          completedToday: dueSummary.completedToday,
+          followedCourseCount: followedCourses,
+          activeAgendaCount: activeAgenda,
+        );
+        controller.syncContextQuietly(
+          displayPrefs: store.display,
+          appResumed: _appResumed,
+          tickerEnabled: _tickerEnabled,
+          reducedMotion: reduceMotion,
+          isSyncing: busy,
+          hasSyncErrorOrPending: syncErrorOrPending,
+          mood: buddyMood,
+          snapshot: homeSnapshot,
+        );
 
-        void onBuddyTap() {
-          if (busy || syncErrorOrPending || !_appResumed || !_tickerEnabled) {
-            _clearBuddyCombo();
-            return;
-          }
-          _buddyTapCount++;
-          _buddyWhisperTimer?.cancel();
-          final int effectiveCombo;
-          if (_reducedMotion) {
-            _clearBuddyCombo();
-            effectiveCombo = 1;
-          } else {
-            _buddyComboResetTimer?.cancel();
-            _buddyComboCount++;
-            effectiveCombo = _buddyComboCount;
-            _buddyComboResetTimer =
-                Timer(const Duration(milliseconds: 1200), () {
-              _buddyComboResetTimer = null;
-              if (!mounted) return;
-              _buddyComboCount = 0;
-            });
-          }
-          final whisper = journalBuddyTapWhisper(
-            dueToday: dueSummary.dueToday,
-            dueIn3Days: dueSummary.dueIn3Days,
-            completedToday: dueSummary.completedToday,
-            tapCount: _buddyTapCount - 1,
-            comboCount: effectiveCombo,
-          );
-          setState(() => _buddyWhisper = whisper);
-          _buddyWhisperTimer = Timer(const Duration(milliseconds: 2000), () {
-            _buddyWhisperTimer = null;
-            if (!mounted) return;
-            if (_buddyWhisper != null) {
-              setState(() => _buddyWhisper = null);
-            }
-          });
-        }
+        JournalPixelBuddyPose poseForController() =>
+            switch (controller.transientPose) {
+              ClawdTransientPose.none => JournalPixelBuddyPose.normal,
+              ClawdTransientPose.wave => JournalPixelBuddyPose.wave,
+              ClawdTransientPose.doubleStar => JournalPixelBuddyPose.doubleStar,
+              ClawdTransientPose.tsundere => JournalPixelBuddyPose.tsunderePuff,
+              ClawdTransientPose.petting => JournalPixelBuddyPose.petSquint,
+              ClawdTransientPose.grabbed => JournalPixelBuddyPose.grabbedFlail,
+              ClawdTransientPose.landing => JournalPixelBuddyPose.normal,
+              ClawdTransientPose.cheer => JournalPixelBuddyPose.cheer,
+            };
 
         final headerBlock = Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1380,54 +1313,38 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                 ),
               ]);
 
-              final title = Text('课业手记', style: journal.display);
               return LayoutBuilder(
                 builder: (context, constraints) {
                   final largeText = JournalLayout.isLargeText(context);
                   final buddySize = largeText
-                      ? 20.0
-                      : (constraints.maxWidth < 350 ? 22.0 : 26.0);
-                  final Widget titleCluster = showPixelBuddy
-                      ? Row(
-                          mainAxisSize: MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.center,
-                          children: [
-                            Flexible(
-                              child: FittedBox(
-                                fit: BoxFit.scaleDown,
-                                alignment: Alignment.centerLeft,
-                                child: title,
-                              ),
-                            ),
-                            const SizedBox(width: 4),
-                            JournalPixelBuddy(
-                              key: const ValueKey('home-pixel-buddy'),
-                              mood: buddyMood,
-                              size: buddySize,
-                              onTap: onBuddyTap,
-                              syncTickListenable: _syncSpinnerTick,
-                              displayPrefs: store.display,
-                              celebratePulse: _buddyCelebratePulse,
-                              allowTapCombo: !busy && !syncErrorOrPending,
-                            ),
-                          ],
-                        )
-                      : FittedBox(
-                          fit: BoxFit.scaleDown,
-                          alignment: Alignment.centerLeft,
-                          child: title,
-                        );
+                      ? 24.0
+                      : (constraints.maxWidth < 350 ? 32.0 : 38.0);
+                  final allowStageMotion = showPixelBuddy &&
+                      !reduceMotion &&
+                      recoveryScope == null &&
+                      !largeText &&
+                      constraints.maxWidth >= 330;
+                  final titleStage = AnimatedBuilder(
+                    animation: controller,
+                    builder: (context, _) => ClawdTitleStage(
+                      title: '课业手记',
+                      titleStyle: journal.display,
+                      controller: controller,
+                      showBuddy: showPixelBuddy,
+                      buddySize: buddySize,
+                      interactive: !busy && !syncErrorOrPending,
+                      allowStageMotion: allowStageMotion,
+                      snapshotBuilder: () => homeSnapshot,
+                      anchorNotifier: _stageAnchor,
+                      moodOverride: buddyMood,
+                    ),
+                  );
                   if (!largeText && constraints.maxWidth >= 300) {
                     return Row(
                       crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
-                        Expanded(
-                          child: Align(
-                            alignment: Alignment.centerLeft,
-                            child: titleCluster,
-                          ),
-                        ),
-                        const SizedBox(width: 4),
+                        Expanded(child: titleStage),
+                        const SizedBox(width: 8),
                         actionsRow,
                       ],
                     );
@@ -1440,7 +1357,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                         constraints: BoxConstraints(
                           maxWidth: constraints.maxWidth,
                         ),
-                        child: titleCluster,
+                        child: titleStage,
                       ),
                       actionsRow,
                     ],
@@ -1481,9 +1398,9 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
               final effectiveStatusText = syncBusyWithBuddy
                   ? journalBuddySyncPhrase(
                       store.homeSyncProgress?.stage,
-                      _syncSpinnerTick.value,
+                      controller.syncTick.value,
                     )
-                  : (activeWhisper ?? statusText);
+                  : statusText;
 
               final scaler = MediaQuery.textScalerOf(context);
               final direction = Directionality.of(context);
@@ -1506,11 +1423,6 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                     ? FontWeight.w600
                     : FontWeight.w400,
               );
-              final baseLeftWidth = 14.5 +
-                  5.0 +
-                  measureWidth(statusText, journal.metadata) +
-                  (showChevron ? 18.0 : 0.0) +
-                  4.0;
               final leftWidth = 14.5 +
                   5.0 +
                   measureWidth(effectiveStatusText, journal.metadata) +
@@ -1519,11 +1431,8 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
               final rightWidth = showDueSummary
                   ? measureWidth(summaryLabel, summaryStyle) + 4.0
                   : 0.0;
-              final idleFitsSingleRow = !showDueSummary ||
-                  (baseLeftWidth + rightWidth + 6.0 <= constraints.maxWidth);
               final fitsSingleRow = !showDueSummary ||
-                  (leftWidth + rightWidth + 6.0 <= constraints.maxWidth) ||
-                  (activeWhisper != null && idleFitsSingleRow);
+                  (leftWidth + rightWidth + 6.0 <= constraints.maxWidth);
 
               Widget buildStatusContent({
                 required Widget leading,
@@ -1584,7 +1493,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                       padding: const EdgeInsets.symmetric(horizontal: 2),
                       child: syncBusyWithBuddy
                           ? ValueListenableBuilder<int>(
-                              valueListenable: _syncSpinnerTick,
+                              valueListenable: controller.syncTick,
                               builder: (context, tick, _) {
                                 final glyph = reduceMotion
                                     ? '✻'
@@ -1615,28 +1524,15 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                                 );
                               },
                             )
-                          : activeWhisper != null
-                              ? buildStatusContent(
-                                  leading: Icon(
-                                    Icons.auto_awesome_rounded,
-                                    size: 14.5,
-                                    color: journal.accent,
-                                  ),
-                                  text: activeWhisper,
-                                  style: journal.metadata.copyWith(
-                                    color: journal.accent,
-                                  ),
-                                  singleLineScaleDown: fitsSingleRow,
-                                )
-                              : buildStatusContent(
-                                  leading: Icon(
-                                    statusIcon,
-                                    size: 14.5,
-                                    color: statusColor,
-                                  ),
-                                  text: statusText,
-                                  style: journal.metadata,
-                                ),
+                          : buildStatusContent(
+                              leading: Icon(
+                                statusIcon,
+                                size: 14.5,
+                                color: statusColor,
+                              ),
+                              text: statusText,
+                              style: journal.metadata,
+                            ),
                     ),
                   ),
                 ),
@@ -2135,7 +2031,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
         final Widget? sliverStatusContent = syncBusyWithBuddy
             ? ValueListenableBuilder<int>(
                 key: const ValueKey('home-sliver-sync-status'),
-                valueListenable: _syncSpinnerTick,
+                valueListenable: controller.syncTick,
                 builder: (context, tick, _) {
                   final glyph = reduceMotion
                       ? '✻'
@@ -2182,36 +2078,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                   );
                 },
               )
-            : activeWhisper != null
-                ? Semantics(
-                    key: const ValueKey('home-sliver-sync-status'),
-                    liveRegion: true,
-                    label: activeWhisper,
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.auto_awesome_rounded,
-                          size: 14.5,
-                          color: journal.accent,
-                        ),
-                        const SizedBox(width: 5),
-                        Flexible(
-                          child: ExcludeSemantics(
-                            child: Text(
-                              activeWhisper,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: journal.metadata.copyWith(
-                                color: journal.accent,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  )
-                : null;
+            : null;
 
         return Stack(
           children: [
@@ -2249,24 +2116,102 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
               right: 0,
               child: ValueListenableBuilder<double>(
                 valueListenable: _scrollOffset,
-                builder: (context, offset, _) => JournalSliverHeader(
-                  title: '课业手记',
-                  scrollOffset: offset,
-                  titleTrailing: showSliverBuddy
-                      ? JournalPixelBuddy(
-                          key: const ValueKey('home-sliver-pixel-buddy'),
-                          mood: buddyMood,
-                          mini: true,
-                          onTap: onBuddyTap,
-                          syncTickListenable: _syncSpinnerTick,
-                          displayPrefs: store.display,
-                          celebratePulse: _buddyCelebratePulse,
-                          allowTapCombo: !busy && !syncErrorOrPending,
-                        )
-                      : null,
-                  statusContent: sliverStatusContent,
-                  actions: headerActions,
+                builder: (context, offset, _) => AnimatedBuilder(
+                  animation: controller,
+                  builder: (context, _) => JournalSliverHeader(
+                    title: '课业手记',
+                    scrollOffset: offset,
+                    titleTrailing: showSliverBuddy
+                        ? JournalPixelBuddy(
+                            key: const ValueKey('home-sliver-pixel-buddy'),
+                            mood: buddyMood,
+                            mini: true,
+                            size: 20.0,
+                            onTap: () => controller.registerTap(
+                              snapshot: homeSnapshot,
+                              fromSliver: true,
+                            ),
+                            syncTickListenable: controller.syncTick,
+                            celebratePulse: controller.celebratePulse,
+                            allowTapCombo: !busy && !syncErrorOrPending,
+                            poseOverride: poseForController(),
+                          )
+                        : null,
+                    statusContent: sliverStatusContent,
+                    actions: headerActions,
+                  ),
                 ),
+              ),
+            ),
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: AnimatedBuilder(
+                animation:
+                    Listenable.merge([controller, _scrollOffset, _stageAnchor]),
+                builder: (context, _) {
+                  final bubble = controller.activeBubble;
+                  if (!showPixelBuddy ||
+                      busy ||
+                      syncErrorOrPending ||
+                      bubble == null ||
+                      bubble.tab != ClawdPrimaryTab.home) {
+                    return const SizedBox.shrink();
+                  }
+                  final offset = _scrollOffset.value;
+                  final sliverShowing = offset > 18.0 && showSliverBuddy;
+                  final screenWidth = MediaQuery.sizeOf(context).width;
+                  final double top;
+                  final double left;
+                  final double maxWidth;
+                  final double pointerOffset;
+                  if (sliverShowing) {
+                    final safeRight = math.max(
+                      120.0,
+                      screenWidth - 18.0 - headerActions.length * 48.0 - 8.0,
+                    );
+                    maxWidth =
+                        math.min(210.0, math.max(96.0, safeRight - 18.0));
+                    const sliverBuddyCenterX = 114.0;
+                    left = (sliverBuddyCenterX - maxWidth * 0.45).clamp(
+                      18.0,
+                      math.max(18.0, safeRight - maxWidth),
+                    );
+                    pointerOffset = (sliverBuddyCenterX - left)
+                        .clamp(14.0, maxWidth - 14.0);
+                    top = 50.0;
+                  } else {
+                    final anchor = _stageAnchor.value;
+                    final safeRight = 18.0 + anchor.safeWidth;
+                    maxWidth = math.min(
+                      210.0,
+                      math.max(96.0, anchor.safeWidth),
+                    );
+                    final buddyGlobalX = 18.0 + anchor.centerX;
+                    left = (buddyGlobalX - maxWidth * 0.45).clamp(
+                      18.0,
+                      math.max(18.0, safeRight - maxWidth),
+                    );
+                    pointerOffset =
+                        (buddyGlobalX - left).clamp(14.0, maxWidth - 14.0);
+                    top = math.max(8.0, 14.0 - offset + anchor.bottomY + 2.0);
+                  }
+                  return Align(
+                    alignment: Alignment.topLeft,
+                    child: Padding(
+                      padding: EdgeInsets.only(left: left, top: top),
+                      child: ClawdSpeechBubble(
+                        key: const ValueKey('clawd-speech-bubble'),
+                        message: bubble,
+                        maxWidth: maxWidth,
+                        pointerDirection: ClawdBubblePointerDirection.up,
+                        pointerOffsetFromLeft: pointerOffset,
+                        onTap: controller.onBubbleTapped,
+                      ),
+                    ),
+                  );
+                },
               ),
             ),
           ],

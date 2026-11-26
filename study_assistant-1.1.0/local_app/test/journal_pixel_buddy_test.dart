@@ -1166,4 +1166,40 @@ void main() {
 
     await t.pumpAndSettle();
   });
+
+  testWidgets(
+      'Clawd 2.0 Shimeji poses render crisply in light & dark themes and settle cleanly',
+      (t) async {
+    for (final theme in [StudyAssistantTheme.light, StudyAssistantTheme.dark]) {
+      for (final pose in [
+        JournalPixelBuddyPose.sitDangle,
+        JournalPixelBuddyPose.napZzz,
+        JournalPixelBuddyPose.climbEdge,
+        JournalPixelBuddyPose.hangSlipFlip,
+        JournalPixelBuddyPose.petSquint,
+        JournalPixelBuddyPose.grabbedFlail,
+        JournalPixelBuddyPose.tsunderePuff,
+      ]) {
+        await t.pumpWidget(
+          MaterialApp(
+            theme: theme,
+            home: Scaffold(
+              body: Center(
+                child: JournalPixelBuddy(
+                  size: 38.0,
+                  poseOverride: pose,
+                  poseProgress: 0.45,
+                  facingSign: -1,
+                  enableIdleActions: false,
+                  handleGestures: false,
+                ),
+              ),
+            ),
+          ),
+        );
+        await t.pumpAndSettle();
+        expect(t.takeException(), isNull, reason: 'pose=$pose threw');
+      }
+    }
+  });
 }

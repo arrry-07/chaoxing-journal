@@ -13,10 +13,13 @@ import '../models/sync_report.dart';
 import '../services/assignment_query.dart';
 import '../services/assignment_store.dart';
 import '../services/calendar_day_workload.dart';
+import '../services/clawd_companion_controller.dart';
 import '../services/interaction_feedback_service.dart';
 import 'assignment_list_screen.dart';
 import 'manual_agenda_screen.dart';
 import 'widgets/assignment_card.dart';
+import 'widgets/clawd_speech_bubble.dart';
+import 'widgets/clawd_title_stage.dart';
 import 'widgets/coursework_status_pill.dart';
 import 'widgets/journal_buttons.dart';
 import 'widgets/journal_grouped_card.dart';
@@ -53,10 +56,43 @@ class _CalendarScreenState extends State<CalendarScreen>
   bool _weekCollapsed = false;
   bool _refreshing = false;
   String? _refreshMessage;
+  ClawdCompanionController? _clawdController;
+  ClawdCompanionController? _localClawdController;
+  bool _appResumed = true;
+  bool _tickerEnabled = true;
+  bool _reducedMotion = false;
+
+  ClawdCompanionController _ensureClawdController() {
+    if (_clawdController != null) return _clawdController!;
+    return _localClawdController ??=
+        ClawdCompanionController(clock: widget.clock);
+  }
+
+  void _syncClawdEnvironment({bool notify = true}) {
+    final controller = _clawdController;
+    if (controller == null) return;
+    final busy = _refreshing || widget.store.isLoading;
+    final hasError = !busy &&
+        (widget.store.syncReport.phase == SyncPhase.failed ||
+            widget.store.syncReport.phase == SyncPhase.partial ||
+            widget.store.operationError != null);
+    controller.updateEnvironment(
+      displayPrefs: widget.store.display,
+      appResumed: _appResumed,
+      tickerEnabled: _tickerEnabled,
+      reducedMotion: _reducedMotion,
+      isSyncing: busy,
+      hasSyncErrorOrPending: hasError,
+      notify: notify,
+    );
+  }
 
   @override
   void initState() {
     super.initState();
+    _appResumed =
+        (WidgetsBinding.instance.lifecycleState ?? AppLifecycleState.resumed) ==
+            AppLifecycleState.resumed;
     WidgetsBinding.instance.addObserver(this);
     _now = widget.clock?.call() ?? DateTime.now();
     today = AssignmentQuery.dayKey(_now);
@@ -74,8 +110,21 @@ class _CalendarScreenState extends State<CalendarScreen>
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _tickerEnabled = TickerMode.valuesOf(context).enabled;
+    _reducedMotion = JournalMotion.isReducedMotion(context);
+    final scoped = ClawdCompanionScope.maybeOf(context);
+    _clawdController = scoped ??
+        (_localClawdController ??=
+            ClawdCompanionController(clock: widget.clock));
+    _syncClawdEnvironment(notify: false);
+  }
+
+  @override
   void dispose() {
     _pageController.dispose();
+    _localClawdController?.dispose();
     WidgetsBinding.instance.removeObserver(this);
     _clock?.cancel();
     super.dispose();
@@ -83,6 +132,11 @@ class _CalendarScreenState extends State<CalendarScreen>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    final nextResumed = state == AppLifecycleState.resumed;
+    if (_appResumed != nextResumed) {
+      _appResumed = nextResumed;
+      _syncClawdEnvironment();
+    }
     if (state != AppLifecycleState.resumed || !mounted) return;
     setState(() {
       _now = widget.clock?.call() ?? DateTime.now();
@@ -290,7 +344,39 @@ class _CalendarScreenState extends State<CalendarScreen>
           final gridHeight =
               _weekCollapsed ? cellHeight : rowCount * cellHeight;
 
-          return ListView(
+          final controller = _ensureClawdController();
+          final showCameo = widget.store.display.showClawdOnSecondaryTabs;
+          final selectedCount = agenda.length + manualAgenda.length;
+          var monthItemCount = selectedCount;
+          if (selectedDay != null) {
+            monthItemCount = 0;
+            for (var d = 1; d <= daysInMonth; d++) {
+              final dayKey = DateTime(month.year, month.month, d);
+              monthItemCount += (assignmentsByDay[dayKey]?.length ?? 0) +
+                  (manualByDay[dayKey]?.length ?? 0);
+            }
+          }
+          final calendarSnapshot = ClawdPageContextSnapshot(
+            tab: ClawdPrimaryTab.calendar,
+            calendarSelectedDayCount: selectedCount,
+            calendarMonthCount: monthItemCount,
+            calendarSelectedIsToday: selectedDay == today,
+            calendarShowsWholeMonth: selectedDay == null,
+          );
+          controller.syncContextQuietly(
+            displayPrefs: widget.store.display,
+            appResumed: _appResumed,
+            tickerEnabled: _tickerEnabled,
+            reducedMotion: _reducedMotion,
+            isSyncing: busy,
+            hasSyncErrorOrPending: !busy &&
+                (widget.store.syncReport.phase == SyncPhase.failed ||
+                    widget.store.syncReport.phase == SyncPhase.partial ||
+                    widget.store.operationError != null),
+            snapshot: calendarSnapshot,
+          );
+
+          final listView = ListView(
             padding: EdgeInsets.fromLTRB(
               16,
               14,
@@ -300,6 +386,16 @@ class _CalendarScreenState extends State<CalendarScreen>
             children: [
               Builder(builder: (context) {
                 final titleWidget = Text('课业日历', style: journal.display);
+                final cameo = showCameo
+                    ? Padding(
+                        padding: const EdgeInsets.only(left: 6),
+                        child: ClawdTabCameo(
+                          key: const ValueKey('calendar-pixel-buddy'),
+                          controller: controller,
+                          snapshotBuilder: () => calendarSnapshot,
+                        ),
+                      )
+                    : null;
                 final refreshBtn = IconButton(
                   tooltip: '刷新',
                   visualDensity: VisualDensity.compact,
@@ -332,10 +428,18 @@ class _CalendarScreenState extends State<CalendarScreen>
                           Expanded(
                             child: Align(
                               alignment: Alignment.centerLeft,
-                              child: FittedBox(
-                                fit: BoxFit.scaleDown,
-                                alignment: Alignment.centerLeft,
-                                child: titleWidget,
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Flexible(
+                                    child: FittedBox(
+                                      fit: BoxFit.scaleDown,
+                                      alignment: Alignment.centerLeft,
+                                      child: titleWidget,
+                                    ),
+                                  ),
+                                  if (cameo != null) cameo,
+                                ],
                               ),
                             ),
                           ),
@@ -351,7 +455,13 @@ class _CalendarScreenState extends State<CalendarScreen>
                       spacing: 8,
                       runSpacing: 6,
                       children: [
-                        titleWidget,
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            titleWidget,
+                            if (cameo != null) cameo,
+                          ],
+                        ),
                         Wrap(
                           spacing: 4,
                           runSpacing: 4,
@@ -823,6 +933,45 @@ class _CalendarScreenState extends State<CalendarScreen>
                   ],
                 ),
               ],
+            ],
+          );
+          return Stack(
+            children: [
+              listView,
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                child: AnimatedBuilder(
+                  animation: controller,
+                  builder: (context, _) {
+                    final bubble = controller.activeBubble;
+                    if (!showCameo ||
+                        busy ||
+                        bubble == null ||
+                        bubble.tab != ClawdPrimaryTab.calendar) {
+                      return const SizedBox.shrink();
+                    }
+                    final screenW = MediaQuery.sizeOf(context).width;
+                    final maxW =
+                        math.min(210.0, math.max(110.0, screenW - 180.0));
+                    return Align(
+                      alignment: Alignment.topLeft,
+                      child: Padding(
+                        padding: const EdgeInsets.only(left: 18, top: 56),
+                        child: ClawdSpeechBubble(
+                          key: const ValueKey('clawd-speech-bubble'),
+                          message: bubble,
+                          maxWidth: maxW,
+                          pointerDirection: ClawdBubblePointerDirection.up,
+                          pointerOffsetFromLeft: math.min(110.0, maxW * 0.55),
+                          onTap: controller.onBubbleTapped,
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
             ],
           );
         },

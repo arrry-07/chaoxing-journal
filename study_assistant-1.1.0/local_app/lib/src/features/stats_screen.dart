@@ -8,10 +8,14 @@ import '../app/journal.dart';
 import '../app/journal_motion.dart';
 import '../app/transient_feedback.dart';
 import '../models/assignment.dart';
+import '../models/sync_report.dart';
 import '../services/assignment_statistics.dart';
 import '../services/assignment_store.dart';
+import '../services/clawd_companion_controller.dart';
 import '../services/course_term_catalog.dart';
 import '../services/local_record_query.dart';
+import 'widgets/clawd_speech_bubble.dart';
+import 'widgets/clawd_title_stage.dart';
 import 'widgets/completion_pie_chart.dart';
 import 'widgets/journal_context_menu.dart';
 import 'widgets/journal_grouped_card.dart';
@@ -43,7 +47,7 @@ class StatsScreen extends StatefulWidget {
   State<StatsScreen> createState() => _StatsScreenState();
 }
 
-class _StatsScreenState extends State<StatsScreen> {
+class _StatsScreenState extends State<StatsScreen> with WidgetsBindingObserver {
   static const _bucketStatusParams = [
     'completed',
     'pending',
@@ -58,19 +62,55 @@ class _StatsScreenState extends State<StatsScreen> {
   final _feedback = TransientFeedbackController();
   late int _feedbackEpoch;
   String? _feedbackAccount;
+  ClawdCompanionController? _clawdController;
+  ClawdCompanionController? _localClawdController;
+  bool _appResumed = true;
+  bool _tickerEnabled = true;
+  bool _reducedMotion = false;
+
+  ClawdCompanionController _ensureClawdController() {
+    if (_clawdController != null) return _clawdController!;
+    return _localClawdController ??=
+        ClawdCompanionController(clock: widget.clock);
+  }
+
+  void _syncClawdEnvironment({bool notify = true}) {
+    final controller = _clawdController;
+    if (controller == null) return;
+    final busy = widget.store.isLoading;
+    final hasError = !busy &&
+        (widget.store.syncReport.phase == SyncPhase.failed ||
+            widget.store.syncReport.phase == SyncPhase.partial ||
+            widget.store.operationError != null);
+    controller.updateEnvironment(
+      displayPrefs: widget.store.display,
+      appResumed: _appResumed,
+      tickerEnabled: _tickerEnabled,
+      reducedMotion: _reducedMotion,
+      isSyncing: busy,
+      hasSyncErrorOrPending: hasError,
+      notify: notify,
+    );
+  }
 
   void _checkFeedbackAccount() {
     if (_feedbackEpoch != widget.store.accountEpoch ||
         _feedbackAccount != widget.store.account) {
       _feedback.dismiss();
+      _clawdController?.resetForAccountChange();
       _feedbackEpoch = widget.store.accountEpoch;
       _feedbackAccount = widget.store.account;
     }
+    _syncClawdEnvironment();
   }
 
   @override
   void initState() {
     super.initState();
+    _appResumed =
+        (WidgetsBinding.instance.lifecycleState ?? AppLifecycleState.resumed) ==
+            AppLifecycleState.resumed;
+    WidgetsBinding.instance.addObserver(this);
     _now = widget.clock?.call() ?? DateTime.now();
     _feedbackEpoch = widget.store.accountEpoch;
     _feedbackAccount = widget.store.account;
@@ -83,20 +123,45 @@ class _StatsScreenState extends State<StatsScreen> {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _tickerEnabled = TickerMode.valuesOf(context).enabled;
+    _reducedMotion = JournalMotion.isReducedMotion(context);
+    final scoped = ClawdCompanionScope.maybeOf(context);
+    _clawdController = scoped ??
+        (_localClawdController ??=
+            ClawdCompanionController(clock: widget.clock));
+    _syncClawdEnvironment(notify: false);
+  }
+
+  @override
   void didUpdateWidget(covariant StatsScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.store != widget.store) {
       oldWidget.store.removeListener(_checkFeedbackAccount);
       _feedback.dismiss();
+      _clawdController?.resetForAccountChange();
       _feedbackEpoch = widget.store.accountEpoch;
       _feedbackAccount = widget.store.account;
       widget.store.addListener(_checkFeedbackAccount);
+      _syncClawdEnvironment();
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final nextResumed = state == AppLifecycleState.resumed;
+    if (_appResumed != nextResumed) {
+      _appResumed = nextResumed;
+      _syncClawdEnvironment();
     }
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     widget.store.removeListener(_checkFeedbackAccount);
+    _localClawdController?.dispose();
     _feedback.dispose();
     _clock?.cancel();
     super.dispose();
@@ -260,184 +325,254 @@ class _StatsScreenState extends State<StatsScreen> {
 
           final allUnknown = stats.total > 0 && stats.unknown == stats.total;
           final barColors = CompletionPieChart.colorsFor(journal);
+          final controller = _ensureClawdController();
+          final showCameo = store.display.showClawdOnSecondaryTabs;
+          final statsSnapshot = ClawdPageContextSnapshot(
+            tab: ClawdPrimaryTab.stats,
+            statsCompletionPercent: allUnknown ? 0 : stats.percentages[0],
+            statsTotalCount: stats.total,
+            statsPendingCount: stats.pending + stats.expired + stats.unknown,
+          );
+          controller.syncContextQuietly(
+            displayPrefs: store.display,
+            appResumed: _appResumed,
+            tickerEnabled: _tickerEnabled,
+            reducedMotion: _reducedMotion,
+            isSyncing: store.isLoading,
+            hasSyncErrorOrPending: !store.isLoading &&
+                (store.syncReport.phase == SyncPhase.failed ||
+                    store.syncReport.phase == SyncPhase.partial ||
+                    store.operationError != null),
+            snapshot: statsSnapshot,
+          );
 
           return Material(
             type: MaterialType.transparency,
-            child: ListView(
-              key: const PageStorageKey('stats-list'),
-              padding: EdgeInsets.fromLTRB(
-                18,
-                14,
-                18,
-                JournalLayout.floatingNavClearance(context),
-              ),
+            child: Stack(
               children: [
-                const JournalHeading('课业统计', bookTitle: true),
-                const SizedBox(height: 10),
-                _StatsTermScopeBar(
-                  selected: _termScope,
-                  onChanged: (scope) {
-                    if (_termScope == scope) return;
-                    JournalMotion.tap(store.display);
-                    setState(() => _termScope = scope);
-                  },
-                ),
-                const SizedBox(height: 10),
-                _StatsRangeSegmentedBar(
-                  selected: _range,
-                  onChanged: (next) {
-                    JournalMotion.tap(store.display);
-                    setState(() => _range = next);
-                  },
-                ),
-                if (_range != StatsTimeRange.all &&
-                    excludedUnscheduled > 0) ...[
-                  const SizedBox(height: 8),
-                  Text(
-                    '不含 $excludedUnscheduled 项无确定时间课业',
-                    style: journal.metadata,
+                ListView(
+                  key: const PageStorageKey('stats-list'),
+                  padding: EdgeInsets.fromLTRB(
+                    18,
+                    14,
+                    18,
+                    JournalLayout.floatingNavClearance(context),
                   ),
-                ],
-                const SizedBox(height: 12),
-                if (stats.total == 0)
-                  JournalGroupedCard(
-                    key: const ValueKey('stats-empty-card'),
-                    padding: const EdgeInsets.all(18),
-                    children: [
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('暂无可统计的作业', style: journal.entryTitle),
-                          if (_range != StatsTimeRange.all) ...[
-                            const SizedBox(height: 4),
-                            Text(
-                              '${_range.label}内暂无带确定时间的课业记录，可切回“全部”查看。',
-                              style: journal.metadata,
-                            ),
-                          ],
-                        ],
+                  children: [
+                    JournalHeading(
+                      '课业统计',
+                      bookTitle: true,
+                      trailing: showCameo
+                          ? ClawdTabCameo(
+                              key: const ValueKey('stats-pixel-buddy'),
+                              controller: controller,
+                              snapshotBuilder: () => statsSnapshot,
+                            )
+                          : null,
+                      trailingWidth: showCameo ? 44 : 0,
+                    ),
+                    const SizedBox(height: 10),
+                    _StatsTermScopeBar(
+                      selected: _termScope,
+                      onChanged: (scope) {
+                        if (_termScope == scope) return;
+                        JournalMotion.tap(store.display);
+                        setState(() => _termScope = scope);
+                      },
+                    ),
+                    const SizedBox(height: 10),
+                    _StatsRangeSegmentedBar(
+                      selected: _range,
+                      onChanged: (next) {
+                        JournalMotion.tap(store.display);
+                        setState(() => _range = next);
+                      },
+                    ),
+                    if (_range != StatsTimeRange.all &&
+                        excludedUnscheduled > 0) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        '不含 $excludedUnscheduled 项无确定时间课业',
+                        style: journal.metadata,
                       ),
                     ],
-                  )
-                else
-                  JournalGroupedCard(
-                    key: const ValueKey('stats-overview-card'),
-                    dividerIndent: 16,
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 14, 10, 14),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            Row(
-                              crossAxisAlignment: CrossAxisAlignment.center,
+                    const SizedBox(height: 12),
+                    if (stats.total == 0)
+                      JournalGroupedCard(
+                        key: const ValueKey('stats-empty-card'),
+                        padding: const EdgeInsets.all(18),
+                        children: [
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('暂无可统计的作业', style: journal.entryTitle),
+                              if (_range != StatsTimeRange.all) ...[
+                                const SizedBox(height: 4),
+                                Text(
+                                  '${_range.label}内暂无带确定时间的课业记录，可切回“全部”查看。',
+                                  style: journal.metadata,
+                                ),
+                              ],
+                            ],
+                          ),
+                        ],
+                      )
+                    else
+                      JournalGroupedCard(
+                        key: const ValueKey('stats-overview-card'),
+                        dividerIndent: 16,
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 14, 10, 14),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: [
-                                Expanded(
-                                  child: Align(
-                                    alignment: Alignment.centerLeft,
-                                    child: FittedBox(
-                                      fit: BoxFit.scaleDown,
-                                      alignment: Alignment.centerLeft,
-                                      child: _AnimatedRatioHero(
-                                        completed: stats.completed,
-                                        total: stats.total,
-                                        journal: journal,
+                                Row(
+                                  crossAxisAlignment: CrossAxisAlignment.center,
+                                  children: [
+                                    Expanded(
+                                      child: Align(
+                                        alignment: Alignment.centerLeft,
+                                        child: FittedBox(
+                                          fit: BoxFit.scaleDown,
+                                          alignment: Alignment.centerLeft,
+                                          child: _AnimatedRatioHero(
+                                            completed: stats.completed,
+                                            total: stats.total,
+                                            journal: journal,
+                                          ),
+                                        ),
                                       ),
                                     ),
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 10,
-                                    vertical: 4,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: allUnknown
-                                        ? journal.parchment
-                                        : journal.sage,
-                                    borderRadius: BorderRadius.circular(14),
-                                  ),
-                                  child: Text(
-                                    allUnknown
-                                        ? '待确认'
-                                        : '${stats.percentages[0]}%',
-                                    style: journal.pillLabel.copyWith(
-                                      color: allUnknown
-                                          ? journal.muted
-                                          : journal.isDark
-                                              ? journal.accent
-                                              : journal.ink,
-                                      fontWeight: FontWeight.w600,
+                                    const SizedBox(width: 8),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 10,
+                                        vertical: 4,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: allUnknown
+                                            ? journal.parchment
+                                            : journal.sage,
+                                        borderRadius: BorderRadius.circular(14),
+                                      ),
+                                      child: Text(
+                                        allUnknown
+                                            ? '待确认'
+                                            : '${stats.percentages[0]}%',
+                                        style: journal.pillLabel.copyWith(
+                                          color: allUnknown
+                                              ? journal.muted
+                                              : journal.isDark
+                                                  ? journal.accent
+                                                  : journal.ink,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
                                     ),
-                                  ),
-                                ),
-                                const JournalInfoButton(
-                                  title: '统计口径说明',
-                                  items: [
-                                    '统计范围为已关注课程的作业/任务与账号级考试。',
-                                    '已在本机隐藏的记录不计入统计；提交状态未知的记录计入总数，不折算为已完成。',
-                                    '切换未来 7 天 / 30 天时，无确定时间的课业不参与时间窗口统计。',
-                                    '点击状态行或课程行查看明细；长按或左滑课程行可快捷取消关注或本机隐藏。',
+                                    const JournalInfoButton(
+                                      title: '统计口径说明',
+                                      items: [
+                                        '统计范围为已关注课程的作业/任务与账号级考试。',
+                                        '已在本机隐藏的记录不计入统计；提交状态未知的记录计入总数，不折算为已完成。',
+                                        '切换未来 7 天 / 30 天时，无确定时间的课业不参与时间窗口统计。',
+                                        '点击状态行或课程行查看明细；长按或左滑课程行可快捷取消关注或本机隐藏。',
+                                      ],
+                                    ),
                                   ],
+                                ),
+                                const SizedBox(height: 12),
+                                _MultiSegmentStatsBar(
+                                  counts: stats.counts,
+                                  colors: barColors,
+                                  trackColor: journal.parchment,
+                                  animateDuration: JournalMotion.duration(
+                                    context,
+                                    const Duration(milliseconds: 340),
+                                  ),
                                 ),
                               ],
                             ),
-                            const SizedBox(height: 12),
-                            _MultiSegmentStatsBar(
-                              counts: stats.counts,
-                              colors: barColors,
-                              trackColor: journal.parchment,
-                              animateDuration: JournalMotion.duration(
-                                context,
-                                const Duration(milliseconds: 340),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      for (var i = 0; i < 4; i++)
-                        if (i < 3 || stats.unknown > 0)
-                          _buildStatusRow(
-                            context,
-                            index: i,
-                            label: i == 0 && stats.localCompleted > 0
-                                ? '${CompletionPieChart.labels[i]}（含本机标记 ${stats.localCompleted}）'
-                                : CompletionPieChart.labels[i],
-                            count: stats.counts[i],
-                            percent: stats.percentages[i],
-                            dotColor: barColors[i],
-                            journal: journal,
                           ),
-                    ],
-                  ),
-                const SizedBox(height: 18),
-                Padding(
-                  padding: const EdgeInsets.only(left: 2, bottom: 8),
-                  child: Text('各课程待处理', style: journal.section),
+                          for (var i = 0; i < 4; i++)
+                            if (i < 3 || stats.unknown > 0)
+                              _buildStatusRow(
+                                context,
+                                index: i,
+                                label: i == 0 && stats.localCompleted > 0
+                                    ? '${CompletionPieChart.labels[i]}（含本机标记 ${stats.localCompleted}）'
+                                    : CompletionPieChart.labels[i],
+                                count: stats.counts[i],
+                                percent: stats.percentages[i],
+                                dotColor: barColors[i],
+                                journal: journal,
+                              ),
+                        ],
+                      ),
+                    const SizedBox(height: 18),
+                    Padding(
+                      padding: const EdgeInsets.only(left: 2, bottom: 8),
+                      child: Text('各课程待处理', style: journal.section),
+                    ),
+                    if (pendingGroups.isEmpty)
+                      JournalGroupedCard(
+                        key: const ValueKey('stats-course-empty'),
+                        padding: const EdgeInsets.all(16),
+                        children: [
+                          Text('当前没有待处理的课程', style: journal.metadata),
+                        ],
+                      )
+                    else
+                      JournalGroupedCard(
+                        dividerIndent: 52,
+                        children: [
+                          for (final group in pendingGroups)
+                            _buildCourseRow(
+                              context,
+                              group: group,
+                              allGroups: groups,
+                              now: now,
+                              journal: journal,
+                            ),
+                        ],
+                      ),
+                  ],
                 ),
-                if (pendingGroups.isEmpty)
-                  JournalGroupedCard(
-                    key: const ValueKey('stats-course-empty'),
-                    padding: const EdgeInsets.all(16),
-                    children: [
-                      Text('当前没有待处理的课程', style: journal.metadata),
-                    ],
-                  )
-                else
-                  JournalGroupedCard(
-                    dividerIndent: 52,
-                    children: [
-                      for (final group in pendingGroups)
-                        _buildCourseRow(
-                          context,
-                          group: group,
-                          allGroups: groups,
-                          now: now,
-                          journal: journal,
+                Positioned(
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  child: AnimatedBuilder(
+                    animation: controller,
+                    builder: (context, _) {
+                      final bubble = controller.activeBubble;
+                      if (!showCameo ||
+                          bubble == null ||
+                          bubble.tab != ClawdPrimaryTab.stats) {
+                        return const SizedBox.shrink();
+                      }
+                      final maxW = math.min(
+                        220.0,
+                        math.max(
+                            110.0, MediaQuery.sizeOf(context).width - 48.0),
+                      );
+                      return Align(
+                        alignment: Alignment.topRight,
+                        child: Padding(
+                          padding: const EdgeInsets.only(right: 18, top: 54),
+                          child: ClawdSpeechBubble(
+                            key: const ValueKey('clawd-speech-bubble'),
+                            message: bubble,
+                            maxWidth: maxW,
+                            pointerDirection: ClawdBubblePointerDirection.up,
+                            pointerOffsetFromLeft: maxW - 22.0,
+                            onTap: controller.onBubbleTapped,
+                          ),
                         ),
-                    ],
+                      );
+                    },
                   ),
+                ),
               ],
             ),
           );

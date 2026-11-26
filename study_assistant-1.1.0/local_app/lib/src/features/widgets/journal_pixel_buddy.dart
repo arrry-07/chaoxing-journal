@@ -9,13 +9,10 @@ import '../../app/journal.dart';
 import '../../app/journal_motion.dart';
 import '../../models/assignment_sync_progress.dart';
 import '../../models/display_preferences.dart';
+import '../../services/clawd_companion_controller.dart';
 
-enum JournalPixelBuddyMood {
-  idle,
-  syncing,
-  dueToday,
-  allClear,
-}
+export '../../services/clawd_companion_controller.dart'
+    show JournalPixelBuddyMood, journalBuddyTapWhisper;
 
 const List<String> kJournalSpinnerGlyphs = ['·', '✢', '✳', '✶', '✻', '✽'];
 
@@ -38,63 +35,19 @@ String journalBuddySyncPhrase(AssignmentSyncStage? stage, int tick) {
   }
 }
 
-String journalBuddyTapWhisper({
-  required int dueToday,
-  required int dueIn3Days,
-  required int completedToday,
-  required int tapCount,
-  int comboCount = 1,
-}) {
-  final List<String> options;
-  if (comboCount >= 3) {
-    options = const <String>[
-      '满格元气发射给你！',
-      '比个小心心，超级棒！',
-      '连击啦，今天状态拉满',
-      '贴贴打气，万事顺意！',
-    ];
-  } else if (comboCount == 2) {
-    options = <String>[
-      if (dueToday > 0) ...[
-        '嘿咻，一起清空待办！',
-        '双击加满今日干劲啦',
-        '小爪给你打气，冲呀',
-      ] else if (completedToday > 0 || dueIn3Days == 0) ...[
-        '好耶，节奏超稳的！',
-        '双击收下今日小红花',
-        '开心蹦两下，继续保持',
-      ] else ...[
-        '趁现在偷闲充个电！',
-        '提前准备超省心的呀',
-        '双击打气，稳稳拿捏',
-      ],
-    ];
-  } else {
-    options = <String>[
-      if (dueToday > 0) ...[
-        dueToday > 99 ? '今日待办较多，先挑急的' : '今日待办$dueToday项，稳步推进',
-        dueToday > 99 ? '先清今日要紧事项吧' : '先清今日这$dueToday项吧',
-        if (dueIn3Days > dueToday && dueIn3Days <= 99) '三日内共$dueIn3Days项，提前看',
-        '我在盯着截止时间呢',
-      ] else if (completedToday > 0) ...[
-        '今日已清空，喝口水歇会儿',
-        completedToday > 99 ? '今日打卡满满，真棒' : '今日已打卡$completedToday项，真棒',
-        if (dueIn3Days > 0)
-          dueIn3Days > 99 ? '三日内有多项，提前瞄一眼' : '三日内还有$dueIn3Days项，瞄一眼',
-        '今天轻松啦，保持节奏',
-      ] else if (dueIn3Days > 0) ...[
-        dueIn3Days > 99 ? '三日内有多项，提前瞄一眼' : '三日内还有$dueIn3Days项，瞄一眼',
-        '今日暂无急单，先备后续',
-        '我在盯着截止时间呢',
-      ] else ...[
-        '眼前清清爽爽，真好',
-        '暂无急单，喝口水歇会儿',
-        '有新课业我会盯紧的',
-      ],
-    ];
-  }
-  final index = (tapCount < 0 ? -tapCount : tapCount) % options.length;
-  return options[index];
+enum JournalPixelBuddyPose {
+  normal,
+  sitDangle,
+  napZzz,
+  climbEdge,
+  hangSlipFlip,
+  petSquint,
+  grabbedFlail,
+  tsunderePuff,
+  wave,
+  doubleStar,
+  doubleHeart,
+  cheer,
 }
 
 enum _BuddyActionKind {
@@ -109,6 +62,13 @@ enum _BuddyActionKind {
   tapDoubleStar,
   tapDoubleHeart,
   cheer,
+  sitDangle,
+  napZzz,
+  climbEdge,
+  hangSlipFlip,
+  petSquint,
+  grabbedFlail,
+  tsunderePuff,
 }
 
 class JournalPixelBuddy extends StatefulWidget {
@@ -122,6 +82,11 @@ class JournalPixelBuddy extends StatefulWidget {
     this.displayPrefs,
     this.celebratePulse = 0,
     this.allowTapCombo = true,
+    this.poseOverride,
+    this.poseProgress,
+    this.facingSign = 1,
+    this.enableIdleActions = true,
+    this.handleGestures = true,
   });
 
   final JournalPixelBuddyMood mood;
@@ -132,6 +97,11 @@ class JournalPixelBuddy extends StatefulWidget {
   final DisplayPreferences? displayPrefs;
   final int celebratePulse;
   final bool allowTapCombo;
+  final JournalPixelBuddyPose? poseOverride;
+  final double? poseProgress;
+  final int facingSign;
+  final bool enableIdleActions;
+  final bool handleGestures;
 
   @override
   State<JournalPixelBuddy> createState() => _JournalPixelBuddyState();
@@ -168,6 +138,10 @@ class _JournalPixelBuddyState extends State<JournalPixelBuddy>
 
   int get _effectiveSyncTick =>
       widget.syncTickListenable?.value ?? _internalSyncTick;
+
+  bool get _hasPoseOverride =>
+      widget.poseOverride != null &&
+      widget.poseOverride != JournalPixelBuddyPose.normal;
 
   @override
   void initState() {
@@ -212,6 +186,14 @@ class _JournalPixelBuddyState extends State<JournalPixelBuddy>
     }
     if (!widget.allowTapCombo) {
       _clearTapCombo();
+    }
+    if (widget.poseOverride != oldWidget.poseOverride &&
+        _hasPoseOverride &&
+        widget.poseProgress == null &&
+        _isActive &&
+        !_reducedMotion) {
+      final mapped = _mapPoseOverride(widget.poseOverride!);
+      _startAction(mapped, _durationForAction(mapped));
     }
     final celebrated = widget.celebratePulse > oldWidget.celebratePulse;
     _reconcileTimers();
@@ -286,14 +268,9 @@ class _JournalPixelBuddyState extends State<JournalPixelBuddy>
       _idleTimer = null;
       _clearTapCombo();
       if (widget.syncTickListenable == null) {
-        _syncTimer ??= Timer.periodic(
+        _syncTimer ??= Timer(
           const Duration(milliseconds: 180),
-          (_) {
-            if (!mounted || !_isActive || _reducedMotion) return;
-            setState(() {
-              _internalSyncTick = (_internalSyncTick + 1) & 0x3fffffff;
-            });
-          },
+          _onInternalSyncTick,
         );
       } else {
         _syncTimer?.cancel();
@@ -302,12 +279,34 @@ class _JournalPixelBuddyState extends State<JournalPixelBuddy>
     } else {
       _syncTimer?.cancel();
       _syncTimer = null;
-      _scheduleIdleTimerIfNeeded();
+      if (widget.enableIdleActions && !_hasPoseOverride) {
+        _scheduleIdleTimerIfNeeded();
+      } else {
+        _idleTimer?.cancel();
+        _idleTimer = null;
+      }
     }
   }
 
+  void _onInternalSyncTick() {
+    _syncTimer = null;
+    if (!mounted ||
+        !_isActive ||
+        _reducedMotion ||
+        widget.mood != JournalPixelBuddyMood.syncing ||
+        widget.syncTickListenable != null) {
+      return;
+    }
+    setState(() {
+      _internalSyncTick = (_internalSyncTick + 1) & 0x3fffffff;
+    });
+    _syncTimer = Timer(const Duration(milliseconds: 180), _onInternalSyncTick);
+  }
+
   void _scheduleIdleTimerIfNeeded() {
-    if (_idleTimer != null ||
+    if (!widget.enableIdleActions ||
+        _hasPoseOverride ||
+        _idleTimer != null ||
         !_isActive ||
         _reducedMotion ||
         widget.mood == JournalPixelBuddyMood.syncing ||
@@ -322,6 +321,8 @@ class _JournalPixelBuddyState extends State<JournalPixelBuddy>
   void _onIdleTick() {
     _idleTimer = null;
     if (!mounted ||
+        !widget.enableIdleActions ||
+        _hasPoseOverride ||
         !_isActive ||
         _reducedMotion ||
         widget.mood == JournalPixelBuddyMood.syncing) {
@@ -352,6 +353,22 @@ class _JournalPixelBuddyState extends State<JournalPixelBuddy>
     _startAction(kind, _durationForAction(kind));
   }
 
+  _BuddyActionKind _mapPoseOverride(JournalPixelBuddyPose pose) =>
+      switch (pose) {
+        JournalPixelBuddyPose.normal => _BuddyActionKind.none,
+        JournalPixelBuddyPose.sitDangle => _BuddyActionKind.sitDangle,
+        JournalPixelBuddyPose.napZzz => _BuddyActionKind.napZzz,
+        JournalPixelBuddyPose.climbEdge => _BuddyActionKind.climbEdge,
+        JournalPixelBuddyPose.hangSlipFlip => _BuddyActionKind.hangSlipFlip,
+        JournalPixelBuddyPose.petSquint => _BuddyActionKind.petSquint,
+        JournalPixelBuddyPose.grabbedFlail => _BuddyActionKind.grabbedFlail,
+        JournalPixelBuddyPose.tsunderePuff => _BuddyActionKind.tsunderePuff,
+        JournalPixelBuddyPose.wave => _BuddyActionKind.tapWave,
+        JournalPixelBuddyPose.doubleStar => _BuddyActionKind.tapDoubleStar,
+        JournalPixelBuddyPose.doubleHeart => _BuddyActionKind.tapDoubleHeart,
+        JournalPixelBuddyPose.cheer => _BuddyActionKind.cheer,
+      };
+
   Duration _durationForAction(_BuddyActionKind kind) => switch (kind) {
         _BuddyActionKind.none => const Duration(milliseconds: 420),
         _BuddyActionKind.idleBreathe => const Duration(milliseconds: 420),
@@ -364,6 +381,13 @@ class _JournalPixelBuddyState extends State<JournalPixelBuddy>
         _BuddyActionKind.tapDoubleStar => const Duration(milliseconds: 460),
         _BuddyActionKind.tapDoubleHeart => const Duration(milliseconds: 480),
         _BuddyActionKind.cheer => const Duration(milliseconds: 440),
+        _BuddyActionKind.sitDangle => const Duration(milliseconds: 700),
+        _BuddyActionKind.napZzz => const Duration(milliseconds: 850),
+        _BuddyActionKind.climbEdge => const Duration(milliseconds: 700),
+        _BuddyActionKind.hangSlipFlip => const Duration(milliseconds: 820),
+        _BuddyActionKind.petSquint => const Duration(milliseconds: 620),
+        _BuddyActionKind.grabbedFlail => const Duration(milliseconds: 560),
+        _BuddyActionKind.tsunderePuff => const Duration(milliseconds: 520),
       };
 
   void _startAction(_BuddyActionKind kind, Duration duration) {
@@ -463,9 +487,81 @@ class _JournalPixelBuddyState extends State<JournalPixelBuddy>
     final effectiveSize = widget.size ?? (widget.mini ? 19.0 : 26.0);
     final minHitWidth = widget.mini
         ? math.max(effectiveSize + 6.0, 26.0)
-        : math.max(effectiveSize + 10.0, 40.0);
-    final minHitHeight =
-        widget.mini ? math.max(effectiveSize + 6.0, 26.0) : 42.0;
+        : effectiveSize >= 30.0
+            ? math.max(effectiveSize + 6.0, 44.0)
+            : math.max(effectiveSize + 10.0, 40.0);
+    final minHitHeight = widget.mini
+        ? math.max(effectiveSize + 6.0, 26.0)
+        : effectiveSize >= 30.0
+            ? math.max(effectiveSize + 6.0, 44.0)
+            : 42.0;
+
+    final effectiveAction = _reducedMotion
+        ? _BuddyActionKind.none
+        : _hasPoseOverride
+            ? _mapPoseOverride(widget.poseOverride!)
+            : _activeAction;
+    final effectiveProgress = _reducedMotion
+        ? 0.0
+        : _hasPoseOverride
+            ? (widget.poseProgress ??
+                (_actionController.isAnimating ? _actionController.value : 0.5))
+            : _actionController.value;
+
+    final paintBox = SizedBox.square(
+      dimension: effectiveSize,
+      child: AnimatedBuilder(
+        animation: Listenable.merge([_jumpController, _actionController]),
+        builder: (context, _) {
+          final currentAction = _reducedMotion
+              ? _BuddyActionKind.none
+              : _hasPoseOverride
+                  ? _mapPoseOverride(widget.poseOverride!)
+                  : _activeAction;
+          final currentProgress = _reducedMotion
+              ? 0.0
+              : _hasPoseOverride
+                  ? (widget.poseProgress ??
+                      (_actionController.isAnimating
+                          ? _actionController.value
+                          : 0.5))
+                  : _actionController.value;
+          return CustomPaint(
+            painter: _JournalPixelBuddyPainter(
+              mood: widget.mood,
+              isDark: journal.isDark,
+              accent: journal.accent,
+              devicePixelRatio: dpr,
+              actionKind: currentAction,
+              actionProgress: currentAction == _BuddyActionKind.none
+                  ? 0.0
+                  : currentProgress,
+              peekSign: _hasPoseOverride ? widget.facingSign : _peekSign,
+              syncTick: _reducedMotion ? 0 : _effectiveSyncTick,
+              jumpOffset: _reducedMotion ? 0.0 : _jumpController.value,
+            ),
+          );
+        },
+      ),
+    );
+
+    if (!widget.handleGestures) {
+      return ConstrainedBox(
+        constraints: BoxConstraints(
+          minWidth: minHitWidth,
+          minHeight: minHitHeight,
+        ),
+        child: Center(
+          widthFactor: 1.0,
+          heightFactor: 1.0,
+          child: paintBox,
+        ),
+      );
+    }
+
+    // Keep reference to effectiveAction/effectiveProgress for clarity when static.
+    assert(
+        effectiveAction == _BuddyActionKind.none || effectiveProgress >= 0.0);
 
     return Semantics(
       button: widget.onTap != null,
@@ -483,28 +579,7 @@ class _JournalPixelBuddyState extends State<JournalPixelBuddy>
           child: Center(
             widthFactor: 1.0,
             heightFactor: 1.0,
-            child: SizedBox.square(
-              dimension: effectiveSize,
-              child: AnimatedBuilder(
-                animation:
-                    Listenable.merge([_jumpController, _actionController]),
-                builder: (context, _) => CustomPaint(
-                  painter: _JournalPixelBuddyPainter(
-                    mood: widget.mood,
-                    isDark: journal.isDark,
-                    accent: journal.accent,
-                    devicePixelRatio: dpr,
-                    actionKind:
-                        _reducedMotion ? _BuddyActionKind.none : _activeAction,
-                    actionProgress:
-                        _reducedMotion ? 0.0 : _actionController.value,
-                    peekSign: _peekSign,
-                    syncTick: _reducedMotion ? 0 : _effectiveSyncTick,
-                    jumpOffset: _reducedMotion ? 0.0 : _jumpController.value,
-                  ),
-                ),
-              ),
-            ),
+            child: paintBox,
           ),
         ),
       ),
@@ -583,10 +658,14 @@ class _JournalPixelBuddyPainter extends CustomPainter {
     var leg4Row = 9; // col 10
     var bothEyesSquint = false;
     var rightEyeSquint = false;
+    var wideEyes = false;
+    var blushCheeks = false;
     var scaleX = 1.0;
     var scaleY = 1.0;
     var hopPx = 0.0;
     var leanSkew = 0.0;
+    var rotationRad = 0.0;
+    var sitDanglePhase = -1;
 
     if (mood == JournalPixelBuddyMood.syncing) {
       leanSkew = -0.07;
@@ -663,6 +742,84 @@ class _JournalPixelBuddyPainter extends CustomPainter {
             leftArmRow = 3;
             rightArmRow = 3;
           }
+        case _BuddyActionKind.sitDangle:
+          dy = 1;
+          leftArmRow = 6;
+          rightArmRow = 6;
+          sitDanglePhase = (t * 4).floor() % 2;
+        case _BuddyActionKind.napZzz:
+          dy = 1;
+          scaleX = 1.07;
+          scaleY = 0.86;
+          bothEyesSquint = true;
+          leg1Row = 8;
+          leg2Row = 8;
+          leg3Row = 8;
+          leg4Row = 8;
+          leftArmRow = 6;
+          rightArmRow = 6;
+        case _BuddyActionKind.climbEdge:
+          final step = (t * 4).floor() % 2;
+          eyeDx = peekSign >= 0 ? 1 : -1;
+          if (peekSign >= 0) {
+            rightArmRow = step == 0 ? 3 : 4;
+            leftArmRow = 5;
+          } else {
+            leftArmRow = step == 0 ? 3 : 4;
+            rightArmRow = 5;
+          }
+          if (step == 0) {
+            leg1Row = 8;
+            leg3Row = 8;
+          } else {
+            leg2Row = 8;
+            leg4Row = 8;
+          }
+          dy = step == 0 ? 0 : -1;
+        case _BuddyActionKind.hangSlipFlip:
+          if (t < 0.32) {
+            leftArmRow = 2;
+            rightArmRow = 2;
+            hopPx = 0.6 * cell * (t / 0.32);
+          } else if (t < 0.80) {
+            final ft = (t - 0.32) / 0.48;
+            rotationRad = 2 * math.pi * ft;
+            hopPx = -0.9 * cell * math.sin(math.pi * ft);
+          } else {
+            final rt = (t - 0.80) / 0.20;
+            final s = math.sin(math.pi * rt);
+            scaleX = 1.0 + 0.08 * s;
+            scaleY = 1.0 - 0.10 * s;
+          }
+        case _BuddyActionKind.petSquint:
+          final s = math.sin(math.pi * t);
+          scaleX = 1.0 + 0.06 * s;
+          scaleY = 1.0 - 0.08 * s;
+          bothEyesSquint = true;
+          blushCheeks = true;
+        case _BuddyActionKind.grabbedFlail:
+          final flail = (t * 8).floor() % 2;
+          wideEyes = true;
+          leanSkew = 0.07 * math.sin(t * 4 * math.pi);
+          hopPx = -0.4 * cell;
+          leftArmRow = flail == 0 ? 3 : 4;
+          rightArmRow = flail == 0 ? 4 : 3;
+          if (flail == 0) {
+            leg1Row = 8;
+            leg4Row = 8;
+          } else {
+            leg2Row = 8;
+            leg3Row = 8;
+          }
+        case _BuddyActionKind.tsunderePuff:
+          final s = math.sin(math.pi * t);
+          hopPx = -0.55 * cell * s;
+          scaleX = 1.0 + 0.05 * s;
+          scaleY = 1.0 + 0.04 * s;
+          leftArmRow = 4;
+          rightArmRow = 4;
+          blushCheeks = true;
+          eyeDx = -1;
         case _BuddyActionKind.none:
           break;
       }
@@ -695,12 +852,17 @@ class _JournalPixelBuddyPainter extends CustomPainter {
     }
 
     final hasCanvasTransform =
-        leanSkew != 0.0 || scaleX != 1.0 || scaleY != 1.0;
+        leanSkew != 0.0 || scaleX != 1.0 || scaleY != 1.0 || rotationRad != 0.0;
     if (hasCanvasTransform) {
       canvas.save();
       final pivotX = originX + _gridCols * cell * 0.5;
-      final pivotY = effectiveOriginY + 11 * cell;
+      final pivotY = rotationRad != 0.0
+          ? effectiveOriginY + 6 * cell
+          : effectiveOriginY + 11 * cell;
       canvas.translate(pivotX, pivotY);
+      if (rotationRad != 0.0) {
+        canvas.rotate(rotationRad);
+      }
       if (leanSkew != 0.0) {
         canvas.skew(leanSkew, 0.0);
       }
@@ -735,8 +897,11 @@ class _JournalPixelBuddyPainter extends CustomPainter {
     drawCell(12 + dx, rightArmRow + 1 + dy, shadowColor);
 
     // 4 symmetrical discrete short legs: left pair (3, 5) + center gap (6, 7) + right pair (8, 10).
-    void drawLeg(int col, int legRow) {
-      if (legRow < 9) {
+    void drawLeg(int col, int legRow, {bool dangleExtend = false}) {
+      if (dangleExtend) {
+        drawCell(col + dx, legRow + dy, bodyColor);
+        drawCell(col + dx, legRow + 1 + dy, shadowColor);
+      } else if (legRow < 9) {
         // Lifted 1 row: leave Row 10 clear and tint Row 9 shadow.
         drawCell(col + dx, legRow + 1 + dy, shadowColor);
       } else {
@@ -745,10 +910,17 @@ class _JournalPixelBuddyPainter extends CustomPainter {
       }
     }
 
-    drawLeg(3, leg1Row);
-    drawLeg(5, leg2Row);
-    drawLeg(8, leg3Row);
-    drawLeg(10, leg4Row);
+    if (sitDanglePhase >= 0) {
+      drawLeg(3, 9, dangleExtend: sitDanglePhase == 0);
+      drawLeg(5, 8, dangleExtend: sitDanglePhase == 1);
+      drawLeg(8, 9, dangleExtend: sitDanglePhase == 0);
+      drawLeg(10, 8, dangleExtend: sitDanglePhase == 1);
+    } else {
+      drawLeg(3, leg1Row);
+      drawLeg(5, leg2Row);
+      drawLeg(8, leg3Row);
+      drawLeg(10, leg4Row);
+    }
 
     // Symmetrical 1x2 eyes at cols 4 and 9, rows 4..5 (shifted by eyeDx on peek).
     final leftEyeCol = 4 + dx + eyeDx;
@@ -763,11 +935,24 @@ class _JournalPixelBuddyPainter extends CustomPainter {
       drawCell(leftEyeCol, eyeTopRow, eyeColor);
       drawCell(leftEyeCol, eyeBottomRow, eyeColor);
       drawSquintEye(rightEyeCol, eyeBottomRow);
+    } else if (wideEyes) {
+      drawCell(leftEyeCol, eyeTopRow, eyeColor);
+      drawCell(leftEyeCol, eyeBottomRow, eyeColor);
+      drawCell(rightEyeCol, eyeTopRow, eyeColor);
+      drawCell(rightEyeCol, eyeBottomRow, eyeColor);
+      drawCell(leftEyeCol + 1, eyeTopRow, highlightColor);
+      drawCell(rightEyeCol - 1, eyeTopRow, highlightColor);
     } else {
       drawCell(leftEyeCol, eyeTopRow, eyeColor);
       drawCell(leftEyeCol, eyeBottomRow, eyeColor);
       drawCell(rightEyeCol, eyeTopRow, eyeColor);
       drawCell(rightEyeCol, eyeBottomRow, eyeColor);
+    }
+
+    if (blushCheeks) {
+      final blush = heartColor.withValues(alpha: 0.65);
+      drawCell(3 + dx, 6 + dy, blush);
+      drawCell(10 + dx, 6 + dy, blush);
     }
 
     if (hasCanvasTransform) {
@@ -787,7 +972,8 @@ class _JournalPixelBuddyPainter extends CustomPainter {
     // Rising & fading floating particles for combos, cheer, and allClear idle sparkle.
     if (mood != JournalPixelBuddyMood.syncing && t > 0.0 && t < 1.0) {
       final alpha = math.sin(math.pi * t).clamp(0.0, 1.0);
-      final maxParticleBottom = py(3) - math.max(1.0 / dpr, snap(cell * 0.25));
+      final maxParticleBottom =
+          py(3 + dy) - math.max(1.0 / dpr, snap(cell * 0.25));
       if (actionKind == _BuddyActionKind.tapDoubleStar ||
           actionKind == _BuddyActionKind.cheer ||
           actionKind == _BuddyActionKind.idleAllClearStar) {
@@ -814,7 +1000,8 @@ class _JournalPixelBuddyPainter extends CustomPainter {
               snap(floatX - sCell), snap(floatY + sCell), sCell, sCell),
           paint,
         );
-      } else if (actionKind == _BuddyActionKind.tapDoubleHeart) {
+      } else if (actionKind == _BuddyActionKind.tapDoubleHeart ||
+          actionKind == _BuddyActionKind.petSquint) {
         final sub = math.max(1.0 / dpr, snap(cell * 0.55));
         final heartBottomY = math.min(
           maxParticleBottom,
@@ -841,6 +1028,62 @@ class _JournalPixelBuddyPainter extends CustomPainter {
             Rect.fromLTWH(
               snap(baseX + hx * sub),
               snap(baseY + hy * sub),
+              sub,
+              sub,
+            ),
+            paint,
+          );
+        }
+      } else if (actionKind == _BuddyActionKind.napZzz) {
+        final sub = math.max(1.0 / dpr, snap(cell * 0.55));
+        final zBottomY = math.min(
+          maxParticleBottom,
+          snap(effectiveOriginY + (3.2 - 1.5 * t) * cell),
+        );
+        final baseX = snap(originX + 10.0 * cell);
+        final baseY = snap(zBottomY - 3 * sub);
+        paint.color = accent.withValues(alpha: alpha);
+        const zOffsets = <(int, int)>[
+          (0, 0),
+          (1, 0),
+          (2, 0),
+          (1, 1),
+          (0, 2),
+          (1, 2),
+          (2, 2),
+        ];
+        for (final (zx, zy) in zOffsets) {
+          canvas.drawRect(
+            Rect.fromLTWH(
+              snap(baseX + zx * sub),
+              snap(baseY + zy * sub),
+              sub,
+              sub,
+            ),
+            paint,
+          );
+        }
+      } else if (actionKind == _BuddyActionKind.tsunderePuff) {
+        final sub = math.max(1.0 / dpr, snap(cell * 0.6));
+        final puffBottomY = math.min(
+          maxParticleBottom,
+          snap(effectiveOriginY + (2.6 - 0.8 * t) * cell),
+        );
+        final baseX = snap(originX + 10.0 * cell);
+        final baseY = snap(puffBottomY - 3 * sub);
+        paint.color = heartColor.withValues(alpha: alpha);
+        const puffOffsets = <(int, int)>[
+          (0, 0),
+          (2, 0),
+          (1, 1),
+          (0, 2),
+          (2, 2),
+        ];
+        for (final (pxOffset, pyOffset) in puffOffsets) {
+          canvas.drawRect(
+            Rect.fromLTWH(
+              snap(baseX + pxOffset * sub),
+              snap(baseY + pyOffset * sub),
               sub,
               sub,
             ),

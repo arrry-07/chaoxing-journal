@@ -14,6 +14,15 @@ enum JournalThemeMode {
   final String label;
 }
 
+enum ClawdVisibilityMode {
+  allPrimaryTabs('全部主页面'),
+  homeOnly('仅首页'),
+  off('关闭');
+
+  const ClawdVisibilityMode(this.label);
+  final String label;
+}
+
 class DisplayPreferences {
   const DisplayPreferences({
     this.compact = false,
@@ -22,12 +31,18 @@ class DisplayPreferences {
     this.themeMode = JournalThemeMode.system,
     this.soundEnabled = true,
     this.hapticsEnabled = true,
-    this.showPixelBuddy = true,
+    this.clawdVisibility = ClawdVisibilityMode.allPrimaryTabs,
   });
   final bool compact, countdown;
   final WidgetRange widgetRange;
   final JournalThemeMode themeMode;
-  final bool soundEnabled, hapticsEnabled, showPixelBuddy;
+  final bool soundEnabled, hapticsEnabled;
+  final ClawdVisibilityMode clawdVisibility;
+
+  bool get showPixelBuddy => clawdVisibility != ClawdVisibilityMode.off;
+
+  bool get showClawdOnSecondaryTabs =>
+      clawdVisibility == ClawdVisibilityMode.allPrimaryTabs;
 
   DisplayPreferences copyWith({
     bool? compact,
@@ -36,6 +51,7 @@ class DisplayPreferences {
     JournalThemeMode? themeMode,
     bool? soundEnabled,
     bool? hapticsEnabled,
+    ClawdVisibilityMode? clawdVisibility,
     bool? showPixelBuddy,
   }) =>
       DisplayPreferences(
@@ -45,7 +61,12 @@ class DisplayPreferences {
         themeMode: themeMode ?? this.themeMode,
         soundEnabled: soundEnabled ?? this.soundEnabled,
         hapticsEnabled: hapticsEnabled ?? this.hapticsEnabled,
-        showPixelBuddy: showPixelBuddy ?? this.showPixelBuddy,
+        clawdVisibility: clawdVisibility ??
+            (showPixelBuddy == null
+                ? this.clawdVisibility
+                : (showPixelBuddy
+                    ? ClawdVisibilityMode.allPrimaryTabs
+                    : ClawdVisibilityMode.off)),
       );
 
   String encode() => jsonEncode({
@@ -55,8 +76,18 @@ class DisplayPreferences {
         'themeMode': themeMode.name,
         'sound': soundEnabled,
         'haptics': hapticsEnabled,
-        'pixelBuddy': showPixelBuddy,
+        'pixelBuddy': switch (clawdVisibility) {
+          ClawdVisibilityMode.allPrimaryTabs => 'all',
+          ClawdVisibilityMode.homeOnly => 'homeOnly',
+          ClawdVisibilityMode.off => 'off',
+        },
       });
+
+  static ClawdVisibilityMode _decodeClawdVisibility(Object? raw) {
+    if (raw == false || raw == 'off') return ClawdVisibilityMode.off;
+    if (raw == 'homeOnly') return ClawdVisibilityMode.homeOnly;
+    return ClawdVisibilityMode.allPrimaryTabs;
+  }
 
   factory DisplayPreferences.decode(String? raw) {
     try {
@@ -74,7 +105,7 @@ class DisplayPreferences {
         ),
         soundEnabled: j['sound'] != false,
         hapticsEnabled: j['haptics'] != false,
-        showPixelBuddy: j['pixelBuddy'] != false,
+        clawdVisibility: _decodeClawdVisibility(j['pixelBuddy']),
       );
     } catch (_) {
       return const DisplayPreferences();
