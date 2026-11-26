@@ -450,7 +450,9 @@ class _CalendarScreenState extends State<CalendarScreen>
           final isOffToday = selected != today ||
               month.year != today.year ||
               month.month != today.month;
-          final busy = _refreshing || widget.store.isLoading;
+          final busy = _refreshing ||
+              widget.store.isLoading ||
+              widget.store.syncReport.phase == SyncPhase.running;
           final effectiveLastSync =
               widget.store.syncReport.lastCurrentSuccessAt ??
                   widget.store.lastSyncAt;
@@ -1065,6 +1067,8 @@ class _CalendarScreenState extends State<CalendarScreen>
                     final bubble = controller.activeBubble;
                     if (!showCameo ||
                         busy ||
+                        controller.isSyncing ||
+                        controller.hasSyncErrorOrPending ||
                         bubble == null ||
                         bubble.tab != ClawdPrimaryTab.calendar) {
                       return const SizedBox.shrink();

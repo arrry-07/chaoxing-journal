@@ -215,7 +215,14 @@ class _ClawdTitleStageState extends State<ClawdTitleStage>
     _isDragging = false;
     _isPetting = false;
     if (clearTransientPose) {
-      widget.controller.clearTransientPose(notify: allowNotify);
+      final controller = widget.controller;
+      final cleared = controller.clearTransientPose(notify: allowNotify);
+      if (cleared && !allowNotify) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          controller.notifyListenersIfAlive();
+        });
+      }
     }
     if (resetToRest && _hasLayout) {
       _currentPos = _restPos;

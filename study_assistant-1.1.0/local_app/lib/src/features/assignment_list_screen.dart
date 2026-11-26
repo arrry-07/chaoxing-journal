@@ -2290,7 +2290,8 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                     return const SizedBox.shrink();
                   }
                   final offset = _scrollOffset.value;
-                  final sliverShowing = offset > 18.0 && showSliverBuddy;
+                  final sliverShowing =
+                      showSliverBuddy && (bubble.fromSliver || offset >= 36.0);
                   final screenWidth = MediaQuery.sizeOf(context).width;
                   final double top;
                   final double minLeft;

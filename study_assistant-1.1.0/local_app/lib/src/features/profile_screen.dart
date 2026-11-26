@@ -45,7 +45,10 @@ class _ProfileScreenState extends State<ProfileScreen>
   ClawdCompanionController? _clawdController;
   ClawdCompanionController? _localClawdController;
   final GlobalKey _cameoKey = GlobalKey();
+  final GlobalKey _titleRowKey = GlobalKey();
   final GlobalKey _stackKey = GlobalKey();
+  final ScrollController _scrollController = ScrollController();
+  final ValueNotifier<double> _scrollOffset = ValueNotifier<double>(0.0);
   final ValueNotifier<Offset> _cameoAnchor =
       ValueNotifier<Offset>(const Offset(156.0, 48.0));
   bool _appResumed = true;
@@ -59,27 +62,64 @@ class _ProfileScreenState extends State<ProfileScreen>
     return _localClawdController ??= ClawdCompanionController();
   }
 
+  double _currentScrollOffset() {
+    if (_scrollController.hasClients &&
+        _scrollController.positions.length == 1) {
+      return _scrollController.offset;
+    }
+    return _scrollOffset.value;
+  }
+
+  void _onScroll() {
+    if (!_scrollController.hasClients ||
+        _scrollController.positions.length != 1) {
+      return;
+    }
+    final raw = _scrollController.offset;
+    if ((raw - _scrollOffset.value).abs() >= 0.5 ||
+        (raw == 0.0 && _scrollOffset.value != 0.0)) {
+      _scrollOffset.value = raw;
+    }
+  }
+
+  void _measureCameoAnchorNow() {
+    if (!mounted) return;
+    final cameoBox = _cameoKey.currentContext?.findRenderObject() as RenderBox?;
+    final stackBox = _stackKey.currentContext?.findRenderObject() as RenderBox?;
+    if (cameoBox == null ||
+        !cameoBox.attached ||
+        !cameoBox.hasSize ||
+        stackBox == null ||
+        !stackBox.attached ||
+        !stackBox.hasSize) {
+      return;
+    }
+    final scrollOffset = _currentScrollOffset();
+    if ((scrollOffset - _scrollOffset.value).abs() >= 0.5 ||
+        (scrollOffset == 0.0 && _scrollOffset.value != 0.0)) {
+      _scrollOffset.value = scrollOffset;
+    }
+    final topLeft = cameoBox.localToGlobal(Offset.zero, ancestor: stackBox);
+    var bottomInStack = topLeft.dy + cameoBox.size.height;
+    final rowBox =
+        _titleRowKey.currentContext?.findRenderObject() as RenderBox?;
+    if (rowBox != null && rowBox.attached && rowBox.hasSize) {
+      final rowTopLeft = rowBox.localToGlobal(Offset.zero, ancestor: stackBox);
+      bottomInStack =
+          math.max(bottomInStack, rowTopLeft.dy + rowBox.size.height);
+    }
+    final nextAtZero = Offset(
+      topLeft.dx + cameoBox.size.width * 0.5,
+      bottomInStack + scrollOffset,
+    );
+    if ((nextAtZero - _cameoAnchor.value).distance > 0.5) {
+      _cameoAnchor.value = nextAtZero;
+    }
+  }
+
   void _scheduleCameoAnchorMeasure() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      final cameoBox =
-          _cameoKey.currentContext?.findRenderObject() as RenderBox?;
-      final stackBox =
-          _stackKey.currentContext?.findRenderObject() as RenderBox?;
-      if (cameoBox == null ||
-          !cameoBox.hasSize ||
-          stackBox == null ||
-          !stackBox.hasSize) {
-        return;
-      }
-      final topLeft = cameoBox.localToGlobal(Offset.zero, ancestor: stackBox);
-      final next = Offset(
-        topLeft.dx + cameoBox.size.width * 0.5,
-        topLeft.dy + cameoBox.size.height,
-      );
-      if ((next - _cameoAnchor.value).distance > 0.5) {
-        _cameoAnchor.value = next;
-      }
+      _measureCameoAnchorNow();
     });
   }
 
@@ -133,6 +173,7 @@ class _ProfileScreenState extends State<ProfileScreen>
     _lastAccountEpoch = widget.store.accountEpoch;
     _lastAccount = widget.store.account;
     widget.store.addListener(_onStoreChanged);
+    _scrollController.addListener(_onScroll);
     WidgetsBinding.instance.addObserver(this);
   }
 
@@ -173,6 +214,9 @@ class _ProfileScreenState extends State<ProfileScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     widget.store.removeListener(_onStoreChanged);
+    _scrollController.removeListener(_onScroll);
+    _scrollController.dispose();
+    _scrollOffset.dispose();
     _cameoAnchor.dispose();
     _localClawdController?.dispose();
     super.dispose();
@@ -209,31 +253,39 @@ class _ProfileScreenState extends State<ProfileScreen>
         return Stack(
           key: _stackKey,
           children: [
-            NotificationListener<ScrollUpdateNotification>(
+            NotificationListener<ScrollNotification>(
               onNotification: (notification) {
-                if (notification.depth == 0 &&
+                if (notification.depth != 0) return false;
+                if (notification is ScrollUpdateNotification &&
                     (notification.scrollDelta ?? 0.0).abs() > 0.5) {
                   final active = controller.activeBubble;
                   if (active != null && active.tab == ClawdPrimaryTab.profile) {
                     controller.dismissBubble();
                   }
+                } else if (notification is ScrollEndNotification) {
+                  _measureCameoAnchorNow();
                 }
                 return false;
               },
               child: ListView(
+                controller: _scrollController,
                 padding: EdgeInsets.zero,
                 children: [
                   _ProfileHeader(
                     displayName: store.profileDisplayName,
                     avatarUrl: store.profileAvatarUrl,
                     accountLabel: _maskAccount(store.account),
+                    titleRowKey: _titleRowKey,
                     titleTrailing: showCameo
                         ? KeyedSubtree(
                             key: _cameoKey,
                             child: ClawdTabCameo(
                               key: const ValueKey('profile-pixel-buddy'),
                               controller: controller,
-                              snapshotBuilder: () => profileSnapshot,
+                              snapshotBuilder: () {
+                                _measureCameoAnchorNow();
+                                return profileSnapshot;
+                              },
                             ),
                           )
                         : null,
@@ -457,7 +509,9 @@ class _ProfileScreenState extends State<ProfileScreen>
             ),
             Positioned.fill(
               child: AnimatedBuilder(
-                animation: Listenable.merge([controller, _cameoAnchor]),
+                animation: Listenable.merge(
+                  [controller, _cameoAnchor, _scrollOffset],
+                ),
                 builder: (context, _) {
                   final bubble = controller.activeBubble;
                   if (!showCameo ||
@@ -477,7 +531,10 @@ class _ProfileScreenState extends State<ProfileScreen>
                     bubbleKey: const ValueKey('clawd-speech-bubble'),
                     message: bubble,
                     anchorX: anchor.dx,
-                    top: math.max(8.0, anchor.dy + 4.0),
+                    top: math.max(
+                      8.0,
+                      anchor.dy - _scrollOffset.value + 4.0,
+                    ),
                     minLeft: 18.0,
                     safeRight: math.max(18.0, screenW - 18.0),
                     maxWidth: maxW,
@@ -583,12 +640,14 @@ class _ProfileHeader extends StatelessWidget {
     required this.avatarUrl,
     required this.accountLabel,
     this.titleTrailing,
+    this.titleRowKey,
   });
 
   final String displayName;
   final String? avatarUrl;
   final String accountLabel;
   final Widget? titleTrailing;
+  final Key? titleRowKey;
 
   @override
   Widget build(BuildContext context) {
@@ -600,6 +659,7 @@ class _ProfileHeader extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            key: titleRowKey,
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [

@@ -714,6 +714,14 @@ class ClawdCompanionController extends ChangeNotifier {
     return true;
   }
 
+  /// Safely notifies listeners outside build/layout (e.g., from a post-frame
+  /// callback) when this controller has not been disposed.
+  void notifyListenersIfAlive() {
+    if (!_disposed) {
+      notifyListeners();
+    }
+  }
+
   void resetForAccountChange() {
     if (_disposed) return;
     _comboResetTimer?.cancel();

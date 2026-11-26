@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -1163,11 +1165,24 @@ void main() {
       expectSafeBounds('initial-rest');
 
       for (var cycle = 0; cycle < 6; cycle++) {
-        await tester.pump(const Duration(milliseconds: 4550));
-        for (var frame = 0; frame < 8; frame++) {
-          await tester.pump(const Duration(milliseconds: 120));
+        final beforeRect = tester.getRect(buddyFinder);
+        final delayMs = 2600 + (cycle * 439) % 1901;
+        await tester.pump(Duration(milliseconds: delayMs - 250));
+        var maxDelta = 0.0;
+        for (var frame = 0; frame < 16; frame++) {
+          await tester.pump(const Duration(milliseconds: 80));
           expectSafeBounds('cycle-$cycle-frame-$frame');
+          final curRect = tester.getRect(buddyFinder);
+          maxDelta = math.max(
+            maxDelta,
+            (curRect.center - beforeRect.center).distance,
+          );
         }
+        expect(
+          maxDelta,
+          greaterThan(1.5),
+          reason: 'cycle-$cycle: Clawd did not displace during flight',
+        );
         await tester.pumpAndSettle();
         expectSafeBounds('cycle-$cycle-settled');
       }
@@ -1214,10 +1229,16 @@ void main() {
       await tester.pump();
       expect(controller.transientPose, ClawdTransientPose.wave);
 
+      var postDegradeNotifications = 0;
+      void countControllerNotify() => postDegradeNotifications++;
+      controller.addListener(countControllerNotify);
+      addTearDown(() => controller.removeListener(countControllerNotify));
+
       router.go('/assignments?scope=noDeadline');
       await tester.pump();
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
+      expect(postDegradeNotifications, greaterThanOrEqualTo(1));
       expect(
         tester
             .widget<ClawdTitleStage>(find.byType(ClawdTitleStage))
@@ -1361,6 +1382,286 @@ void main() {
         await tester.pump();
         expect(controller.isSyncing, isFalse);
       }
+
+      // 4. Calendar hides active bubble when SyncPhase.running is active.
+      await tester.tap(find.text('日历'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('calendar-pixel-buddy')));
+      await tester.pump();
+      expect(find.byKey(const ValueKey('clawd-speech-bubble')), findsOneWidget);
+      store.syncReport = const SyncReport(phase: SyncPhase.running);
+      store.notifyListeners();
+      await tester.pump();
+      expect(find.byKey(const ValueKey('clawd-speech-bubble')), findsNothing);
+      store.syncReport =
+          SyncReport(phase: SyncPhase.success, lastDataSuccessAt: now);
+      store.notifyListeners();
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets(
+        'ClawdTitleStage petting lingers petSquint at ~300ms after release and resets to normal after 650ms with zero settle timeout',
+        (tester) async {
+      tester.view.physicalSize = const Size(412, 915);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      final now = DateTime.utc(2026, 11, 26, 2, 0);
+      final store = await _createSeededStore(now: now);
+      addTearDown(store.dispose);
+      final router = _buildShellRouter(store, clock: () => now);
+      addTearDown(router.dispose);
+
+      await tester.pumpWidget(
+        MaterialApp.router(
+          theme: StudyAssistantTheme.light,
+          routerConfig: router,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final buddyFinder = find.byKey(const ValueKey('home-pixel-buddy'));
+      final gesture = await tester.startGesture(tester.getCenter(buddyFinder));
+      await tester.pump(const Duration(milliseconds: 600));
+      expect(
+        tester.widget<JournalPixelBuddy>(buddyFinder).poseOverride,
+        JournalPixelBuddyPose.petSquint,
+      );
+
+      await gesture.up();
+      await tester.pump();
+      expect(
+        tester.widget<JournalPixelBuddy>(buddyFinder).poseOverride,
+        JournalPixelBuddyPose.petSquint,
+      );
+
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(
+        tester.widget<JournalPixelBuddy>(buddyFinder).poseOverride,
+        JournalPixelBuddyPose.petSquint,
+      );
+
+      await tester.pump(const Duration(milliseconds: 350));
+      expect(
+        tester.widget<JournalPixelBuddy>(buddyFinder).poseOverride,
+        JournalPixelBuddyPose.normal,
+      );
+
+      await tester.pump(const Duration(milliseconds: 2600));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets(
+        'Stats & Profile cameo bubbles stay anchored below cameo and clear of title after scroll+rebuild+top and 24dp micro-scroll, and home 24dp micro-scroll avoids sync status',
+        (tester) async {
+      tester.view.physicalSize = const Size(360, 560);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      final now = DateTime.utc(2026, 11, 26, 2, 0);
+      final store = await _createSeededStore(
+        now: now,
+        assignments: [
+          for (var i = 0; i < 12; i++)
+            Assignment(
+              id: 'cx:work:1:${10 + i}:scroll-$i',
+              courseName: '课程$i',
+              title: '作业$i',
+              deadlineAt: now.add(Duration(days: i + 1)),
+              deadlineTrusted: true,
+              requirementsText: '',
+              status: 'pending',
+              lastSyncedAt: now,
+            ),
+        ],
+      );
+      addTearDown(store.dispose);
+
+      final router = _buildShellRouter(store, clock: () => now);
+      addTearDown(router.dispose);
+
+      await tester.pumpWidget(
+        MaterialApp.router(
+          theme: StudyAssistantTheme.light,
+          routerConfig: router,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Home micro-scroll 24dp (within 18..36dp transition band) keeps bubble below home-sync-status.
+      await tester.tap(find.byKey(const ValueKey('home-pixel-buddy')));
+      await tester.pump();
+      await tester.drag(find.byType(Scrollable).first, const Offset(0, -42));
+      await tester.pumpAndSettle();
+      final homeScroll =
+          tester.state<ScrollableState>(find.byType(Scrollable).first).position;
+      expect(homeScroll.pixels, inInclusiveRange(20.0, 28.0));
+      final homeBubbleRect =
+          tester.getRect(find.byKey(const ValueKey('clawd-speech-bubble')));
+      final homeStatusRect =
+          tester.getRect(find.byKey(const ValueKey('home-sync-status')));
+      expect(homeBubbleRect.overlaps(homeStatusRect), isFalse);
+      expect(homeBubbleRect.top, greaterThanOrEqualTo(homeStatusRect.bottom));
+      await tester.tap(find.byKey(const ValueKey('clawd-speech-bubble')));
+      await tester.pumpAndSettle();
+
+      Future<void> verifyCameoAndTitleBounds(
+        String label, {
+        required Finder titleFinder,
+        required Finder cameoFinder,
+      }) async {
+        final bubbleFinder = find.byKey(const ValueKey('clawd-speech-bubble'));
+        expect(bubbleFinder, findsOneWidget, reason: '$label: bubble missing');
+        final bubbleRect = tester.getRect(bubbleFinder);
+        final titleRect = tester.getRect(titleFinder);
+        final cameoRect = tester.getRect(cameoFinder);
+        expect(
+          bubbleRect.top,
+          greaterThanOrEqualTo(cameoRect.bottom + 2.0),
+          reason:
+              '$label: bubble top=${bubbleRect.top} < cameo bottom=${cameoRect.bottom}',
+        );
+        expect(
+          bubbleRect.overlaps(titleRect),
+          isFalse,
+          reason: '$label: bubble=$bubbleRect overlaps title=$titleRect',
+        );
+        expect(
+          bubbleRect.overlaps(cameoRect),
+          isFalse,
+          reason: '$label: bubble=$bubbleRect overlaps cameo=$cameoRect',
+        );
+      }
+
+      // StatsScreen: scroll 48dp -> rebuild via term filter -> scroll back to top -> tap cameo.
+      await tester.tap(find.text('统计'));
+      await tester.pumpAndSettle();
+      final statsListFinder = find.byType(ListView).first;
+      final statsScroll = tester
+          .state<ScrollableState>(
+            find
+                .descendant(
+                  of: statsListFinder,
+                  matching: find.byType(Scrollable),
+                )
+                .first,
+          )
+          .position;
+      await tester.timedDrag(
+        statsListFinder,
+        const Offset(0, -48),
+        const Duration(milliseconds: 500),
+      );
+      await tester.pumpAndSettle();
+      expect(statsScroll.pixels, inInclusiveRange(44.0, 52.0));
+
+      await tester.tap(find.byKey(const ValueKey('stats-term-scope-allTerms')));
+      await tester.pumpAndSettle();
+
+      await tester.drag(statsListFinder, const Offset(0, 120));
+      await tester.pumpAndSettle();
+      expect(statsScroll.pixels, 0.0);
+
+      final statsTitleFinder = find.text('课业统计');
+      final statsCameoFinder = find.byKey(const ValueKey('stats-pixel-buddy'));
+      await tester.tap(statsCameoFinder);
+      await tester.pumpAndSettle();
+      await verifyCameoAndTitleBounds(
+        'stats-rebuild-top',
+        titleFinder: statsTitleFinder,
+        cameoFinder: statsCameoFinder,
+      );
+      await tester.tap(find.byKey(const ValueKey('clawd-speech-bubble')));
+      await tester.pumpAndSettle();
+
+      // StatsScreen: micro-scroll 24dp from top -> tap cameo.
+      await tester.timedDrag(
+        statsListFinder,
+        const Offset(0, -24),
+        const Duration(milliseconds: 400),
+      );
+      await tester.pumpAndSettle();
+      expect(statsScroll.pixels, inInclusiveRange(20.0, 28.0));
+      await tester.tap(statsCameoFinder);
+      await tester.pumpAndSettle();
+      await verifyCameoAndTitleBounds(
+        'stats-micro-24dp',
+        titleFinder: statsTitleFinder,
+        cameoFinder: statsCameoFinder,
+      );
+      await tester.tap(find.byKey(const ValueKey('clawd-speech-bubble')));
+      await tester.pumpAndSettle();
+
+      // ProfileScreen: scroll 48dp -> rebuild via theme switch -> scroll back to top -> tap cameo.
+      tester.view.physicalSize = const Size(360, 660);
+      await tester.tap(find.text('我的'));
+      await tester.pumpAndSettle();
+      final profileListFinder = find.byType(ListView).first;
+      final profileScroll = tester
+          .state<ScrollableState>(
+            find
+                .descendant(
+                  of: profileListFinder,
+                  matching: find.byType(Scrollable),
+                )
+                .first,
+          )
+          .position;
+      Future<void> dragProfileToOffset(double targetOffset) async {
+        final before = profileScroll.pixels;
+        await tester.timedDragFrom(
+          tester.getTopLeft(profileListFinder) + const Offset(8, 140),
+          Offset(0, before - targetOffset),
+          const Duration(milliseconds: 500),
+        );
+        await tester.pumpAndSettle();
+        expect((profileScroll.pixels - before).abs(), greaterThan(8.0));
+        if ((profileScroll.pixels - targetOffset).abs() > 4.0) {
+          profileScroll.jumpTo(
+            targetOffset.clamp(0.0, profileScroll.maxScrollExtent),
+          );
+          await tester.pumpAndSettle();
+        }
+      }
+
+      await dragProfileToOffset(48.0);
+      expect(profileScroll.pixels, inInclusiveRange(44.0, 52.0));
+
+      await tester.tap(find.text(JournalThemeMode.dark.label));
+      await tester.pumpAndSettle();
+      expect(store.display.themeMode, JournalThemeMode.dark);
+
+      await tester.drag(profileListFinder, const Offset(0, 120));
+      await tester.pumpAndSettle();
+      expect(profileScroll.pixels, 0.0);
+
+      final profileTitleFinder = find.text('我的手帐');
+      final profileCameoFinder =
+          find.byKey(const ValueKey('profile-pixel-buddy'));
+      await tester.tap(profileCameoFinder);
+      await tester.pumpAndSettle();
+      await verifyCameoAndTitleBounds(
+        'profile-rebuild-top',
+        titleFinder: profileTitleFinder,
+        cameoFinder: profileCameoFinder,
+      );
+      await tester.tap(find.byKey(const ValueKey('clawd-speech-bubble')));
+      await tester.pumpAndSettle();
+
+      // ProfileScreen: micro-scroll 24dp from top -> tap cameo.
+      await dragProfileToOffset(24.0);
+      expect(profileScroll.pixels, inInclusiveRange(20.0, 28.0));
+      await tester.tap(profileCameoFinder);
+      await tester.pumpAndSettle();
+      await verifyCameoAndTitleBounds(
+        'profile-micro-24dp',
+        titleFinder: profileTitleFinder,
+        cameoFinder: profileCameoFinder,
+      );
+      await tester.tap(find.byKey(const ValueKey('clawd-speech-bubble')));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
     });
   });
 }
