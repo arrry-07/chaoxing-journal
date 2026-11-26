@@ -67,6 +67,7 @@ class _CalendarScreenState extends State<CalendarScreen>
   late bool _wasAuthenticated;
   bool _appResumed = true;
   bool _tickerEnabled = true;
+  bool _isCurrentRoute = true;
   bool _reducedMotion = false;
 
   ClawdCompanionController _ensureClawdController() {
@@ -118,6 +119,8 @@ class _CalendarScreenState extends State<CalendarScreen>
   void _syncClawdEnvironment({bool notify = true}) {
     final controller = _clawdController;
     if (controller == null) return;
+    final isSharedController = !identical(controller, _localClawdController);
+    if (isSharedController && !_isCurrentRoute) return;
     final busy = _refreshing ||
         widget.store.isLoading ||
         widget.store.syncReport.phase == SyncPhase.running;
@@ -128,7 +131,7 @@ class _CalendarScreenState extends State<CalendarScreen>
     controller.updateEnvironment(
       displayPrefs: widget.store.display,
       appResumed: _appResumed,
-      tickerEnabled: _tickerEnabled,
+      tickerEnabled: isSharedController ? null : _tickerEnabled,
       reducedMotion: _reducedMotion,
       isSyncing: busy,
       hasSyncErrorOrPending: hasError,
@@ -208,6 +211,7 @@ class _CalendarScreenState extends State<CalendarScreen>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    _isCurrentRoute = ModalRoute.of(context)?.isCurrent ?? true;
     _tickerEnabled = TickerMode.valuesOf(context).enabled;
     _reducedMotion = JournalMotion.isReducedMotion(context);
     final scoped = ClawdCompanionScope.maybeOf(context);

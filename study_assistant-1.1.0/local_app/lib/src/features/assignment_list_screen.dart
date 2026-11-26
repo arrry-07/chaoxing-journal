@@ -140,6 +140,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
   ClawdCompanionController? _localClawdController;
   bool _appResumed = true;
   bool _tickerEnabled = true;
+  bool _isCurrentRoute = true;
   bool _reducedMotion = false;
 
   bool get _isBusy =>
@@ -245,11 +246,13 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
   void _syncClawdEnvironment({bool notify = true}) {
     final controller = _clawdController;
     if (controller == null) return;
+    final isSharedController = !identical(controller, _localClawdController);
+    if (isSharedController && !_isCurrentRoute) return;
     final state = _buildHomeClawdState();
     controller.updateEnvironment(
       displayPrefs: store.display,
       appResumed: _appResumed,
-      tickerEnabled: _tickerEnabled,
+      tickerEnabled: isSharedController ? null : _tickerEnabled,
       reducedMotion: _reducedMotion,
       isSyncing: _isBusy,
       hasSyncErrorOrPending: _hasStoreSyncErrorOrPending,
@@ -439,6 +442,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    _isCurrentRoute = ModalRoute.of(context)?.isCurrent ?? true;
     _tickerEnabled = TickerMode.valuesOf(context).enabled;
     _reducedMotion = JournalMotion.isReducedMotion(context);
     final scoped = ClawdCompanionScope.maybeOf(context);
