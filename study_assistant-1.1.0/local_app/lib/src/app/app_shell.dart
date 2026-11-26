@@ -220,7 +220,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     final nextUri = AppShell.currentUriOf(router).toString();
     if (nextUri == _lastKnownUri) return;
     _lastKnownUri = nextUri;
-    final path = AppShell.currentLocationOf(router);
+    _applyClawdRouteState(AppShell.currentLocationOf(router));
+    _resetExitWindow();
+  }
+
+  void _applyClawdRouteState(String path) {
     final tab = switch (path) {
       '/assignments' => ClawdPrimaryTab.home,
       '/calendar' => ClawdPrimaryTab.calendar,
@@ -231,9 +235,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     if (tab != null) {
       _clawdController.handleTabChanged(tab);
     } else {
-      _clawdController.dismissBubble();
+      _clawdController.handleSecondaryRouteEntered();
     }
-    _resetExitWindow();
   }
 
   @override
@@ -268,6 +271,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       ]);
       _lastKnownUri = AppShell.currentUriOf(router).toString();
       _routerListenable!.addListener(_handleRouteChange);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !identical(_boundRouter, router)) return;
+        _applyClawdRouteState(AppShell.currentLocationOf(router));
+      });
     }
     return ListenableBuilder(
       listenable: _routerListenable!,

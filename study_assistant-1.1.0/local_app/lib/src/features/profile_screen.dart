@@ -129,7 +129,7 @@ class _ProfileScreenState extends State<ProfileScreen>
         _lastAccount != widget.store.account) {
       _lastAccountEpoch = widget.store.accountEpoch;
       _lastAccount = widget.store.account;
-      _clawdController?.resetForAccountChange();
+      _localClawdController?.resetForAccountChange();
     }
     _syncClawdEnvironment();
   }
@@ -200,7 +200,7 @@ class _ProfileScreenState extends State<ProfileScreen>
       _lastAccountEpoch = widget.store.accountEpoch;
       _lastAccount = widget.store.account;
       widget.store.addListener(_onStoreChanged);
-      _clawdController?.resetForAccountChange();
+      _localClawdController?.resetForAccountChange();
       _syncClawdEnvironment();
     }
   }

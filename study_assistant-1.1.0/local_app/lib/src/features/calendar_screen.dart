@@ -151,10 +151,6 @@ class _CalendarScreenState extends State<CalendarScreen>
       _lastAccount = widget.store.account;
       _wasAuthenticated = widget.store.isAuthenticated;
       _localClawdController?.resetForAccountChange();
-      if (_clawdController != null &&
-          !identical(_clawdController, _localClawdController)) {
-        _clawdController!.resetForAccountChange();
-      }
     }
     _syncClawdEnvironment();
   }
@@ -232,10 +228,6 @@ class _CalendarScreenState extends State<CalendarScreen>
       _wasAuthenticated = widget.store.isAuthenticated;
       widget.store.addListener(_onStoreChanged);
       _localClawdController?.resetForAccountChange();
-      if (_clawdController != null &&
-          !identical(_clawdController, _localClawdController)) {
-        _clawdController!.resetForAccountChange();
-      }
       _syncClawdEnvironment();
     }
   }

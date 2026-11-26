@@ -429,7 +429,7 @@ void main() {
       expect(find.byKey(bubbleFinder), findsOneWidget);
 
       await tester.tap(find.text('日历'));
-      await tester.pumpAndSettle();
+      await tester.pump();
       final calendarBuddy = find.byKey(const ValueKey('calendar-pixel-buddy'));
       expect(calendarBuddy, findsOneWidget);
       final calendarController =
@@ -441,6 +441,32 @@ void main() {
       await tester.pump();
       expect(find.byKey(bubbleFinder), findsOneWidget);
       expect(calendarController.activeBubble?.tab, ClawdPrimaryTab.calendar);
+      final calendarTitleRect = tester.getRect(find.text('课业日历'));
+      final calendarBuddyRect = tester.getRect(calendarBuddy);
+      final calendarBubbleRect = tester.getRect(find.byKey(bubbleFinder));
+      // The keyed rect includes the 6dp upward pointer, so compare the pill
+      // body top against the title to prove the text itself is not covered.
+      final calendarPillTop = calendarBubbleRect.top + 6.0;
+      expect(
+        calendarPillTop,
+        greaterThanOrEqualTo(calendarTitleRect.bottom + 2.0 - 0.1),
+      );
+      expect(
+        calendarPillTop,
+        lessThanOrEqualTo(calendarTitleRect.bottom + 12.0),
+      );
+      expect(
+        calendarPillTop,
+        greaterThanOrEqualTo(calendarBuddyRect.bottom - 0.1),
+      );
+      expect(
+        calendarBubbleRect.top,
+        lessThanOrEqualTo(calendarBuddyRect.bottom + 8.0),
+      );
+      expect(
+        (calendarBubbleRect.center.dx - calendarBuddyRect.center.dx).abs(),
+        lessThanOrEqualTo(4.0),
+      );
       expect(
         find.descendant(
           of: find.byKey(bubbleFinder),
@@ -450,7 +476,7 @@ void main() {
       );
 
       await tester.tap(find.text('统计'));
-      await tester.pumpAndSettle();
+      await tester.pump();
       final statsBuddy = find.byKey(const ValueKey('stats-pixel-buddy'));
       expect(statsBuddy, findsOneWidget);
       final statsController =
@@ -461,6 +487,7 @@ void main() {
       await tester.tap(statsBuddy);
       await tester.pump();
       expect(find.byKey(bubbleFinder), findsOneWidget);
+      expect(statsController.activeBubble?.tab, ClawdPrimaryTab.stats);
       final statsTitleBottom = tester.getRect(find.text('课业统计')).bottom;
       final statsBuddyBottom = tester.getRect(statsBuddy).bottom;
       final statsBubbleRect = tester.getRect(find.byKey(bubbleFinder));
@@ -474,7 +501,7 @@ void main() {
       );
 
       await tester.tap(find.text('我的'));
-      await tester.pumpAndSettle();
+      await tester.pump();
       final profileBuddy = find.byKey(const ValueKey('profile-pixel-buddy'));
       expect(profileBuddy, findsOneWidget);
       final profileController =
@@ -485,6 +512,7 @@ void main() {
       await tester.tap(profileBuddy);
       await tester.pump();
       expect(find.byKey(bubbleFinder), findsOneWidget);
+      expect(profileController.activeBubble?.tab, ClawdPrimaryTab.profile);
       final profileTitleBottom = tester.getRect(find.text('我的手帐')).bottom;
       final profileBuddyBottom = tester.getRect(profileBuddy).bottom;
       final profileBubbleRect = tester.getRect(find.byKey(bubbleFinder));
@@ -498,7 +526,7 @@ void main() {
       );
 
       await tester.tap(find.text('首页'));
-      await tester.pumpAndSettle();
+      await tester.pump();
       final homeBuddy = find.byKey(const ValueKey('home-pixel-buddy'));
       expect(homeBuddy, findsOneWidget);
       final homeController = ClawdCompanionScope.of(tester.element(homeBuddy));
@@ -508,6 +536,7 @@ void main() {
       await tester.tap(homeBuddy);
       await tester.pump();
       expect(find.byKey(bubbleFinder), findsOneWidget);
+      expect(homeController.activeBubble?.tab, ClawdPrimaryTab.home);
       final homeBubbleRect = tester.getRect(find.byKey(bubbleFinder));
       final syncStatusRect =
           tester.getRect(find.byKey(const ValueKey('home-sync-status')));
@@ -515,6 +544,75 @@ void main() {
         homeBubbleRect.top,
         greaterThanOrEqualTo(syncStatusRect.bottom + 2.0 - 0.1),
       );
+    });
+
+    testWidgets(
+        'secondary routes pause proactive bubbles and resume scheduling on pop',
+        (tester) async {
+      tester.view.physicalSize = const Size(412, 915);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      final now = DateTime.utc(2026, 11, 26, 2, 0);
+      final store = await _createSeededStore(
+        now: now,
+        assignments: [
+          _work(
+            'today-1',
+            title: '主动冒泡暂停回归作业',
+            due: now.add(const Duration(hours: 4)),
+            syncedAt: now,
+          ),
+        ],
+      );
+      addTearDown(store.dispose);
+
+      final router = _buildShellRouter(store, clock: () => now);
+      addTearDown(router.dispose);
+
+      await tester.pumpWidget(
+        MaterialApp.router(
+          theme: StudyAssistantTheme.light,
+          routerConfig: router,
+        ),
+      );
+      await tester.pump();
+
+      final homeBuddy = find.byKey(const ValueKey('home-pixel-buddy'));
+      expect(homeBuddy, findsOneWidget);
+      final controller = ClawdCompanionScope.of(tester.element(homeBuddy));
+      final bubbleIds = <int>{};
+      ClawdSpeechMessage? lastBubble;
+      void recordBubble() {
+        final bubble = controller.activeBubble;
+        if (bubble != null && bubble.id != lastBubble?.id) {
+          lastBubble = bubble;
+          bubbleIds.add(bubble.id);
+        }
+      }
+
+      controller.addListener(recordBubble);
+      addTearDown(() => controller.removeListener(recordBubble));
+
+      // Push a secondary route inside the initial 3.2s proactive window.
+      router.push('/agenda');
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 4));
+      expect(controller.activeBubble, isNull);
+      expect(find.byKey(const ValueKey('clawd-speech-bubble')), findsNothing);
+      expect(bubbleIds, isEmpty);
+
+      // Popping back to home resumes the schedule without a consumed cooldown.
+      router.pop();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 3300));
+      expect(bubbleIds.length, 1);
+      expect(controller.activeBubble, isNotNull);
+      expect(controller.activeBubble?.tab, ClawdPrimaryTab.home);
+      expect(find.byKey(const ValueKey('clawd-speech-bubble')), findsOneWidget);
+      expect(tester.takeException(), isNull);
+
+      await tester.pump(const Duration(milliseconds: 2600));
     });
   });
 

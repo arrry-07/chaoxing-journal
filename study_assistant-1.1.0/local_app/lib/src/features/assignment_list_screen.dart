@@ -317,7 +317,10 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
     setState(() {
       _completingManualIds.add(entryId);
     });
-    _ensureClawdController().triggerCheer();
+    final controller = _ensureClawdController();
+    if (identical(controller, _localClawdController) || _isCurrentRoute) {
+      controller.triggerCheer();
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_completingManualIds.contains(entryId)) return;
       _completingManualTimers.remove(entryId)?.cancel();
@@ -348,7 +351,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
     if (_feedbackEpoch != store.accountEpoch ||
         _feedbackAccount != store.account) {
       _feedback.dismiss();
-      _clawdController?.resetForAccountChange();
+      _localClawdController?.resetForAccountChange();
       _clearCompletingManual();
       _pinPulseByKey.clear();
       _preExamStripFilters = null;
@@ -411,7 +414,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
     if (oldWidget.store != store) {
       oldWidget.store.removeListener(_onStoreChanged);
       _feedback.dismiss();
-      _clawdController?.resetForAccountChange();
+      _localClawdController?.resetForAccountChange();
       _clearCompletingManual();
       _pinPulseByKey.clear();
       _feedbackEpoch = store.accountEpoch;

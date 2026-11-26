@@ -190,7 +190,7 @@ class _StatsScreenState extends State<StatsScreen> with WidgetsBindingObserver {
     if (_feedbackEpoch != widget.store.accountEpoch ||
         _feedbackAccount != widget.store.account) {
       _feedback.dismiss();
-      _clawdController?.resetForAccountChange();
+      _localClawdController?.resetForAccountChange();
       _feedbackEpoch = widget.store.accountEpoch;
       _feedbackAccount = widget.store.account;
     }
@@ -236,7 +236,7 @@ class _StatsScreenState extends State<StatsScreen> with WidgetsBindingObserver {
     if (oldWidget.store != widget.store) {
       oldWidget.store.removeListener(_checkFeedbackAccount);
       _feedback.dismiss();
-      _clawdController?.resetForAccountChange();
+      _localClawdController?.resetForAccountChange();
       _feedbackEpoch = widget.store.accountEpoch;
       _feedbackAccount = widget.store.account;
       widget.store.addListener(_checkFeedbackAccount);
