@@ -23,13 +23,13 @@ import '../services/assignment_store.dart';
 import '../services/assignment_web_link.dart';
 import '../services/clawd_companion_controller.dart';
 import '../services/external_link_service.dart';
-import '../services/home_course_filter.dart';
 import '../services/home_sync_presentation.dart';
 import '../services/interaction_feedback_service.dart';
 import '../services/todo_copy_formatter.dart';
 import 'widgets/appearance_controls.dart';
 import 'widgets/clawd_speech_bubble.dart';
 import 'widgets/clawd_title_stage.dart';
+import 'widgets/home_action_bar.dart';
 import 'widgets/home_filter_sheet.dart';
 import 'widgets/home_list_sections.dart';
 import 'widgets/home_manual_actions.dart';
@@ -526,11 +526,6 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
         _clearCompletingManual(entryId: id, notify: true),
   );
 
-  /// Per-course item counts for the picker, refreshed on every build so the
-  /// sheet can recount when the user changes type or deadline before applying.
-  Map<String, int> Function(AssignmentTypeFilter, AssignmentDeadlineFilter)
-      _courseCountsFor = (_, __) => const {};
-
   Future<void> _toggleTodayPlan(Assignment assignment) async {
     final epoch = store.accountEpoch;
     final day =
@@ -932,15 +927,20 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
     );
   }
 
-  Future<void> _openFilters(List<HomeCourseFilterOption> courseOptions) async {
+  Future<void> _openFilters() async {
     final openingEpoch = store.accountEpoch;
     final openingAccount = store.account;
     final selection = await showHomeFilterSheet(
       context: context,
       store: store,
-      initialFilters: store.homeFilters,
-      courseOptions: courseOptions,
-      courseCountsFor: _courseCountsFor,
+      initialFilters: HomeFilters(
+        query: _query,
+        courseKey: _courseKey,
+        deadline: _deadlineFilter,
+        type: _typeFilter,
+        sortOrder: _sortOrder,
+      ),
+      clock: widget.clock,
     );
     if (!mounted ||
         selection == null ||
@@ -968,7 +968,13 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
     final epoch = store.accountEpoch;
     final account = store.account;
     if (!inExamView) {
-      _preExamStripFilters = store.homeFilters;
+      _preExamStripFilters = HomeFilters(
+        query: _query,
+        courseKey: _courseKey,
+        deadline: _deadlineFilter,
+        type: _typeFilter,
+        sortOrder: _sortOrder,
+      );
       _preExamStripEpoch = epoch;
       unawaited(_saveFilters(
         HomeFilters(
@@ -986,15 +992,21 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
           _preExamStripEpoch == epoch ? _preExamStripFilters : null;
       _preExamStripFilters = null;
       _preExamStripEpoch = null;
+      final previousCourseKey = previous?.courseKey;
+      final restoredCourseKey = previous == null
+          ? _courseKey
+          : (previousCourseKey != null &&
+                  store.termCatalog.isBlocked(previousCourseKey)
+              ? null
+              : previousCourseKey);
       unawaited(_saveFilters(
-        previous ??
-            HomeFilters(
-              query: _query,
-              courseKey: _courseKey,
-              deadline: _deadlineFilter,
-              type: AssignmentTypeFilter.all,
-              sortOrder: _sortOrder,
-            ),
+        HomeFilters(
+          query: previous?.query ?? _query,
+          courseKey: restoredCourseKey,
+          deadline: previous?.deadline ?? _deadlineFilter,
+          type: previous?.type ?? AssignmentTypeFilter.all,
+          sortOrder: _sortOrder,
+        ),
         epoch,
         account,
       ));
@@ -1144,7 +1156,6 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
           sortOrder: _sortOrder,
           completingManualIds: _completingManualIds,
         );
-        _courseCountsFor = data.courseCountsFor;
         final reduceMotion = MediaQuery.disableAnimationsOf(context);
         _reducedMotion = reduceMotion;
         final showPixelBuddy = store.display.showPixelBuddy;
@@ -1162,131 +1173,135 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
         final epoch = store.accountEpoch;
         final account = store.account;
 
-        final headerBlock = HomeHeaderSection(
-          controller: controller,
-          showPixelBuddy: showPixelBuddy,
-          busy: busy,
-          reduceMotion: reduceMotion,
-          recoveryLabel: recoveryScope?.label,
-          recoveryItemCount: data.items.length,
-          syncErrorOrPending: syncErrorOrPending,
-          displayPrefs: store.display,
-          accountEpoch: epoch,
-          account: account,
-          buddyMood: data.buddyMood,
-          homeSnapshot: data.homeSnapshot,
-          stageAnchor: _stageAnchor,
-          statusRowKey: _syncStatusRowKey,
-          sync: data.sync,
-          syncPhase: store.syncReport.phase,
-          statusText: data.statusText,
-          syncStage: store.homeSyncProgress?.stage,
-          syncBusyWithBuddy: syncBusyWithBuddy,
-          showDueSummary: data.showDueSummary,
-          dueSummary: data.dueSummary,
-          plans: data.plans,
-          upcomingExam: data.upcomingExam,
-          filtersActive: data.filtersActive,
-          query: _query,
-          typeFilter: _typeFilter,
-          deadlineFilter: _deadlineFilter,
-          courseKey: _courseKey,
-          sortOrder: data.sortOrder,
-          courseOptions: data.options,
-          syncProgressLabel: _syncProgressLabel(store),
-          hasTimelineItems: data.sortedTimelineItems.isNotEmpty,
-          onOpenAgenda: () => context.push('/agenda'),
-          onRefresh: () => refresh(syncAction),
-          onRetrySync: () => refresh(HomeSyncAction.retry),
-          onOpenSyncIssues: () => context.push('/sync?expand=issues'),
-          onToggleNearDueFilter: () {
-            final nextDeadline =
-                _deadlineFilter == AssignmentDeadlineFilter.next7Days
-                    ? AssignmentDeadlineFilter.all
-                    : AssignmentDeadlineFilter.next7Days;
-            unawaited(_saveFilters(
+        final headerBlock = HomeAccountGuardScope(
+          currentAccountEpoch: () => store.accountEpoch,
+          currentAccount: () => store.account,
+          child: HomeHeaderSection(
+            controller: controller,
+            showPixelBuddy: showPixelBuddy,
+            busy: busy,
+            reduceMotion: reduceMotion,
+            recoveryLabel: recoveryScope?.label,
+            recoveryItemCount: data.items.length,
+            syncErrorOrPending: syncErrorOrPending,
+            displayPrefs: store.display,
+            accountEpoch: epoch,
+            account: account,
+            buddyMood: data.buddyMood,
+            homeSnapshot: data.homeSnapshot,
+            stageAnchor: _stageAnchor,
+            statusRowKey: _syncStatusRowKey,
+            sync: data.sync,
+            syncPhase: store.syncReport.phase,
+            statusText: data.statusText,
+            syncStage: store.homeSyncProgress?.stage,
+            syncBusyWithBuddy: syncBusyWithBuddy,
+            showDueSummary: data.showDueSummary,
+            dueSummary: data.dueSummary,
+            plans: data.plans,
+            upcomingExam: data.upcomingExam,
+            filtersActive: data.filtersActive,
+            query: _query,
+            typeFilter: _typeFilter,
+            deadlineFilter: _deadlineFilter,
+            courseKey: _courseKey,
+            sortOrder: data.sortOrder,
+            courseOptions: data.options,
+            syncProgressLabel: _syncProgressLabel(store),
+            hasTimelineItems: data.sortedTimelineItems.isNotEmpty,
+            onOpenAgenda: () => context.push('/agenda'),
+            onRefresh: () => refresh(syncAction),
+            onRetrySync: () => refresh(HomeSyncAction.retry),
+            onOpenSyncIssues: () => context.push('/sync?expand=issues'),
+            onToggleNearDueFilter: () {
+              final nextDeadline =
+                  _deadlineFilter == AssignmentDeadlineFilter.next7Days
+                      ? AssignmentDeadlineFilter.all
+                      : AssignmentDeadlineFilter.next7Days;
+              unawaited(_saveFilters(
+                HomeFilters(
+                  query: _query,
+                  courseKey: _courseKey,
+                  deadline: nextDeadline,
+                  type: _typeFilter,
+                  sortOrder: _sortOrder,
+                ),
+                epoch,
+                account,
+              ));
+            },
+            onCycleTheme: () => _cycleTheme(context),
+            onOpenMoreMenu: (anchorContext) =>
+                unawaited(_openMoreMenu(anchorContext)),
+            onExitRecoveryScope: () => _exitRecoveryScope(context),
+            onOpenPlan: () => context.push('/plan'),
+            onToggleUpcomingExam: _toggleUpcomingExamView,
+            onOpenFilters: () => unawaited(_openFilters()),
+            onSelectSortOrder: _selectSortOrder,
+            onAddManual: () => _manualActions.openEditor(
+              context,
+              initialKind: _typeFilter == AssignmentTypeFilter.exam
+                  ? ManualEntry.kindExam
+                  : ManualEntry.kindTodo,
+            ),
+            onClearQuery: () => _saveFilters(
               HomeFilters(
-                query: _query,
+                query: '',
                 courseKey: _courseKey,
-                deadline: nextDeadline,
+                deadline: _deadlineFilter,
                 type: _typeFilter,
                 sortOrder: _sortOrder,
               ),
               epoch,
               account,
-            ));
-          },
-          onCycleTheme: () => _cycleTheme(context),
-          onOpenMoreMenu: (anchorContext) =>
-              unawaited(_openMoreMenu(anchorContext)),
-          onExitRecoveryScope: () => _exitRecoveryScope(context),
-          onOpenPlan: () => context.push('/plan'),
-          onToggleUpcomingExam: _toggleUpcomingExamView,
-          onOpenFilters: () => unawaited(_openFilters(data.options)),
-          onSelectSortOrder: _selectSortOrder,
-          onAddManual: () => _manualActions.openEditor(
-            context,
-            initialKind: _typeFilter == AssignmentTypeFilter.exam
-                ? ManualEntry.kindExam
-                : ManualEntry.kindTodo,
-          ),
-          onClearQuery: () => _saveFilters(
-            HomeFilters(
-              query: '',
-              courseKey: _courseKey,
-              deadline: _deadlineFilter,
-              type: _typeFilter,
-              sortOrder: _sortOrder,
             ),
-            epoch,
-            account,
-          ),
-          onClearType: () {
-            _preExamStripFilters = null;
-            _preExamStripEpoch = null;
-            unawaited(_saveFilters(
+            onClearType: () {
+              _preExamStripFilters = null;
+              _preExamStripEpoch = null;
+              unawaited(_saveFilters(
+                HomeFilters(
+                  query: _query,
+                  courseKey: _courseKey,
+                  deadline: _deadlineFilter,
+                  type: AssignmentTypeFilter.all,
+                  sortOrder: _sortOrder,
+                ),
+                epoch,
+                account,
+              ));
+            },
+            onClearDeadline: () => _saveFilters(
               HomeFilters(
                 query: _query,
                 courseKey: _courseKey,
-                deadline: _deadlineFilter,
-                type: AssignmentTypeFilter.all,
+                deadline: AssignmentDeadlineFilter.all,
+                type: _typeFilter,
                 sortOrder: _sortOrder,
               ),
               epoch,
               account,
-            ));
-          },
-          onClearDeadline: () => _saveFilters(
-            HomeFilters(
-              query: _query,
-              courseKey: _courseKey,
-              deadline: AssignmentDeadlineFilter.all,
-              type: _typeFilter,
-              sortOrder: _sortOrder,
             ),
-            epoch,
-            account,
-          ),
-          onClearCourse: () => _saveFilters(
-            HomeFilters(
-              query: _query,
-              courseKey: null,
-              deadline: _deadlineFilter,
-              type: _typeFilter,
-              sortOrder: _sortOrder,
-            ),
-            epoch,
-            account,
-          ),
-          onResetAllFilters: () {
-            _preExamStripFilters = null;
-            _preExamStripEpoch = null;
-            unawaited(_saveFilters(
-              HomeFilters(sortOrder: _sortOrder),
+            onClearCourse: () => _saveFilters(
+              HomeFilters(
+                query: _query,
+                courseKey: null,
+                deadline: _deadlineFilter,
+                type: _typeFilter,
+                sortOrder: _sortOrder,
+              ),
               epoch,
               account,
-            ));
-          },
+            ),
+            onResetAllFilters: () {
+              _preExamStripFilters = null;
+              _preExamStripEpoch = null;
+              unawaited(_saveFilters(
+                HomeFilters(sortOrder: _sortOrder),
+                epoch,
+                account,
+              ));
+            },
+          ),
         );
 
         final listView = HomeTimelineList(

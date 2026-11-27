@@ -125,6 +125,13 @@ List<File> _dartFiles(Directory dir) => dir
     .toList()
   ..sort((a, b) => a.path.compareTo(b.path));
 
+bool _isIdentifierChar(int codeUnit) =>
+    (codeUnit >= 0x30 && codeUnit <= 0x39) ||
+    (codeUnit >= 0x41 && codeUnit <= 0x5A) ||
+    (codeUnit >= 0x61 && codeUnit <= 0x7A) ||
+    codeUnit == 0x5F ||
+    codeUnit == 0x24;
+
 /// Advances past a Dart comment or string literal starting at [index], or
 /// returns [index] unchanged if none starts there.
 int _skipDartCommentOrString(String source, int index) {
@@ -135,12 +142,25 @@ int _skipDartCommentOrString(String source, int index) {
     return nl == -1 ? len : nl + 1;
   }
   if (source.startsWith('/*', index)) {
-    final end = source.indexOf('*/', index + 2);
-    return end == -1 ? len : end + 2;
+    var depth = 1;
+    var pos = index + 2;
+    while (pos < len && depth > 0) {
+      if (source.startsWith('/*', pos)) {
+        depth++;
+        pos += 2;
+      } else if (source.startsWith('*/', pos)) {
+        depth--;
+        pos += 2;
+      } else {
+        pos++;
+      }
+    }
+    return pos;
   }
   var raw = false;
   var pos = index;
   if (source[pos] == 'r' &&
+      (pos == 0 || !_isIdentifierChar(source.codeUnitAt(pos - 1))) &&
       pos + 1 < len &&
       (source[pos + 1] == "'" || source[pos + 1] == '"')) {
     raw = true;
@@ -154,13 +174,81 @@ int _skipDartCommentOrString(String source, int index) {
   pos += delim.length;
   while (pos < len) {
     if (!raw && source[pos] == r'\') {
-      pos += 2;
+      pos = pos + 1 < len ? pos + 2 : len;
       continue;
     }
     if (source.startsWith(delim, pos)) return pos + delim.length;
     pos++;
   }
   return len;
+}
+
+String _stripDartCommentsAndStrings(String source) {
+  final len = source.length;
+  final out = StringBuffer();
+  var i = 0;
+  while (i < len) {
+    final skipped = _skipDartCommentOrString(source, i);
+    if (skipped > i) {
+      for (var k = i; k < skipped; k++) {
+        out.write(source[k] == '\n' ? '\n' : ' ');
+      }
+      i = skipped;
+      continue;
+    }
+    out.write(source[i]);
+    i++;
+  }
+  return out.toString();
+}
+
+List<String> _findRawShowModalBottomSheetViolations(
+  String source,
+  String filePath,
+) {
+  final stripped = _stripDartCommentsAndStrings(source);
+  final rawLines = source.split('\n');
+  final violations = <String>[];
+  final identRe = RegExp(r'\bshowModalBottomSheet\b');
+  final len = stripped.length;
+
+  int skipWhitespace(int pos) {
+    while (pos < len) {
+      final ch = stripped[pos];
+      if (ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n') {
+        pos++;
+      } else {
+        break;
+      }
+    }
+    return pos;
+  }
+
+  for (final match in identRe.allMatches(stripped)) {
+    var pos = skipWhitespace(match.end);
+    if (pos < len && stripped[pos] == '<') {
+      var depth = 1;
+      pos++;
+      while (pos < len && depth > 0) {
+        final ch = stripped[pos];
+        if (ch == ';') break;
+        if (ch == '<') {
+          depth++;
+        } else if (ch == '>') {
+          depth--;
+        }
+        pos++;
+      }
+      if (depth != 0) continue;
+      pos = skipWhitespace(pos);
+    }
+    if (pos < len && stripped[pos] == '(') {
+      final line =
+          '\n'.allMatches(stripped.substring(0, match.start)).length + 1;
+      violations.add('$filePath:$line: ${rawLines[line - 1].trimLeft()}');
+    }
+  }
+  return violations;
 }
 
 /// Source text between an opening bracket (already consumed at [start]) and
@@ -294,8 +382,6 @@ void main() {
         'app and pages route modal bottom sheets through showJournalModalSheet',
         () {
       final libDir = _resolveLibDir();
-      final modalSheetRe =
-          RegExp(r'\bshowModalBottomSheet\s*(?:<[^>]*>)?\s*\(');
       final violations = <String>[];
       for (final file in _dartFiles(libDir)) {
         final norm = file.path.replaceAll('\\', '/');
@@ -303,14 +389,12 @@ void main() {
             .endsWith('lib/src/features/widgets/journal_modal_sheet.dart')) {
           continue;
         }
-        final lines = file.readAsLinesSync();
-        for (var i = 0; i < lines.length; i++) {
-          final trimmed = lines[i].trimLeft();
-          if (trimmed.startsWith('//')) continue;
-          if (modalSheetRe.hasMatch(trimmed)) {
-            violations.add('${file.path}:${i + 1}: $trimmed');
-          }
-        }
+        violations.addAll(
+          _findRawShowModalBottomSheetViolations(
+            file.readAsStringSync(),
+            file.path,
+          ),
+        );
       }
       expect(
         violations,
@@ -318,6 +402,90 @@ void main() {
         reason:
             'Use showJournalModalSheet instead of raw showModalBottomSheet:\n'
             '${violations.join('\n')}',
+      );
+    });
+
+    test(
+        'modal bottom sheet detector catches bypasses and ignores comments and strings',
+        () {
+      const multilineCall = '''
+Future<void> open(BuildContext context) {
+  return showModalBottomSheet
+      (
+    context: context,
+    builder: (_) => const SizedBox(),
+  );
+}
+''';
+      expect(
+        _findRawShowModalBottomSheetViolations(multilineCall, 'a.dart'),
+        hasLength(1),
+      );
+
+      const nestedGenericsCall = '''
+Future<void> open(BuildContext context) {
+  return showModalBottomSheet<List<Map<String, int>>>(
+    context: context,
+    builder: (_) => const SizedBox(),
+  );
+}
+''';
+      expect(
+        _findRawShowModalBottomSheetViolations(nestedGenericsCall, 'b.dart'),
+        hasLength(1),
+      );
+
+      const blockCommentCall = '''
+Future<void> open(BuildContext context) {
+  return showModalBottomSheet/* ok */(
+    context: context,
+    builder: (_) => const SizedBox(),
+  );
+}
+Future<void> open2(BuildContext context) {
+  return showModalBottomSheet /* a */ <List<int>> /* b */ (
+    context: context,
+    builder: (_) => const SizedBox(),
+  );
+}
+''';
+      expect(
+        _findRawShowModalBottomSheetViolations(blockCommentCall, 'c.dart'),
+        hasLength(2),
+      );
+
+      const safeSamples = r"""
+// showModalBottomSheet(context: context, builder: (_) => const SizedBox());
+/*
+  showModalBottomSheet(context: context, builder: (_) => const SizedBox());
+  /* nested comment showModalBottomSheet<List<int>>( */
+  showModalBottomSheet/* still inside outer comment */(
+*/
+const a = 'showModalBottomSheet(';
+const b = "showModalBottomSheet<int>(";
+const c = 'escaped \' showModalBottomSheet(';
+const d = 'trailing \\';
+const e = r'raw showModalBottomSheet(';
+const f = r"raw showModalBottomSheet<List<int>>(";
+const h = '''
+triple single showModalBottomSheet(
+''';
+""";
+      const safeTripleDouble = r'''
+const g = """
+triple double showModalBottomSheet(
+""";
+''';
+      expect(
+        _findRawShowModalBottomSheetViolations(safeSamples, 'safe.dart'),
+        isEmpty,
+      );
+      expect(
+        _findRawShowModalBottomSheetViolations(
+          safeTripleDouble,
+          'safe_double.dart',
+        ),
+        isEmpty,
       );
     });
 

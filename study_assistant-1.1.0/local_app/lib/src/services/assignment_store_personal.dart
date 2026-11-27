@@ -1,6 +1,264 @@
+// Keep explicit receivers on calls that dispatch through the store.
+// ignore_for_file: unnecessary_this
+
 part of 'assignment_store.dart';
 
 extension _AssignmentStorePersonal on AssignmentStore {
+  String? get _combinedError {
+    final messages = [
+      _error,
+      repository.recoveryWarning,
+      ..._warningBuckets.serviceWarnings,
+      ..._recoveryWarnings
+    ].whereType<String>().where((s) => s.isNotEmpty).toSet();
+    return messages.isEmpty ? null : messages.join('；');
+  }
+
+  String _saveFeedback(
+    bool saved, {
+    required String successMessage,
+    required String failureMessage,
+    Iterable<String>? warnings,
+  }) {
+    final mergedWarnings = {
+      if (repository.recoveryWarning != null) repository.recoveryWarning!,
+      ...(warnings ?? _warningBuckets.serviceWarnings),
+    };
+    return [
+      saved ? successMessage : failureMessage,
+      ...mergedWarnings,
+    ].join('；');
+  }
+
+  String get _profileDisplayName {
+    final name = _chaoxingDisplayName?.trim();
+    if (name != null && name.isNotEmpty) {
+      return name;
+    }
+    final account = _account?.trim();
+    if (account != null && account.isNotEmpty) {
+      return account;
+    }
+    return '同学';
+  }
+
+  LocalCourseworkEntry? _courseworkEntryFor(Assignment assignment) =>
+      CourseworkDeadline.entryFor(assignment, _courseworkState);
+
+  CourseworkDeadline? _effectiveDeadlineFor(Assignment assignment) =>
+      CourseworkDeadline.resolveEntry(
+          assignment, this.courseworkEntryFor(assignment));
+
+  DateTime? _manualDeadlineFor(Assignment assignment) =>
+      this.courseworkEntryFor(assignment)?.manualDeadlineAt;
+
+  bool _isLocallyCompleted(Assignment assignment) =>
+      _authenticated &&
+      CourseworkDeadline.isLocallyCompleted(assignment, _courseworkState);
+
+  bool _isEffectivelyCompleted(Assignment assignment) =>
+      assignment.isCompleted || this.isLocallyCompleted(assignment);
+
+  AssignmentChange? _latestDeadlineChangeFor(Assignment assignment) {
+    for (final event in changes) {
+      if (event.assignmentId == assignment.id &&
+          event.kind == AssignmentChangeKind.deadline) {
+        return event;
+      }
+    }
+    return null;
+  }
+
+  AssignmentChange? _activeDeadlineAlertFor(Assignment assignment) {
+    if (_journalRestoreFailed ||
+        changes.isEmpty ||
+        this.isEffectivelyCompleted(assignment)) {
+      return null;
+    }
+    final latest = this.latestDeadlineChangeFor(assignment);
+    if (latest == null || !latest.isAdvanceDeadlineAlert) return null;
+    if (_acknowledgedDeadlineChangeIds.contains(latest.effectiveChangeId)) {
+      return null;
+    }
+    return latest;
+  }
+
+  bool _isPinned(Assignment assignment) =>
+      _authenticated && _pinned.containsAny(_pinAliases(assignment));
+
+  Future<bool> _togglePin(Assignment assignment) => _togglePinKey(
+        AssignmentStore._pinKey(assignment),
+        _pinAliases(assignment),
+        () => this.canTogglePin(assignment),
+      );
+
+  bool _isManualPinned(ManualEntry entry) =>
+      _authenticated &&
+      _pinned.containsAny([AssignmentStore.manualPinKeyOf(entry)]);
+
+  Future<bool> _toggleManualPin(ManualEntry entry) {
+    final key = AssignmentStore.manualPinKeyOf(entry);
+    return _togglePinKey(key, [key], () => this.canToggleManualPin(entry));
+  }
+
+  CourseTermCatalog get _termCatalog {
+    final currentNow = _clock();
+    final currentTerm = AcademicTerm.fromInstant(currentNow);
+    final cached = _termCatalogCache;
+    if (cached != null && cached.currentTerm == currentTerm) {
+      return cached;
+    }
+    return _termCatalogCache = CourseTermCatalog.build(
+      courses: this.courses,
+      assignments: [..._assignments, ..._hiddenAssignments],
+      notices: _courseNotices.items,
+      preferences: _courseTermPreferences,
+      now: currentNow,
+      coursework: _courseworkState,
+      unfollowedCourseKeys: _unfollowed,
+      hiddenAssignmentIds: {for (final a in _hiddenAssignments) a.id},
+      changes: changes,
+    );
+  }
+
+  bool _isCourseActive(String key) =>
+      this.follows(key) && this.termCatalog.isActiveOrRecalled(key);
+
+  List<Assignment> get _formalAssignments =>
+      this.courseAssignments.where((a) => a.isFormal).toList();
+
+  List<CourseworkGroup> get _localRecordGroups =>
+      _localRecordGroupsCache ??= List.unmodifiable(AssignmentGrouping.group(
+        [..._assignments, ..._hiddenAssignments],
+        hiddenIds:
+            _hiddenAssignments.map((assignment) => assignment.id).toSet(),
+      ));
+
+  List<CourseworkGroup> get _courseworkGroups =>
+      _courseworkGroupsCache ??= List.unmodifiable(AssignmentGrouping.group(
+        AssignmentQuery.scope([..._assignments, ..._hiddenAssignments], {})
+            .where((assignment) =>
+                assignment.courseKey == null ||
+                this.isCourseActive(assignment.courseKey!))
+            .toList(),
+        hiddenIds:
+            _hiddenAssignments.map((assignment) => assignment.id).toSet(),
+      ));
+
+  List<Assignment> get _courseAssignments =>
+      _courseworkSourcesCache ??= List.unmodifiable([
+        for (final group in this.courseworkGroups)
+          if (!group.hidden) ...group.sources,
+      ]);
+
+  List<Assignment> get _statsAssignments =>
+      _statsAssignmentsCache ??= List.unmodifiable([
+        for (final group in this.localRecordGroups)
+          if (!group.hidden &&
+              group.primary.isInAssignmentScope &&
+              (group.primary.courseKey == null ||
+                  (this.follows(group.primary.courseKey!) &&
+                      !this.termCatalog.isBlocked(group.primary.courseKey!))))
+            group.primary,
+      ]);
+
+  List<Assignment> _statsAssignmentsForScope(
+    CourseTermScope scope, {
+    DateTime? now,
+  }) {
+    final catalog = now == null
+        ? this.termCatalog
+        : CourseTermCatalog.build(
+            courses: this.courses,
+            assignments: [..._assignments, ..._hiddenAssignments],
+            notices: _courseNotices.items,
+            preferences: _courseTermPreferences,
+            now: now,
+            coursework: _courseworkState,
+            unfollowedCourseKeys: _unfollowed,
+            hiddenAssignmentIds: {for (final a in _hiddenAssignments) a.id},
+            changes: changes,
+          );
+    return List.unmodifiable([
+      for (final a in this.statsAssignments)
+        if (catalog.matchesAssignmentInStatsScope(a, scope)) a,
+    ]);
+  }
+
+  List<Assignment> _homeCatalogAssignmentsWithSelectedCourse(
+    String? selectedCourseKey,
+  ) {
+    final activeCatalog = this.homeCatalogAssignments;
+    if (selectedCourseKey == null ||
+        !this.follows(selectedCourseKey) ||
+        this.termCatalog.isBlocked(selectedCourseKey) ||
+        this.termCatalog.isActiveOrRecalled(selectedCourseKey)) {
+      return activeCatalog;
+    }
+    final activeIds = {for (final a in activeCatalog) a.id};
+    final extra = <Assignment>[];
+    for (final group in this.localRecordGroups) {
+      if (group.hidden) continue;
+      if (group.primary.courseKey != selectedCourseKey) continue;
+      for (final source in group.sources) {
+        if (!activeIds.contains(source.id)) {
+          extra.add(source);
+        }
+      }
+    }
+    if (extra.isEmpty) return activeCatalog;
+    return List<Assignment>.unmodifiable([...activeCatalog, ...extra]);
+  }
+
+  Set<String> _effectiveHiddenAssignmentIds() => {
+        for (final item in _hiddenAssignments) item.id,
+        for (final group in this.hiddenCourseworkGroups)
+          for (final source in group.sources) source.id,
+      };
+
+  List<CourseworkGroup> get _hiddenCourseworkGroups => List.unmodifiable(
+        this.localRecordGroups.where((group) => group.hidden),
+      );
+
+  List<CourseworkGroup> get _localCourseTaskGroups => List.unmodifiable(
+        this.localRecordGroups.where(
+              (group) => !group.hidden && group.primary.hasCourseTaskIdentity,
+            ),
+      );
+
+  CourseworkGroup? _courseworkGroupFor(String assignmentId) => this
+      .localRecordGroups
+      .where((group) =>
+          group.sources.any((assignment) => assignment.id == assignmentId))
+      .firstOrNull;
+
+  Assignment? _findAssignment(String assignmentId) {
+    for (final assignment in _assignments) {
+      if (assignment.id == assignmentId) {
+        return assignment;
+      }
+    }
+    return null;
+  }
+
+  Assignment? _findAnyAssignment(String assignmentId) {
+    final visible = this.findAssignment(assignmentId);
+    if (visible != null) return visible;
+    for (final assignment in _hiddenAssignments) {
+      if (assignment.id == assignmentId) {
+        return assignment;
+      }
+    }
+    return null;
+  }
+
+  void _replaceAssignmentsForTest(List<Assignment> assignments) {
+    _assignments
+      ..clear()
+      ..addAll(assignments);
+    _invalidateHomeDisplayIndex();
+  }
+
   Future<bool> _saveHomeFilters(HomeFilters next, int expectedEpoch) {
     final account = _account;
     if (account == null || !_isSessionStateCurrent(epoch: expectedEpoch)) {
@@ -516,14 +774,14 @@ extension _AssignmentStorePersonal on AssignmentStore {
     if (at != null &&
         !CourseworkDeadline.canSetManualDeadline(
           assignment,
-          entry: courseworkEntryFor(assignment),
+          entry: this.courseworkEntryFor(assignment),
         )) {
       return false;
     }
     return _mutateCourseworkState(
       snap,
       (_) {
-        final current = findAnyAssignment(assignment.id) ?? assignment;
+        final current = this.findAnyAssignment(assignment.id) ?? assignment;
         return AssignmentPersonalStateCoordinator.computeManualDeadlineState(
               currentState: _courseworkState,
               target: current,
@@ -544,7 +802,7 @@ extension _AssignmentStorePersonal on AssignmentStore {
     return _mutateCourseworkState(
       snap,
       (_) {
-        final current = findAnyAssignment(assignment.id) ?? assignment;
+        final current = this.findAnyAssignment(assignment.id) ?? assignment;
         return AssignmentPersonalStateCoordinator.computeLocallyCompletedState(
           currentState: _courseworkState,
           target: current,
@@ -740,7 +998,7 @@ extension _AssignmentStorePersonal on AssignmentStore {
       localRecordGroups: localRecordGroups,
       notebook: notebook,
       now: _clock(),
-      isLocallyCompleted: isLocallyCompleted,
+      isLocallyCompleted: this.isLocallyCompleted,
     );
     if (retained == _pinned && !_pinsNeedSave) return;
     _pinned = retained;
@@ -868,7 +1126,7 @@ extension _AssignmentStorePersonal on AssignmentStore {
         isCourseBlocked: termCatalog.isBlocked,
       );
       if (cleared != null) {
-        await saveHomeFilters(cleared, snap.generation);
+        await this.saveHomeFilters(cleared, snap.generation);
       }
     }
     return saved;
@@ -893,7 +1151,7 @@ extension _AssignmentStorePersonal on AssignmentStore {
         isCourseBlocked: termCatalog.isBlocked,
       );
       if (cleared != null) {
-        await saveHomeFilters(cleared, snap.generation);
+        await this.saveHomeFilters(cleared, snap.generation);
       }
     }
     return saved;

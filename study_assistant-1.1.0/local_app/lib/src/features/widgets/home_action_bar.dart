@@ -48,6 +48,24 @@ IconData _sortMenuIcon(HomeSortOrder order) =>
       _ => Icons.arrow_upward_rounded,
     };
 
+class HomeAccountGuardScope extends InheritedWidget {
+  const HomeAccountGuardScope({
+    super.key,
+    required this.currentAccountEpoch,
+    required this.currentAccount,
+    required super.child,
+  });
+
+  final int Function() currentAccountEpoch;
+  final String? Function() currentAccount;
+
+  static HomeAccountGuardScope? maybeOf(BuildContext context) =>
+      context.getInheritedWidgetOfExactType<HomeAccountGuardScope>();
+
+  @override
+  bool updateShouldNotify(HomeAccountGuardScope oldWidget) => false;
+}
+
 class HomeActionBar extends StatelessWidget {
   const HomeActionBar({
     super.key,
@@ -56,6 +74,8 @@ class HomeActionBar extends StatelessWidget {
     required this.displayPrefs,
     required this.accountEpoch,
     required this.account,
+    this.currentAccountEpoch,
+    this.currentAccount,
     required this.onOpenFilters,
     required this.onSelectSortOrder,
     required this.onAddManual,
@@ -66,6 +86,8 @@ class HomeActionBar extends StatelessWidget {
   final DisplayPreferences displayPrefs;
   final int accountEpoch;
   final String? account;
+  final int Function()? currentAccountEpoch;
+  final String? Function()? currentAccount;
   final VoidCallback onOpenFilters;
   final Future<void> Function(
     HomeSortOrder order,
@@ -77,6 +99,11 @@ class HomeActionBar extends StatelessWidget {
   Future<void> _openSortMenu(BuildContext anchorContext) async {
     final openingEpoch = accountEpoch;
     final openingAccount = account;
+    final scope = HomeAccountGuardScope.maybeOf(anchorContext);
+    final resolveEpoch = currentAccountEpoch ?? scope?.currentAccountEpoch;
+    final resolveAccount = currentAccount ?? scope?.currentAccount;
+    if (resolveEpoch != null && resolveEpoch() != openingEpoch) return;
+    if (resolveAccount != null && resolveAccount() != openingAccount) return;
     final box = anchorContext.findRenderObject() as RenderBox?;
     Rect? anchorRect;
     if (box != null && box.hasSize) {

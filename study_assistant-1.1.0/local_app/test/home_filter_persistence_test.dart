@@ -9,6 +9,7 @@ import 'package:study_assistant_mobile/src/app/app_shell.dart';
 import 'package:study_assistant_mobile/src/features/assignment_list_screen.dart';
 import 'package:study_assistant_mobile/src/local/local_assignment_repository.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
+import 'package:study_assistant_mobile/src/models/course_term_preferences.dart';
 import 'package:study_assistant_mobile/src/models/home_filters.dart';
 import 'package:study_assistant_mobile/src/services/assignment_query.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
@@ -457,6 +458,177 @@ void main() {
     expect(s.homeFilters.sortOrder, HomeSortOrder.deadlineAsc);
 
     await tapSheetOption(t, '应用');
+    expect(s.homeFilters.sortOrder, HomeSortOrder.deadlineAsc);
+
+    final repo = LocalAssignmentRepository();
+    await repo.activateAccount('A');
+    expect((await repo.loadHomeFilters()).sortOrder, HomeSortOrder.courseName);
+    await t.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets(
+      'filter sheet drops blocked course key and reads live course counts while open',
+      (t) async {
+    var now = DateTime.utc(2026, 11, 16, 2);
+    final session = Session();
+    final s = AssignmentStore(
+      sessionStore: session,
+      notificationService: Notifications(),
+      widgetSnapshotService: Snapshot(),
+      clock: () => now,
+    );
+    addTearDown(s.dispose);
+    await s.restoreSession();
+
+    final math = Assignment(
+      id: 'cx:work:1:1:w1',
+      courseName: '高等数学',
+      title: '微积分作业',
+      deadlineAt: now.add(const Duration(days: 2)),
+      deadlineTrusted: true,
+      requirementsText: '',
+      status: 'pending',
+      lastSyncedAt: now,
+    );
+    final englishSoon = Assignment(
+      id: 'cx:work:2:2:w1',
+      courseName: '大学英语',
+      title: '英语短时作业',
+      deadlineAt: now.add(const Duration(minutes: 30)),
+      deadlineTrusted: true,
+      requirementsText: '',
+      status: 'pending',
+      lastSyncedAt: now,
+    );
+    final englishLater = Assignment(
+      id: 'cx:work:2:2:w2',
+      courseName: '大学英语',
+      title: '英语长时作业',
+      deadlineAt: now.add(const Duration(days: 3)),
+      deadlineTrusted: true,
+      requirementsText: '',
+      status: 'pending',
+      lastSyncedAt: now,
+    );
+    s.replaceAssignmentsForTest([math, englishSoon, englishLater]);
+    await s.saveHomeFilters(
+      const HomeFilters(
+        courseKey: '1:1',
+        deadline: AssignmentDeadlineFilter.notExpired,
+      ),
+      s.accountEpoch,
+    );
+
+    final prefs = await SharedPreferences.getInstance();
+    SharedPreferencesStorePlatform.instance = FailingPreferences({
+      for (final key in prefs.getKeys()) 'flutter.$key': prefs.get(key)!,
+    });
+    expect(await s.setCourseBlockMode('1:1', CourseBlockMode.blocked), isTrue);
+    expect(s.termCatalog.isBlocked('1:1'), isTrue);
+    expect(s.homeFilters.courseKey, '1:1');
+
+    final updatedPrefs = await SharedPreferences.getInstance();
+    SharedPreferencesStorePlatform.instance =
+        InMemorySharedPreferencesStore.withData({
+      for (final key in updatedPrefs.getKeys())
+        'flutter.$key': updatedPrefs.get(key)!,
+    });
+
+    await t.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: AssignmentListScreen(store: s, clock: () => now),
+      ),
+    ));
+    await t.pumpAndSettle();
+
+    await t.tap(find.text('已筛选'));
+    await t.pumpAndSettle();
+    expect(find.text('全部课程'), findsOneWidget);
+    await tapSheetOption(t, '应用');
+    expect(s.homeFilters.courseKey, isNull);
+
+    await t.tap(find.text('已筛选'));
+    await t.pumpAndSettle();
+
+    now = now.add(const Duration(hours: 1));
+    final physics = Assignment(
+      id: 'cx:work:3:3:w1',
+      courseName: '大学物理',
+      title: '物理实验',
+      deadlineAt: now.add(const Duration(days: 2)),
+      deadlineTrusted: true,
+      requirementsText: '',
+      status: 'pending',
+      lastSyncedAt: now,
+    );
+    s.replaceAssignmentsForTest([math, englishSoon, englishLater, physics]);
+    await t.pumpAndSettle();
+
+    final courseRow = find.byKey(const ValueKey('home-course-filter'));
+    await t.ensureVisible(courseRow);
+    await t.pumpAndSettle();
+    await t.tap(courseRow);
+    await t.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('course-option-1:1')), findsNothing);
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('course-option-2:2')),
+        matching: find.text('1 项'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('course-option-3:3')),
+        matching: find.text('1 项'),
+      ),
+      findsOneWidget,
+    );
+    await t.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets(
+      'sort menu blocks stale open before rebuild and stale selection across account switch',
+      (t) async {
+    final session = Session();
+    final s = makeStore(session);
+    addTearDown(s.dispose);
+    await s.restoreSession();
+    await s.saveHomeFilters(
+      const HomeFilters(sortOrder: HomeSortOrder.courseName),
+      s.accountEpoch,
+    );
+    await t.pumpWidget(
+      MaterialApp(home: Scaffold(body: AssignmentListScreen(store: s))),
+    );
+    await t.pumpAndSettle();
+
+    // Account changes before the stale button rebuilds: tapping sort must not open the menu.
+    session.account = 'B';
+    await s.restoreSession();
+    await t.tap(find.byKey(const ValueKey('current-home-sort')));
+    await t.pumpAndSettle();
+    expect(find.text('时间：远到近'), findsNothing);
+    expect(s.homeFilters.sortOrder, HomeSortOrder.deadlineAsc);
+
+    // Menu opens on account A, then account switches to B before selection: neither A nor B is polluted.
+    session.account = 'A';
+    await s.restoreSession();
+    await t.pumpAndSettle();
+    expect(s.homeFilters.sortOrder, HomeSortOrder.courseName);
+
+    await t.tap(find.byKey(const ValueKey('current-home-sort')));
+    await t.pumpAndSettle();
+    expect(find.text('时间：远到近'), findsOneWidget);
+
+    session.account = 'B';
+    await s.restoreSession();
+    await t.pumpAndSettle();
+    expect(s.homeFilters.sortOrder, HomeSortOrder.deadlineAsc);
+
+    await t.tap(find.text('时间：远到近'));
+    await t.pumpAndSettle();
     expect(s.homeFilters.sortOrder, HomeSortOrder.deadlineAsc);
 
     final repo = LocalAssignmentRepository();

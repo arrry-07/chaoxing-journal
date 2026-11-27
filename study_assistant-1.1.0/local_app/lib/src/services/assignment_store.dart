@@ -175,13 +175,7 @@ class AssignmentStore extends ChangeNotifier {
   bool get isChapterSyncing => _isChapterSyncing;
   String? get chapterSyncProgressText => _chapterSyncProgressText;
 
-  String exportSanitizedSyncDiagnostics() =>
-      ChaoxingSyncDiagnosticsExporter.exportJson(
-        appVersion: AppVersion.display,
-        report: syncReport,
-        phaseElapsedMs: chaoxingClient.diagnostics.phaseElapsedMs,
-        requestTimings: chaoxingClient.requestTimings,
-      );
+  String exportSanitizedSyncDiagnostics() => _exportSanitizedSyncDiagnostics();
 
   Future<void>? _filterWrites;
 
@@ -275,12 +269,7 @@ class AssignmentStore extends ChangeNotifier {
   List<SyncSourceResult> _lastSyncSourceResults = const [];
   int _generation = 0;
   bool _disposed = false, _loginRunning = false;
-  String get syncSummary {
-    if (_warningBuckets.isNotEmpty && syncReport.phase == SyncPhase.success) {
-      return hasWidgetWarningOnly ? '作业已更新，小组件需要处理' : '作业已更新，提醒或小组件需要处理';
-    }
-    return syncReport.summary;
-  }
+  String get syncSummary => _syncSummary;
 
   bool get hasWidgetWarningOnly => _warningBuckets.hasWidgetWarningOnly(
         hasRecoveryWarnings: _recoveryWarnings.isNotEmpty,
@@ -331,31 +320,20 @@ class AssignmentStore extends ChangeNotifier {
   List<String> get manualSaveWarnings => _warningBuckets.manualSaveWarnings;
   String? get recoveryWarning => repository.recoveryWarning;
   String? get operationError => _error;
-  String? get error {
-    final messages = [
-      _error,
-      repository.recoveryWarning,
-      ..._warningBuckets.serviceWarnings,
-      ..._recoveryWarnings
-    ].whereType<String>().where((s) => s.isNotEmpty).toSet();
-    return messages.isEmpty ? null : messages.join('；');
-  }
+  String? get error => _combinedError;
 
   String saveFeedback(
     bool saved, {
     required String successMessage,
     required String failureMessage,
     Iterable<String>? warnings,
-  }) {
-    final mergedWarnings = {
-      if (repository.recoveryWarning != null) repository.recoveryWarning!,
-      ...(warnings ?? _warningBuckets.serviceWarnings),
-    };
-    return [
-      saved ? successMessage : failureMessage,
-      ...mergedWarnings,
-    ].join('；');
-  }
+  }) =>
+      _saveFeedback(
+        saved,
+        successMessage: successMessage,
+        failureMessage: failureMessage,
+        warnings: warnings,
+      );
 
   List<Assignment> _hiddenAssignments = [];
   List<Assignment> get hiddenAssignments =>
@@ -366,23 +344,9 @@ class AssignmentStore extends ChangeNotifier {
   int get nativeSessionEpoch => _nativeSessionEpoch;
   String? get profileAvatarUrl => _chaoxingAvatarUrl;
 
-  String get profileDisplayName {
-    final name = _chaoxingDisplayName?.trim();
-    if (name != null && name.isNotEmpty) {
-      return name;
-    }
-    final account = _account?.trim();
-    if (account != null && account.isNotEmpty) {
-      return account;
-    }
-    return '同学';
-  }
+  String get profileDisplayName => _profileDisplayName;
 
-  DateTime? get lastSyncAt =>
-      _lastSyncAt ??
-      (syncReport.phase == SyncPhase.success
-          ? syncReport.lastFullSuccessAt
-          : null);
+  DateTime? get lastSyncAt => _effectiveLastSyncAt;
   int get autoSyncIntervalMinutes => _backgroundCheckSettings.enabled
       ? _backgroundCheckSettings.intervalMinutes
       : 0;
@@ -401,10 +365,7 @@ class AssignmentStore extends ChangeNotifier {
   bool get isUsingV2DeadlineChannel =>
       _deadlineChannelId == LocalNotificationService.assignmentV2Channel;
   String? get backgroundWarning => _backgroundWarning;
-  DateTime? get nextBackgroundCheckAt {
-    if (!_authenticated || !_backgroundCheckSettings.enabled) return null;
-    return _nextBackgroundTarget(DateTime.now());
-  }
+  DateTime? get nextBackgroundCheckAt => _nextBackgroundCheckAt;
 
   Future<BackgroundReminderHealth?> inspectBackgroundReminderHealth() =>
       _inspectBackgroundReminderHealth();
@@ -435,41 +396,21 @@ class AssignmentStore extends ChangeNotifier {
   bool get hasManualPinOrder => _pinned.manuallyOrdered;
   LocalCourseworkState get courseworkState => _courseworkState;
   LocalCourseworkEntry? courseworkEntryFor(Assignment assignment) =>
-      CourseworkDeadline.entryFor(assignment, _courseworkState);
+      _courseworkEntryFor(assignment);
   CourseworkDeadline? effectiveDeadlineFor(Assignment assignment) =>
-      CourseworkDeadline.resolveEntry(
-          assignment, courseworkEntryFor(assignment));
+      _effectiveDeadlineFor(assignment);
   DateTime? manualDeadlineFor(Assignment assignment) =>
-      courseworkEntryFor(assignment)?.manualDeadlineAt;
+      _manualDeadlineFor(assignment);
   bool isLocallyCompleted(Assignment assignment) =>
-      _authenticated &&
-      CourseworkDeadline.isLocallyCompleted(assignment, _courseworkState);
+      _isLocallyCompleted(assignment);
   bool isEffectivelyCompleted(Assignment assignment) =>
-      assignment.isCompleted || isLocallyCompleted(assignment);
+      _isEffectivelyCompleted(assignment);
 
-  AssignmentChange? latestDeadlineChangeFor(Assignment assignment) {
-    for (final event in changes) {
-      if (event.assignmentId == assignment.id &&
-          event.kind == AssignmentChangeKind.deadline) {
-        return event;
-      }
-    }
-    return null;
-  }
+  AssignmentChange? latestDeadlineChangeFor(Assignment assignment) =>
+      _latestDeadlineChangeFor(assignment);
 
-  AssignmentChange? activeDeadlineAlertFor(Assignment assignment) {
-    if (_journalRestoreFailed ||
-        changes.isEmpty ||
-        isEffectivelyCompleted(assignment)) {
-      return null;
-    }
-    final latest = latestDeadlineChangeFor(assignment);
-    if (latest == null || !latest.isAdvanceDeadlineAlert) return null;
-    if (_acknowledgedDeadlineChangeIds.contains(latest.effectiveChangeId)) {
-      return null;
-    }
-    return latest;
-  }
+  AssignmentChange? activeDeadlineAlertFor(Assignment assignment) =>
+      _activeDeadlineAlertFor(assignment);
 
   Future<bool> acknowledgeDeadlineAlert(String changeId) =>
       _acknowledgeDeadlineAlert(changeId);
@@ -509,29 +450,20 @@ class AssignmentStore extends ChangeNotifier {
 
   void _notify() => notifyListeners();
 
-  bool isPinned(Assignment assignment) =>
-      _authenticated && _pinned.containsAny(_pinAliases(assignment));
+  bool isPinned(Assignment assignment) => _isPinned(assignment);
 
   Set<String>? _pinnableKeysCache;
   int? _pinnableKeysCacheMinute;
 
   bool canTogglePin(Assignment assignment) => _canTogglePin(assignment);
 
-  Future<bool> togglePin(Assignment assignment) => _togglePinKey(
-        _pinKey(assignment),
-        _pinAliases(assignment),
-        () => canTogglePin(assignment),
-      );
+  Future<bool> togglePin(Assignment assignment) => _togglePin(assignment);
 
-  bool isManualPinned(ManualEntry entry) =>
-      _authenticated && _pinned.containsAny([manualPinKeyOf(entry)]);
+  bool isManualPinned(ManualEntry entry) => _isManualPinned(entry);
 
   bool canToggleManualPin(ManualEntry entry) => _canToggleManualPin(entry);
 
-  Future<bool> toggleManualPin(ManualEntry entry) {
-    final key = manualPinKeyOf(entry);
-    return _togglePinKey(key, [key], () => canToggleManualPin(entry));
-  }
+  Future<bool> toggleManualPin(ManualEntry entry) => _toggleManualPin(entry);
 
   Future<bool> reorderPinned(List<String> visibleOrderedKeys) =>
       _reorderPinned(visibleOrderedKeys);
@@ -541,28 +473,9 @@ class AssignmentStore extends ChangeNotifier {
   bool follows(String key) => !_unfollowed.contains(key);
   CourseTermPreferences get courseTermPreferences => _courseTermPreferences;
 
-  CourseTermCatalog get termCatalog {
-    final currentNow = _clock();
-    final currentTerm = AcademicTerm.fromInstant(currentNow);
-    final cached = _termCatalogCache;
-    if (cached != null && cached.currentTerm == currentTerm) {
-      return cached;
-    }
-    return _termCatalogCache = CourseTermCatalog.build(
-      courses: courses,
-      assignments: [..._assignments, ..._hiddenAssignments],
-      notices: _courseNotices.items,
-      preferences: _courseTermPreferences,
-      now: currentNow,
-      coursework: _courseworkState,
-      unfollowedCourseKeys: _unfollowed,
-      hiddenAssignmentIds: {for (final a in _hiddenAssignments) a.id},
-      changes: changes,
-    );
-  }
+  CourseTermCatalog get termCatalog => _termCatalog;
 
-  bool isCourseActive(String key) =>
-      follows(key) && termCatalog.isActiveOrRecalled(key);
+  bool isCourseActive(String key) => _isCourseActive(key);
 
   Future<bool> setCourseManualTerm(String courseKey, AcademicTerm? term) =>
       _setCourseManualTerm(courseKey, term);
@@ -599,120 +512,41 @@ class AssignmentStore extends ChangeNotifier {
 
   Future<bool> archivePastCourses() => _archivePastCourses();
 
-  List<Assignment> get formalAssignments =>
-      courseAssignments.where((a) => a.isFormal).toList();
+  List<Assignment> get formalAssignments => _formalAssignments;
   List<CourseworkGroup>? _courseworkGroupsCache;
   List<CourseworkGroup>? _localRecordGroupsCache;
   List<Assignment>? _courseworkSourcesCache;
   List<Assignment>? _statsAssignmentsCache;
 
-  List<CourseworkGroup> get localRecordGroups =>
-      _localRecordGroupsCache ??= List.unmodifiable(AssignmentGrouping.group(
-        [..._assignments, ..._hiddenAssignments],
-        hiddenIds:
-            _hiddenAssignments.map((assignment) => assignment.id).toSet(),
-      ));
+  List<CourseworkGroup> get localRecordGroups => _localRecordGroups;
 
-  List<CourseworkGroup> get courseworkGroups =>
-      _courseworkGroupsCache ??= List.unmodifiable(AssignmentGrouping.group(
-        AssignmentQuery.scope([..._assignments, ..._hiddenAssignments], {})
-            .where((assignment) =>
-                assignment.courseKey == null ||
-                isCourseActive(assignment.courseKey!))
-            .toList(),
-        hiddenIds:
-            _hiddenAssignments.map((assignment) => assignment.id).toSet(),
-      ));
+  List<CourseworkGroup> get courseworkGroups => _courseworkGroups;
 
-  List<Assignment> get courseAssignments =>
-      _courseworkSourcesCache ??= List.unmodifiable([
-        for (final group in courseworkGroups)
-          if (!group.hidden) ...group.sources,
-      ]);
+  List<Assignment> get courseAssignments => _courseAssignments;
 
   /// Original primary records for statistics across followed courses.
   ///
   /// Uses all non-hidden followed records so past/archived terms remain
   /// inspectable via [statsAssignmentsForScope].
-  List<Assignment> get statsAssignments =>
-      _statsAssignmentsCache ??= List.unmodifiable([
-        for (final group in localRecordGroups)
-          if (!group.hidden &&
-              group.primary.isInAssignmentScope &&
-              (group.primary.courseKey == null ||
-                  (follows(group.primary.courseKey!) &&
-                      !termCatalog.isBlocked(group.primary.courseKey!))))
-            group.primary,
-      ]);
+  List<Assignment> get statsAssignments => _statsAssignments;
 
   List<Assignment> statsAssignmentsForScope(
     CourseTermScope scope, {
     DateTime? now,
-  }) {
-    final catalog = now == null
-        ? termCatalog
-        : CourseTermCatalog.build(
-            courses: courses,
-            assignments: [..._assignments, ..._hiddenAssignments],
-            notices: _courseNotices.items,
-            preferences: _courseTermPreferences,
-            now: now,
-            coursework: _courseworkState,
-            unfollowedCourseKeys: _unfollowed,
-            hiddenAssignmentIds: {for (final a in _hiddenAssignments) a.id},
-            changes: changes,
-          );
-    return List.unmodifiable([
-      for (final a in statsAssignments)
-        if (catalog.matchesAssignmentInStatsScope(a, scope)) a,
-    ]);
-  }
+  }) =>
+      _statsAssignmentsForScope(scope, now: now);
 
   List<Assignment> homeCatalogAssignmentsWithSelectedCourse(
     String? selectedCourseKey,
-  ) {
-    final activeCatalog = homeCatalogAssignments;
-    if (selectedCourseKey == null ||
-        !follows(selectedCourseKey) ||
-        termCatalog.isBlocked(selectedCourseKey) ||
-        termCatalog.isActiveOrRecalled(selectedCourseKey)) {
-      return activeCatalog;
-    }
-    final activeIds = {for (final a in activeCatalog) a.id};
-    final extra = <Assignment>[];
-    for (final group in localRecordGroups) {
-      if (group.hidden) continue;
-      if (group.primary.courseKey != selectedCourseKey) continue;
-      for (final source in group.sources) {
-        if (!activeIds.contains(source.id)) {
-          extra.add(source);
-        }
-      }
-    }
-    if (extra.isEmpty) return activeCatalog;
-    return List<Assignment>.unmodifiable([...activeCatalog, ...extra]);
-  }
+  ) =>
+      _homeCatalogAssignmentsWithSelectedCourse(selectedCourseKey);
 
-  Set<String> _effectiveHiddenAssignmentIds() => {
-        for (final item in _hiddenAssignments) item.id,
-        for (final group in hiddenCourseworkGroups)
-          for (final source in group.sources) source.id,
-      };
+  List<CourseworkGroup> get hiddenCourseworkGroups => _hiddenCourseworkGroups;
 
-  List<CourseworkGroup> get hiddenCourseworkGroups => List.unmodifiable(
-        localRecordGroups.where((group) => group.hidden),
-      );
+  List<CourseworkGroup> get localCourseTaskGroups => _localCourseTaskGroups;
 
-  List<CourseworkGroup> get localCourseTaskGroups => List.unmodifiable(
-        localRecordGroups.where(
-          (group) => !group.hidden && group.primary.hasCourseTaskIdentity,
-        ),
-      );
-
-  CourseworkGroup? courseworkGroupFor(String assignmentId) => localRecordGroups
-      .where((group) =>
-          group.sources.any((assignment) => assignment.id == assignmentId))
-      .firstOrNull;
+  CourseworkGroup? courseworkGroupFor(String assignmentId) =>
+      _courseworkGroupFor(assignmentId);
   bool _privacyCleanupPending = false;
   final Set<String> _pendingNativeCleanupAccounts = <String>{};
   bool get notificationPrivacyPending => _privacyCleanupPending;
@@ -725,13 +559,7 @@ class AssignmentStore extends ChangeNotifier {
 
   Future<String?> saveDisplay(DisplayPreferences next) => _saveDisplay(next);
 
-  List<Assignment> get visibleAssignments => AssignmentQuery.currentDisplay(
-        courseAssignments,
-        _clock(),
-        coursework: _authenticated
-            ? _courseworkState
-            : const LocalCourseworkState.empty(),
-      );
+  List<Assignment> get visibleAssignments => _visibleAssignments;
   AssignmentSyncProgress? _homeSyncProgress;
   List<Assignment> _homePreviewAssignments = [];
   Set<String> _homePendingDeadlineIds = {};
@@ -743,60 +571,20 @@ class AssignmentStore extends ChangeNotifier {
 
   AssignmentSyncProgress? get homeSyncProgress => _homeSyncProgress;
 
-  List<Assignment> get homeDisplayAssignments {
-    return AssignmentQuery.currentDisplay(
-      homeCatalogAssignments,
-      DateTime.now(),
-      index: homeDisplayIndex,
-      coursework: _authenticated
-          ? _courseworkState
-          : const LocalCourseworkState.empty(),
-    );
-  }
+  List<Assignment> get homeDisplayAssignments => _homeDisplayAssignments;
 
   /// Complete scoped source catalog for the home list, including submitted
   /// homework and ended exams. It retains notice sources for display-time
   /// ordering and stays consistent while a sync preview is published;
   /// current-todo callers continue to use [homeDisplayAssignments].
-  List<Assignment> get homeCatalogAssignments {
-    if (_homeCatalogCache != null) return _homeCatalogCache!;
-    if (_homePreviewAssignments.isEmpty) {
-      final sources = courseAssignments;
-      // The store's own snapshot is already scoped and immutable. Overrides
-      // keep the same filtering and snapshot semantics as before.
-      final next = identical(sources, _courseworkSourcesCache)
-          ? sources
-          : List<Assignment>.unmodifiable(AssignmentQuery.scope(sources, {}));
-      _homeCatalogCache = next;
-      return next;
-    }
-    final merged = LocalAssignmentRepository.mergeAssignments(
-      [..._assignments, ..._hiddenAssignments],
-      _homePreviewAssignments,
-      hiddenCompletedIds:
-          _hiddenAssignments.map((assignment) => assignment.id).toSet(),
-      includeCompleted: true,
-    );
-    final hiddenIds =
-        _hiddenAssignments.map((assignment) => assignment.id).toSet();
-    final next = List<Assignment>.unmodifiable([
-      for (final group in AssignmentGrouping.group(
-        _catalogAssignmentsFrom(merged),
-        hiddenIds: hiddenIds,
-      ))
-        if (!group.hidden) ...group.sources,
-    ]);
-    _homeCatalogCache = next;
-    return next;
-  }
+  List<Assignment> get homeCatalogAssignments => _homeCatalogAssignments;
 
   List<Assignment>? _homeCatalogCache;
   AssignmentDisplayIndex? _homeDisplayIndex;
   Set<String>? _persistedIdsCache;
   Set<String>? _previewIdsCache;
 
-  AssignmentDisplayIndex get homeDisplayIndex =>
-      _homeDisplayIndex ??= AssignmentDisplayIndex.from(homeCatalogAssignments);
+  AssignmentDisplayIndex get homeDisplayIndex => _resolveHomeDisplayIndex;
 
   void _invalidateHomeDisplayIndex() {
     _termCatalogCache = null;
@@ -815,55 +603,22 @@ class AssignmentStore extends ChangeNotifier {
   bool isHomeDeadlinePending(String assignmentId) =>
       _homePendingDeadlineIds.contains(assignmentId);
 
-  bool isHomeAssignmentPreviewOnly(String assignmentId) {
-    if (_homePreviewAssignments.isEmpty) return false;
-    final previewIds =
-        _previewIdsCache ??= {for (final a in _homePreviewAssignments) a.id};
-    if (!previewIds.contains(assignmentId)) return false;
-    final persistedIds =
-        _persistedIdsCache ??= {for (final a in _assignments) a.id};
-    return !persistedIds.contains(assignmentId);
-  }
-
-  List<Assignment> _catalogAssignmentsFrom(Iterable<Assignment> records) =>
-      AssignmentQuery.scope(records.toList(), {})
-          .where((assignment) =>
-              assignment.courseKey == null ||
-              isCourseActive(assignment.courseKey!))
-          .toList();
+  bool isHomeAssignmentPreviewOnly(String assignmentId) =>
+      _isHomeAssignmentPreviewOnly(assignmentId);
 
   Future<void> followCourse(String key, bool followed) =>
       _followCourse(key, followed);
 
-  Map<String, dynamic>? get syncStatus => {
-        'localOnly': true,
-        'lastSyncedAt': _lastSyncAt?.toIso8601String(),
-        'stale': _lastSyncAt == null ||
-            DateTime.now().difference(_lastSyncAt!).inHours >= 24,
-      };
+  Map<String, dynamic>? get syncStatus => _syncStatus;
 
-  Assignment? findAssignment(String assignmentId) {
-    for (final assignment in _assignments) {
-      if (assignment.id == assignmentId) {
-        return assignment;
-      }
-    }
-    return null;
-  }
+  Assignment? findAssignment(String assignmentId) =>
+      _findAssignment(assignmentId);
 
   /// Resolves either visible or hidden assignments on the current account,
   /// allowing read-only detail inspection and restore without exposing hidden
   /// records to [findAssignment] notification or visit callers.
-  Assignment? findAnyAssignment(String assignmentId) {
-    final visible = findAssignment(assignmentId);
-    if (visible != null) return visible;
-    for (final assignment in _hiddenAssignments) {
-      if (assignment.id == assignmentId) {
-        return assignment;
-      }
-    }
-    return null;
-  }
+  Assignment? findAnyAssignment(String assignmentId) =>
+      _findAnyAssignment(assignmentId);
 
   Future<void> restoreSession() => _restoreSession();
 
@@ -954,32 +709,20 @@ class AssignmentStore extends ChangeNotifier {
   Future<bool> saveReminderRule(List<int> offsetsMinutes) =>
       _saveReminderRule(offsetsMinutes);
 
-  Future<bool> saveAutoSyncIntervalMinutes(int minutes) => minutes == 0
-      ? saveBackgroundCheckEnabled(false)
-      : saveBackgroundCheckIntervalMinutes(minutes);
+  Future<bool> saveAutoSyncIntervalMinutes(int minutes) =>
+      _saveAutoSyncIntervalMinutes(minutes);
 
   Future<bool> saveBackgroundCheckEnabled(bool enabled) =>
-      _saveBackgroundCheckSettings(
-        (current) => current.copyWith(enabled: enabled),
-      );
+      _saveBackgroundCheckEnabled(enabled);
 
   Future<bool> saveBackgroundCheckIntervalMinutes(int minutes) =>
-      _saveBackgroundCheckSettings(
-        (current) => current.copyWith(
-          enabled: true,
-          intervalMinutes: DaytimeCheckPolicy.normalizeIntervalMinutes(minutes),
-        ),
-      );
+      _saveBackgroundCheckIntervalMinutes(minutes);
 
   Future<bool> saveNotificationListenerEnabled(bool enabled) =>
-      _saveBackgroundCheckSettings(
-        (current) => current.copyWith(notificationListenerEnabled: enabled),
-      );
+      _saveNotificationListenerEnabled(enabled);
 
   Future<bool> saveNewAssignmentReminderEnabled(bool enabled) =>
-      _saveBackgroundCheckSettings(
-        (current) => current.copyWith(newAssignmentReminderEnabled: enabled),
-      );
+      _saveNewAssignmentReminderEnabled(enabled);
 
   Future<bool> saveAllowUrgentDeadlineNightBreakthrough(bool enabled) =>
       _saveAllowUrgentDeadlineNightBreakthrough(enabled);
@@ -1006,12 +749,8 @@ class AssignmentStore extends ChangeNotifier {
   Future<void> logout() => _logout();
 
   @visibleForTesting
-  void replaceAssignmentsForTest(List<Assignment> assignments) {
-    _assignments
-      ..clear()
-      ..addAll(assignments);
-    _invalidateHomeDisplayIndex();
-  }
+  void replaceAssignmentsForTest(List<Assignment> assignments) =>
+      _replaceAssignmentsForTest(assignments);
 
   bool get reminderHistoryAvailable => _reminderHistoryReady;
 
@@ -1043,12 +782,8 @@ class AssignmentStore extends ChangeNotifier {
 
   bool _needsProfileRecovery = false;
 
-  static int normalizeAutoSyncIntervalMinutes(int minutes) {
-    if (minutes <= 0) {
-      return 0;
-    }
-    return DaytimeCheckPolicy.normalizeIntervalMinutes(minutes);
-  }
+  static int normalizeAutoSyncIntervalMinutes(int minutes) =>
+      minutes <= 0 ? 0 : DaytimeCheckPolicy.normalizeIntervalMinutes(minutes);
 
   Future<void>? _operations;
   _SessionSnapshot? _activeSyncSession;

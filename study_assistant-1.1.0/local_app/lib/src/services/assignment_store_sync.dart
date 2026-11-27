@@ -4,6 +4,105 @@
 part of 'assignment_store.dart';
 
 extension _AssignmentStoreSync on AssignmentStore {
+  String _exportSanitizedSyncDiagnostics() =>
+      ChaoxingSyncDiagnosticsExporter.exportJson(
+        appVersion: AppVersion.display,
+        report: syncReport,
+        phaseElapsedMs: chaoxingClient.diagnostics.phaseElapsedMs,
+        requestTimings: chaoxingClient.requestTimings,
+      );
+
+  String get _syncSummary {
+    if (_warningBuckets.isNotEmpty && syncReport.phase == SyncPhase.success) {
+      return this.hasWidgetWarningOnly ? '作业已更新，小组件需要处理' : '作业已更新，提醒或小组件需要处理';
+    }
+    return syncReport.summary;
+  }
+
+  DateTime? get _effectiveLastSyncAt =>
+      _lastSyncAt ??
+      (syncReport.phase == SyncPhase.success
+          ? syncReport.lastFullSuccessAt
+          : null);
+
+  List<Assignment> get _visibleAssignments => AssignmentQuery.currentDisplay(
+        this.courseAssignments,
+        _clock(),
+        coursework: _authenticated
+            ? _courseworkState
+            : const LocalCourseworkState.empty(),
+      );
+
+  List<Assignment> get _homeDisplayAssignments {
+    return AssignmentQuery.currentDisplay(
+      this.homeCatalogAssignments,
+      DateTime.now(),
+      index: this.homeDisplayIndex,
+      coursework: _authenticated
+          ? _courseworkState
+          : const LocalCourseworkState.empty(),
+    );
+  }
+
+  List<Assignment> get _homeCatalogAssignments {
+    if (_homeCatalogCache != null) return _homeCatalogCache!;
+    if (_homePreviewAssignments.isEmpty) {
+      final sources = this.courseAssignments;
+      // The store's own snapshot is already scoped and immutable. Overrides
+      // keep the same filtering and snapshot semantics as before.
+      final next = identical(sources, _courseworkSourcesCache)
+          ? sources
+          : List<Assignment>.unmodifiable(AssignmentQuery.scope(sources, {}));
+      _homeCatalogCache = next;
+      return next;
+    }
+    final merged = LocalAssignmentRepository.mergeAssignments(
+      [..._assignments, ..._hiddenAssignments],
+      _homePreviewAssignments,
+      hiddenCompletedIds:
+          _hiddenAssignments.map((assignment) => assignment.id).toSet(),
+      includeCompleted: true,
+    );
+    final hiddenIds =
+        _hiddenAssignments.map((assignment) => assignment.id).toSet();
+    final next = List<Assignment>.unmodifiable([
+      for (final group in AssignmentGrouping.group(
+        _catalogAssignmentsFrom(merged),
+        hiddenIds: hiddenIds,
+      ))
+        if (!group.hidden) ...group.sources,
+    ]);
+    _homeCatalogCache = next;
+    return next;
+  }
+
+  AssignmentDisplayIndex get _resolveHomeDisplayIndex => _homeDisplayIndex ??=
+      AssignmentDisplayIndex.from(this.homeCatalogAssignments);
+
+  bool _isHomeAssignmentPreviewOnly(String assignmentId) {
+    if (_homePreviewAssignments.isEmpty) return false;
+    final previewIds =
+        _previewIdsCache ??= {for (final a in _homePreviewAssignments) a.id};
+    if (!previewIds.contains(assignmentId)) return false;
+    final persistedIds =
+        _persistedIdsCache ??= {for (final a in _assignments) a.id};
+    return !persistedIds.contains(assignmentId);
+  }
+
+  List<Assignment> _catalogAssignmentsFrom(Iterable<Assignment> records) =>
+      AssignmentQuery.scope(records.toList(), {})
+          .where((assignment) =>
+              assignment.courseKey == null ||
+              this.isCourseActive(assignment.courseKey!))
+          .toList();
+
+  Map<String, dynamic>? get _syncStatus => {
+        'localOnly': true,
+        'lastSyncedAt': _lastSyncAt?.toIso8601String(),
+        'stale': _lastSyncAt == null ||
+            DateTime.now().difference(_lastSyncAt!).inHours >= 24,
+      };
+
   Future<bool> _syncCourseChapters({String? courseKey}) async {
     final account = _account;
     final epoch = _generation;
@@ -69,7 +168,7 @@ extension _AssignmentStoreSync on AssignmentStore {
           return;
         }
         if (chaoxingClient.needsSessionInitialization) {
-          await _refreshChaoxingSession();
+          await _refreshChaoxingSession(syncOperation: chapterOperation);
         }
         var updatedCount = 0;
         String? firstIssue;
@@ -97,7 +196,7 @@ extension _AssignmentStoreSync on AssignmentStore {
               )) {
                 break;
               }
-              await _refreshChaoxingSession();
+              await _refreshChaoxingSession(syncOperation: chapterOperation);
               if (!_isSessionStateCurrent(
                 epoch: epoch,
                 syncOperation: chapterOperation,
@@ -209,6 +308,7 @@ extension _AssignmentStoreSync on AssignmentStore {
       if (!_isSessionStateCurrent(epoch: generation)) return;
       if (chaoxingClient.needsSessionInitialization) {
         await _refreshChaoxingSession();
+        if (!_isSessionStateCurrent(epoch: generation)) return;
       }
       chaoxingClient.previousAssignments = {
         for (final a in [..._assignments, ..._hiddenAssignments]) a.id: a
@@ -221,7 +321,9 @@ extension _AssignmentStoreSync on AssignmentStore {
               : await chaoxingClient.fetchAssignmentsForCourse(
                   courseId: target.courseId!, clazzId: target.clazzId!);
         } on ChaoxingAuthenticationException {
+          if (!_isSessionStateCurrent(epoch: generation)) return;
           await _refreshChaoxingSession();
+          if (!_isSessionStateCurrent(epoch: generation)) return;
           incoming = target.courseId == null
               ? await chaoxingClient.fetchAssignments()
               : await chaoxingClient.fetchAssignmentsForCourse(
@@ -232,7 +334,9 @@ extension _AssignmentStoreSync on AssignmentStore {
         try {
           single = await chaoxingClient.fetchReturnedWork(target);
         } on ChaoxingAuthenticationException {
+          if (!_isSessionStateCurrent(epoch: generation)) return;
           await _refreshChaoxingSession();
+          if (!_isSessionStateCurrent(epoch: generation)) return;
           single = await chaoxingClient.fetchReturnedWork(target);
         }
         incoming = single == null ? const <Assignment>[] : [single];
@@ -482,6 +586,7 @@ extension _AssignmentStoreSync on AssignmentStore {
     _syncSkipReason = null;
     _syncSkipReasonOperation = null;
     _syncSkipReasonGeneration = null;
+    final account = _account;
     final accountHash = _accountHash;
     final sessionEpoch = _nativeSessionEpoch;
     String? leaseRequest;
@@ -571,8 +676,7 @@ extension _AssignmentStoreSync on AssignmentStore {
       }
       return null;
     } finally {
-      if (_nativeReminderAvailable &&
-          accountHash != null &&
+      if (accountHash != null &&
           leaseRequest != null &&
           lease != null &&
           lease.acquired) {
@@ -584,8 +688,16 @@ extension _AssignmentStoreSync on AssignmentStore {
         } catch (error) {
           // Keep the sync result intact; an unconfirmed release is visible and
           // the native engine-destroy path remains the safety net.
-          _backgroundWarning = '同步租约释放未确认：$error';
-          _warningBuckets.addServiceWarning(_backgroundWarning!);
+          if (_isSessionStateCurrent(
+            epoch: generation,
+            account: account,
+            checkAccount: true,
+            expectedAuthenticated: null,
+          )) {
+            _backgroundWarning = '同步租约释放未确认：$error';
+            _warningBuckets.addServiceWarning(_backgroundWarning!);
+            this._notify();
+          }
         }
       }
     }
@@ -1123,8 +1235,11 @@ extension _AssignmentStoreSync on AssignmentStore {
     } on StaleSessionWriteException {
       return;
     }
+    _ensureSyncActive(operation);
     if (chaoxingClient.needsSessionInitialization) {
-      await _refreshChaoxingSession();
+      await _refreshChaoxingSession(syncOperation: operation);
+      _ensureSyncActive(operation);
+      if (!_isSessionCurrent(syncSession)) return;
       _needsProfileRecovery = false;
     }
     final previous = [..._assignments, ..._hiddenAssignments];
@@ -1148,6 +1263,7 @@ extension _AssignmentStoreSync on AssignmentStore {
 
     attachProgress();
     var savingStageMarked = false;
+    var staleCourseWrite = false;
     // Persistence begins with the course cache; mark that stage before the
     // first write can suspend, not only before the journal merge.
     void markSavingStage() {
@@ -1166,10 +1282,12 @@ extension _AssignmentStoreSync on AssignmentStore {
         enableTaskEngineProbe: manualSync && !skipTaskEngineProbe,
       );
     } on ChaoxingAuthenticationException {
-      _needsProfileRecovery = false;
       chaoxingClient.onProgress = null;
       _clearHomePreview(notify: true);
-      await _refreshChaoxingSession();
+      await _refreshChaoxingSession(syncOperation: operation);
+      _ensureSyncActive(operation);
+      if (!_isSessionCurrent(syncSession)) return;
+      _needsProfileRecovery = false;
       attachProgress();
       chaoxingClient.nextSyncCourseSelector = _buildSyncCourseSelector(
         requestedScope,
@@ -1188,12 +1306,7 @@ extension _AssignmentStoreSync on AssignmentStore {
       chaoxingClient.onProgress = null;
       chaoxingClient.shouldStop = null;
       chaoxingClient.nextSyncCourseSelector = null;
-      if (_isSessionStateCurrent(
-            epoch: generation,
-            expectedAuthenticated: null,
-            syncOperation: operation,
-          ) &&
-          chaoxingClient.hasCourseResponse) {
+      if (_isSessionCurrent(syncSession) && chaoxingClient.hasCourseResponse) {
         final nextCourses = chaoxingClient.courses
             .map((c) => CourseRef(
                   courseId: c.courseId,
@@ -1206,24 +1319,28 @@ extension _AssignmentStoreSync on AssignmentStore {
                   courseEndAt: c.courseEndAt,
                 ))
             .toList();
-        final account = _account;
-        if (account == null) {
+        if (syncAccount == null) {
           throw StateError('当前学习通账号已变化，课程资料未保存');
         }
         markSavingStage();
         try {
-          await repository.saveCourses(nextCourses, account: account);
-          if (generation == _generation && !_disposed) {
+          await repository.saveCourses(
+            nextCourses,
+            account: syncAccount,
+            canCommit: _scopedWriteGateFor(syncSession),
+          );
+          if (_isSessionCurrent(syncSession)) {
             _courses = nextCourses;
             _invalidateHomeDisplayIndex();
           }
         } on StaleSessionWriteException {
-          // Account changed before the finally block could commit courses.
+          staleCourseWrite = true;
         }
       }
     }
     if (generation != _generation || _disposed) return;
     _ensureSyncActive(operation);
+    if (staleCourseWrite) return;
     var warning = chaoxingClient.lastSyncWarning;
     // Snapshot scope, issues, sources, and counts before optional profile
     // recovery, because _refreshChaoxingSession() calls login()->clearSession()
@@ -1253,7 +1370,7 @@ extension _AssignmentStoreSync on AssignmentStore {
     if (_needsProfileRecovery && !chaoxingClient.deferProfile) {
       _needsProfileRecovery = false;
       try {
-        await _refreshChaoxingSession();
+        await _refreshChaoxingSession(syncOperation: operation);
       } catch (_) {
         // Profile recovery is optional after a successful homework fetch.
       }
@@ -1480,12 +1597,21 @@ extension _AssignmentStoreSync on AssignmentStore {
     }
   }
 
-  Future<void> _refreshChaoxingSession() async {
+  Future<void> _refreshChaoxingSession({int? syncOperation}) async {
     final generation = _generation;
+    bool sessionIsCurrent({String? account}) => _isSessionStateCurrent(
+          epoch: generation,
+          account: account,
+          checkAccount: account != null,
+          expectedAuthenticated: null,
+          syncOperation: syncOperation,
+        );
+
+    if (!sessionIsCurrent()) return;
     final account = _account ?? await sessionStore.readChaoxingAccount();
-    if (generation != _generation || _disposed) return;
+    if (!sessionIsCurrent()) return;
     final password = await sessionStore.readChaoxingPassword();
-    if (generation != _generation || _disposed) return;
+    if (!sessionIsCurrent()) return;
     if (account == null ||
         account.trim().isEmpty ||
         password == null ||
@@ -1495,11 +1621,15 @@ extension _AssignmentStoreSync on AssignmentStore {
     // Restored sessions also skip optional profile/avatar requests. A profile
     // challenge must not prevent the authenticated course request from running.
     chaoxingClient.deferProfile = true;
-    final result = await chaoxingClient.login(
-      account: account,
-      password: password,
-    );
-    if (generation != _generation || _disposed) {
+    final ChaoxingLoginResult result;
+    try {
+      result = await chaoxingClient.login(account: account, password: password);
+    } catch (_) {
+      if (sessionIsCurrent()) rethrow;
+      chaoxingClient.clearSession();
+      return;
+    }
+    if (!sessionIsCurrent()) {
       chaoxingClient.clearSession();
       return;
     }
@@ -1511,39 +1641,18 @@ extension _AssignmentStoreSync on AssignmentStore {
       final displayName = result.displayName ??
           _chaoxingDisplayName ??
           await sessionStore.readChaoxingDisplayName();
-      if (!_isSessionStateCurrent(
-        epoch: generation,
-        account: account,
-        checkAccount: true,
-        expectedAuthenticated: null,
-      )) {
-        return;
-      }
+      if (!sessionIsCurrent(account: account)) return;
       final avatarUrl = result.avatarUrl ??
           _chaoxingAvatarUrl ??
           await sessionStore.readChaoxingAvatarUrl();
-      if (!_isSessionStateCurrent(
-        epoch: generation,
-        account: account,
-        checkAccount: true,
-        expectedAuthenticated: null,
-      )) {
-        return;
-      }
+      if (!sessionIsCurrent(account: account)) return;
       await sessionStore.saveChaoxingAccount(
         account: account,
         password: password,
         displayName: displayName,
         avatarUrl: avatarUrl,
       );
-      if (!_isSessionStateCurrent(
-        epoch: generation,
-        account: account,
-        checkAccount: true,
-        expectedAuthenticated: null,
-      )) {
-        return;
-      }
+      if (!sessionIsCurrent(account: account)) return;
       _chaoxingDisplayName = displayName;
       _chaoxingAvatarUrl = avatarUrl;
     }

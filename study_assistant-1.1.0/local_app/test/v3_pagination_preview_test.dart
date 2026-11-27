@@ -342,10 +342,18 @@ class _BlockingCourseRepository extends LocalAssignmentRepository {
   final releaseCourses = Completer<void>();
 
   @override
-  Future<void> saveCourses(List<CourseRef> courses, {String? account}) async {
+  Future<void> saveCourses(
+    List<CourseRef> courses, {
+    String? account,
+    Future<bool> Function()? canCommit,
+  }) async {
     if (!courseSaveStarted.isCompleted) courseSaveStarted.complete();
     await releaseCourses.future;
-    return super.saveCourses(courses, account: account);
+    return super.saveCourses(
+      courses,
+      account: account,
+      canCommit: canCommit,
+    );
   }
 }
 

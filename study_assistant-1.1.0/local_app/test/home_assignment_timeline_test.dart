@@ -660,6 +660,83 @@ void main() {
         find.byKey(const ValueKey('home-upcoming-exam-strip')), findsNothing);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets(
+      'Phase 5A exiting upcoming exam view restores pre-exam scope while keeping newly saved sort order',
+      (tester) async {
+    final now = DateTime.utc(2026, 11, 16, 2); // Beijing 10:00
+    SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
+    final session = f.Session();
+    final store = _PinTimelineStore(sessionStore: session, clock: () => now);
+    addTearDown(store.dispose);
+    await store.restoreSession();
+
+    final mathExam = Assignment(
+      id: 'cx:exam:1:2:10',
+      source: AssignmentSource.exam,
+      courseName: '高等数学',
+      title: '高数期中考试',
+      deadlineAt: null,
+      requirementsText: '',
+      status: 'pending',
+      lastSyncedAt: now,
+      exam: ExamInfo(
+        examId: '10',
+        courseId: '1',
+        clazzId: '2',
+        startAt: now.add(const Duration(days: 3)),
+        endAt: now.add(const Duration(days: 3, hours: 2)),
+        startTrusted: true,
+        endTrusted: true,
+        lifecycle: 'scheduled',
+      ),
+    );
+    final mathWork = _work(
+      'math-work',
+      title: '高数习题',
+      course: '高等数学',
+      due: now.add(const Duration(days: 2)),
+    ).copyWith(id: 'cx:work:1:2:w1');
+
+    store
+      ..replaceAssignmentsForTest([mathExam, mathWork])
+      ..homeFilters = const HomeFilters(
+        query: '高数',
+        courseKey: '1:2',
+        deadline: AssignmentDeadlineFilter.notExpired,
+        type: AssignmentTypeFilter.all,
+        sortOrder: HomeSortOrder.deadlineAsc,
+      );
+
+    await _mountRoutedHomeWithClock(tester, store, () => now);
+    tester.view.physicalSize = const Size(360, 780);
+    await tester.pumpAndSettle();
+
+    expect(find.text('近期考试 · 《高数期中考试》3 天后'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('home-upcoming-exam-strip')));
+    await tester.pumpAndSettle();
+    expect(store.homeFilters.type, AssignmentTypeFilter.exam);
+    expect(store.homeFilters.deadline, AssignmentDeadlineFilter.all);
+    expect(store.homeFilters.courseKey, '1:2');
+    expect(store.homeFilters.query, '高数');
+
+    await tester.tap(find.byKey(const ValueKey('current-home-sort')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('时间：远到近'));
+    await tester.pumpAndSettle();
+    expect(store.homeFilters.sortOrder, HomeSortOrder.deadlineDesc);
+
+    await tester.tap(find.byKey(const ValueKey('home-upcoming-exam-strip')));
+    await tester.pumpAndSettle();
+    expect(store.homeFilters.type, AssignmentTypeFilter.all);
+    expect(store.homeFilters.query, '高数');
+    expect(store.homeFilters.courseKey, '1:2');
+    expect(store.homeFilters.deadline, AssignmentDeadlineFilter.notExpired);
+    expect(store.homeFilters.sortOrder, HomeSortOrder.deadlineDesc);
+    expect(find.text('时间远到近'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
 }
 
 Future<GoRouter> _mountRoutedHomeWithClock(

@@ -1,6 +1,41 @@
+// Keep explicit receivers on calls that dispatch through the store.
+// ignore_for_file: unnecessary_this
+
 part of 'assignment_store.dart';
 
 extension _AssignmentStoreReminders on AssignmentStore {
+  DateTime? get _nextBackgroundCheckAt {
+    if (!_authenticated || !_backgroundCheckSettings.enabled) return null;
+    return _nextBackgroundTarget(DateTime.now());
+  }
+
+  Future<bool> _saveAutoSyncIntervalMinutes(int minutes) => minutes == 0
+      ? this.saveBackgroundCheckEnabled(false)
+      : this.saveBackgroundCheckIntervalMinutes(minutes);
+
+  Future<bool> _saveBackgroundCheckEnabled(bool enabled) =>
+      _saveBackgroundCheckSettings(
+        (current) => current.copyWith(enabled: enabled),
+      );
+
+  Future<bool> _saveBackgroundCheckIntervalMinutes(int minutes) =>
+      _saveBackgroundCheckSettings(
+        (current) => current.copyWith(
+          enabled: true,
+          intervalMinutes: DaytimeCheckPolicy.normalizeIntervalMinutes(minutes),
+        ),
+      );
+
+  Future<bool> _saveNotificationListenerEnabled(bool enabled) =>
+      _saveBackgroundCheckSettings(
+        (current) => current.copyWith(notificationListenerEnabled: enabled),
+      );
+
+  Future<bool> _saveNewAssignmentReminderEnabled(bool enabled) =>
+      _saveBackgroundCheckSettings(
+        (current) => current.copyWith(newAssignmentReminderEnabled: enabled),
+      );
+
   Future<BackgroundReminderHealth?> _inspectBackgroundReminderHealth() async {
     final accountHash = _accountHash;
     if (!_nativeReminderAvailable || !_authenticated || accountHash == null) {
@@ -815,11 +850,11 @@ extension _AssignmentStoreReminders on AssignmentStore {
             _backgroundCheckSettings.newAssignmentReminderEnabled,
         courseworkState: _courseworkState,
         allowUrgentNightBreakthrough: _allowUrgentDeadlineNightBreakthrough,
-        courseworkGroupFor: courseworkGroupFor,
-        findAssignment: findAssignment,
+        courseworkGroupFor: this.courseworkGroupFor,
+        findAssignment: this.findAssignment,
         inspectHealth: notificationService.inspectHealth,
         readScheduleEvidence: notificationService.readScheduleEvidence,
-        inspectSubjects: inspectReminderSubjects,
+        inspectSubjects: this.inspectReminderSubjects,
         loadPlanState: (accountHash, sessionEpoch) =>
             backgroundReminderGateway.loadPlanState(
           accountHash: accountHash,
