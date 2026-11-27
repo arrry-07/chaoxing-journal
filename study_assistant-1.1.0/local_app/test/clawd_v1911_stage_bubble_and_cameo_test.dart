@@ -1968,6 +1968,152 @@ void main() {
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
     });
+
+    testWidgets(
+        'CalendarScreen anchors cameo bubble dynamically, dismisses on vertical scroll, preserves bubble across horizontal month swipe, and re-aligns at top',
+        (tester) async {
+      tester.view.physicalSize = const Size(360, 560);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      final now = DateTime.utc(2026, 11, 26, 2, 0);
+      final store = await _createSeededStore(
+        now: now,
+        assignments: [
+          for (var i = 0; i < 10; i++)
+            Assignment(
+              id: 'cx:work:1:${20 + i}:cal-$i',
+              courseName: '课程$i',
+              title: '日历作业$i',
+              deadlineAt: now.add(Duration(hours: i + 1)),
+              deadlineTrusted: true,
+              requirementsText: '',
+              status: 'pending',
+              lastSyncedAt: now,
+            ),
+        ],
+      );
+      addTearDown(store.dispose);
+
+      final router = _buildShellRouter(store, clock: () => now);
+      addTearDown(router.dispose);
+
+      await tester.pumpWidget(
+        MaterialApp.router(
+          theme: StudyAssistantTheme.light,
+          routerConfig: router,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('日历'));
+      await tester.pumpAndSettle();
+
+      final titleFinder = find.text('课业日历');
+      final cameoFinder = find.byKey(const ValueKey('calendar-pixel-buddy'));
+      final bubbleFinder = find.byKey(const ValueKey('clawd-speech-bubble'));
+      final agendaButtonFinder = find.text('个人待办');
+      expect(agendaButtonFinder, findsOneWidget);
+      expect(find.text('个人待办与考试'), findsNothing);
+      expect(
+        tester.getRect(agendaButtonFinder).left,
+        greaterThan(tester.getRect(titleFinder).right),
+      );
+
+      void expectBubbleAligned(String label) {
+        expect(bubbleFinder, findsOneWidget, reason: '$label: bubble missing');
+        final bubbleRect = tester.getRect(bubbleFinder);
+        final titleRect = tester.getRect(titleFinder);
+        final cameoRect = tester.getRect(cameoFinder);
+        final anchorFloor = cameoRect.bottom > titleRect.bottom
+            ? cameoRect.bottom
+            : titleRect.bottom;
+        expect(
+          bubbleRect.top,
+          greaterThanOrEqualTo(cameoRect.bottom + 2.0),
+          reason:
+              '$label: bubble top=${bubbleRect.top} < cameo bottom=${cameoRect.bottom}',
+        );
+        expect(
+          bubbleRect.top,
+          lessThanOrEqualTo(anchorFloor + 12.0),
+          reason:
+              '$label: bubble top=${bubbleRect.top} drifted below anchorFloor=$anchorFloor',
+        );
+        expect(
+          bubbleRect.overlaps(titleRect),
+          isFalse,
+          reason: '$label: bubble=$bubbleRect overlaps title=$titleRect',
+        );
+        expect(
+          bubbleRect.overlaps(cameoRect),
+          isFalse,
+          reason: '$label: bubble=$bubbleRect overlaps cameo=$cameoRect',
+        );
+      }
+
+      // 1. Tap cameo at top -> aligned dynamically below title & cameo.
+      await tester.tap(cameoFinder);
+      await tester.pumpAndSettle();
+      expectBubbleAligned('calendar-top');
+
+      // 2. Horizontal month PageView swipe must NOT dismiss the active bubble.
+      final monthPageView = find.byType(PageView).first;
+      await tester.drag(monthPageView, const Offset(-260, 0));
+      await tester.pumpAndSettle();
+      expect(find.text('2026年12月'), findsOneWidget);
+      expect(find.text('回今天'), findsOneWidget);
+      expectBubbleAligned('calendar-after-month-swipe');
+
+      // Swipe back to current month so today's rich agenda keeps ListView scrollable.
+      await tester.tap(find.text('回今天'));
+      await tester.pumpAndSettle();
+      expect(find.text('2026年11月'), findsOneWidget);
+
+      // 3. Vertical scroll > 0.5dp dismisses the bubble immediately.
+      final calendarListFinder = find.byType(ListView).first;
+      final calendarScroll = tester
+          .state<ScrollableState>(
+            find
+                .descendant(
+                  of: calendarListFinder,
+                  matching: find.byType(Scrollable),
+                )
+                .first,
+          )
+          .position;
+      expect(calendarScroll.maxScrollExtent, greaterThan(48.0));
+
+      await tester.drag(calendarListFinder, const Offset(0, -120));
+      await tester.pump();
+      expect(bubbleFinder, findsNothing);
+      await tester.pumpAndSettle();
+
+      // 4. Scroll back to top -> re-tap cameo aligns cleanly.
+      await tester.drag(calendarListFinder, const Offset(0, 200));
+      await tester.pumpAndSettle();
+      expect(calendarScroll.pixels, 0.0);
+      await tester.tap(cameoFinder);
+      await tester.pumpAndSettle();
+      expectBubbleAligned('calendar-back-to-top');
+      await tester.tap(bubbleFinder);
+      await tester.pumpAndSettle();
+
+      // 5. Micro-scroll ~24dp -> re-tap cameo proves dynamic top (not hardcoded 56dp).
+      await tester.timedDragFrom(
+        tester.getTopLeft(calendarListFinder) + const Offset(8, 100),
+        const Offset(0, -24),
+        const Duration(milliseconds: 500),
+      );
+      await tester.pumpAndSettle();
+      expect(calendarScroll.pixels, inInclusiveRange(20.0, 28.0));
+      await tester.tap(cameoFinder);
+      await tester.pumpAndSettle();
+      final microBubbleTop = tester.getRect(bubbleFinder).top;
+      expect(microBubbleTop, lessThan(44.0));
+      expectBubbleAligned('calendar-micro-24dp');
+      expect(tester.takeException(), isNull);
+    });
   });
 }
 

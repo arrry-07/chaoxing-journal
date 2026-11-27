@@ -55,12 +55,14 @@ class ManualHomeCard extends StatelessWidget {
     final overdue = bucket == AssignmentDeadlineBucket.overdue;
     final largeText = JournalLayout.isLargeText(context);
     final compactLayout = compact && !largeText;
-    final titleStyle = compactLayout
-        ? journal.entryTitle.copyWith(fontSize: 14.5)
-        : journal.entryTitle;
-    final metaStyle = compactLayout
-        ? journal.metadata.copyWith(fontSize: 12.5)
-        : journal.metadata;
+    final titleStyle = journal.entryTitle.copyWith(
+      fontSize: compactLayout ? 14.8 : 16.0,
+      height: 1.34,
+    );
+    final metaStyle = journal.metadata.copyWith(
+      color: journal.subtle,
+      fontSize: compactLayout ? 12.5 : null,
+    );
     final bodyGap = compactLayout ? 2.0 : 4.0;
     final railWidth = AssignmentCard.measureRailWidth(
       context,
@@ -117,7 +119,7 @@ class ManualHomeCard extends StatelessWidget {
                 style: journal.metadata.copyWith(
                   fontSize: 11,
                   height: 1.22,
-                  color: today ? journal.accent : journal.muted,
+                  color: today ? journal.accent : journal.subtle,
                 ),
               ),
             ],
@@ -150,7 +152,7 @@ class ManualHomeCard extends StatelessWidget {
           Text(
             dateLabel,
             style: journal.metadata.copyWith(
-              color: pinUrgent ? journal.accent : journal.muted,
+              color: pinUrgent ? journal.accent : journal.subtle,
               fontSize: 11.5,
               height: 1.22,
               fontWeight: pinUrgent ? FontWeight.w600 : FontWeight.w500,
@@ -167,7 +169,7 @@ class ManualHomeCard extends StatelessWidget {
           Text(
             remaining,
             style: journal.metadata.copyWith(
-              color: pinUrgent ? journal.accent : journal.muted,
+              color: pinUrgent ? journal.accent : journal.subtle,
               fontSize: 11,
               height: 1.22,
             ),
@@ -309,7 +311,11 @@ class ManualHomeCard extends StatelessWidget {
               entry.note.trim(),
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: journal.metadata.copyWith(fontSize: 12.5, height: 1.4),
+              style: journal.metadata.copyWith(
+                color: journal.subtle,
+                fontSize: 12.5,
+                height: 1.4,
+              ),
             ),
           ),
       ],

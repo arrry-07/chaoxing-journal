@@ -138,6 +138,7 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
     required this.primaryFill,
     required this.onPrimaryFill,
     required this.muted,
+    required this.subtle,
     required this.sage,
     required this.sageBorder,
     required this.rule,
@@ -184,6 +185,7 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
     primaryFill: Journal.slate,
     onPrimaryFill: Color(0xFFFFFFFF),
     muted: Journal.muted,
+    subtle: Color(0xFF565E69),
     sage: Journal.sage,
     sageBorder: Journal.sageBorder,
     rule: Journal.rule,
@@ -231,6 +233,7 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
     primaryFill: Color(0xFF88A8F8),
     onPrimaryFill: Color(0xFF1A1917),
     muted: Color(0xFFC4BFB6),
+    subtle: Color(0xFFA5A096),
     sage: Color(0xFF252B3B),
     sageBorder: Color(0xFF3D4C6E),
     rule: Color(0xFF32302B),
@@ -276,6 +279,7 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
   final Color primaryFill;
   final Color onPrimaryFill;
   final Color muted;
+  final Color subtle;
   final Color sage;
   final Color sageBorder;
   final Color rule;
@@ -350,6 +354,7 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
     Color? primaryFill,
     Color? onPrimaryFill,
     Color? muted,
+    Color? subtle,
     Color? sage,
     Color? sageBorder,
     Color? rule,
@@ -395,6 +400,7 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
         primaryFill: primaryFill ?? this.primaryFill,
         onPrimaryFill: onPrimaryFill ?? this.onPrimaryFill,
         muted: muted ?? this.muted,
+        subtle: subtle ?? this.subtle,
         sage: sage ?? this.sage,
         sageBorder: sageBorder ?? this.sageBorder,
         rule: rule ?? this.rule,
@@ -447,6 +453,7 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
       primaryFill: Color.lerp(primaryFill, other.primaryFill, t)!,
       onPrimaryFill: Color.lerp(onPrimaryFill, other.onPrimaryFill, t)!,
       muted: Color.lerp(muted, other.muted, t)!,
+      subtle: Color.lerp(subtle, other.subtle, t)!,
       sage: Color.lerp(sage, other.sage, t)!,
       sageBorder: Color.lerp(sageBorder, other.sageBorder, t)!,
       rule: Color.lerp(rule, other.rule, t)!,
@@ -506,6 +513,7 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
           primaryFill == other.primaryFill &&
           onPrimaryFill == other.onPrimaryFill &&
           muted == other.muted &&
+          subtle == other.subtle &&
           sage == other.sage &&
           sageBorder == other.sageBorder &&
           rule == other.rule &&
@@ -552,6 +560,7 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
         primaryFill,
         onPrimaryFill,
         muted,
+        subtle,
         sage,
         sageBorder,
         rule,

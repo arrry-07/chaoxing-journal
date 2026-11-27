@@ -20,6 +20,7 @@ import 'widgets/journal_buttons.dart';
 import 'widgets/journal_expansion_tile.dart';
 import 'widgets/journal_grouped_card.dart';
 import 'widgets/journal_info_popover.dart';
+import 'widgets/journal_modal_sheet.dart';
 import 'widgets/journal_picker_sheet.dart';
 import 'widgets/journal_sliver_grouped_card.dart';
 
@@ -224,11 +225,8 @@ class _CourseStudyHubScreenState extends State<CourseStudyHubScreen> {
       return;
     }
     var closingForAccountChange = false;
-    await showModalBottomSheet<void>(
+    await showJournalModalSheet<void>(
       context: context,
-      useRootNavigator: true,
-      isScrollControlled: true,
-      useSafeArea: true,
       backgroundColor: Colors.transparent,
       builder: (sheetContext) {
         final journal = Journal.of(sheetContext);

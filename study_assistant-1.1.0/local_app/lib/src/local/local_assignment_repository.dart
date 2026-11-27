@@ -361,11 +361,18 @@ class LocalAssignmentRepository {
 
   Future<void> saveHistoricalSweepState(
     HistoricalSweepState state,
-    String account,
-  ) =>
+    String account, {
+    Future<bool> Function()? canCommit,
+  }) =>
       _serialized(() async {
         final prefs = await SharedPreferences.getInstance();
+        if (!crossEngineLockEnabled) {
+          await prefs.reload();
+        }
         _checkOwner(prefs, account);
+        if (canCommit != null && !await canCommit()) {
+          throw StaleSessionWriteException('账号会话已变化，旧往期巡检游标已拒绝提交');
+        }
         await _protectExisting(
           prefs,
           _historicalSweepStateKey,
@@ -1092,9 +1099,19 @@ class LocalAssignmentRepository {
     return valid;
   }
 
-  Future<void> saveCourses(List<CourseRef> courses, {String? account}) =>
+  Future<void> saveCourses(
+    List<CourseRef> courses, {
+    String? account,
+    Future<bool> Function()? canCommit,
+  }) =>
       _serialized(() async {
         final p = await SharedPreferences.getInstance();
+        if (!crossEngineLockEnabled) {
+          await p.reload();
+        }
+        if (canCommit != null && !await canCommit()) {
+          throw StaleSessionWriteException('账号会话已变化，旧课程结果已拒绝提交');
+        }
         if (account != null) {
           _checkOwner(p, account);
         } else if (p.containsKey(_switchKey)) {

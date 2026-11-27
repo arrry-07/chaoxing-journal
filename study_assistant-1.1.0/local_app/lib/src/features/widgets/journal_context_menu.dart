@@ -15,12 +15,14 @@ class JournalContextMenuAction {
     required this.icon,
     required this.onSelected,
     this.destructive = false,
+    this.selected = false,
   });
 
   final String label;
   final IconData icon;
   final VoidCallback onSelected;
   final bool destructive;
+  final bool selected;
 }
 
 Future<void> showJournalContextMenu({
@@ -29,9 +31,14 @@ Future<void> showJournalContextMenu({
   Widget? previewCard,
   required List<JournalContextMenuAction> actions,
   DisplayPreferences displayPrefs = const DisplayPreferences(),
+  bool useSelectionFeedback = false,
 }) async {
   if (actions.isEmpty) return;
-  JournalMotion.mediumThreshold(displayPrefs);
+  if (useSelectionFeedback) {
+    JournalMotion.selectionTick(displayPrefs);
+  } else {
+    JournalMotion.mediumThreshold(displayPrefs);
+  }
   final reduced = JournalMotion.isReducedMotion(context);
   final duration = reduced ? Duration.zero : const Duration(milliseconds: 190);
 
@@ -383,30 +390,42 @@ class _ContextMenuRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = action.destructive ? journal.berry : journal.ink;
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(minHeight: 48),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    action.label,
-                    style: journal.entryTitle.copyWith(
-                      fontSize: 15,
-                      color: color,
-                      fontWeight: FontWeight.w500,
+    final isSelected = !action.destructive && action.selected;
+    final color = action.destructive
+        ? journal.berry
+        : isSelected
+            ? journal.accent
+            : journal.ink;
+    return Semantics(
+      selected: isSelected,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 48),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      action.label,
+                      style: journal.entryTitle.copyWith(
+                        fontSize: 15,
+                        color: color,
+                        fontWeight: FontWeight.w500,
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(width: 12),
-                Icon(action.icon, size: 19, color: color),
-              ],
+                  const SizedBox(width: 12),
+                  if (isSelected) ...[
+                    Icon(Icons.check_rounded, size: 18, color: color),
+                    const SizedBox(width: 8),
+                  ],
+                  Icon(action.icon, size: 19, color: color),
+                ],
+              ),
             ),
           ),
         ),

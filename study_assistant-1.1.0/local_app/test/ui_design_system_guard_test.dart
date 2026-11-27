@@ -1,4 +1,6 @@
 import 'dart:io';
+import 'dart:math' as math;
+import 'dart:ui' show Tristate;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -8,10 +10,13 @@ import 'package:intl/date_symbol_data_local.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:study_assistant_mobile/src/app/app_shell.dart';
 import 'package:study_assistant_mobile/src/app/journal.dart';
+import 'package:study_assistant_mobile/src/app/journal_motion.dart';
 import 'package:study_assistant_mobile/src/features/assignment_list_screen.dart';
 import 'package:study_assistant_mobile/src/features/calendar_screen.dart';
 import 'package:study_assistant_mobile/src/features/profile_screen.dart';
 import 'package:study_assistant_mobile/src/features/stats_screen.dart';
+import 'package:study_assistant_mobile/src/features/widgets/journal_context_menu.dart';
+import 'package:study_assistant_mobile/src/features/widgets/journal_modal_sheet.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
 import 'package:study_assistant_mobile/src/services/local_notification_service.dart';
@@ -120,22 +125,56 @@ List<File> _dartFiles(Directory dir) => dir
     .toList()
   ..sort((a, b) => a.path.compareTo(b.path));
 
-/// Advances past a Dart comment or string literal starting at [index], or
-/// returns [index] unchanged if none starts there.
-int _skipDartCommentOrString(String source, int index) {
+bool _isIdentifierChar(int codeUnit) =>
+    (codeUnit >= 0x30 && codeUnit <= 0x39) ||
+    (codeUnit >= 0x41 && codeUnit <= 0x5A) ||
+    (codeUnit >= 0x61 && codeUnit <= 0x7A) ||
+    codeUnit == 0x5F ||
+    codeUnit == 0x24;
+
+void _writeMasked(StringBuffer? out, String source, int start, int end) {
+  if (out == null) return;
+  for (var k = start; k < end; k++) {
+    out.write(source[k] == '\n' ? '\n' : ' ');
+  }
+}
+
+/// Scans a Dart comment or string literal starting at [index], returning its
+/// exclusive end offset (or [index] unchanged if none starts there).
+///
+/// When [out] is non-null, writes a masked copy of the scanned span into [out]
+/// that preserves newlines/column offsets while keeping Dart code inside
+/// non-raw `${...}` interpolations intact.
+int _scanDartCommentOrString(String source, int index, StringBuffer? out) {
   final len = source.length;
   if (index >= len) return index;
   if (source.startsWith('//', index)) {
     final nl = source.indexOf('\n', index + 2);
-    return nl == -1 ? len : nl + 1;
+    final end = nl == -1 ? len : nl + 1;
+    _writeMasked(out, source, index, end);
+    return end;
   }
   if (source.startsWith('/*', index)) {
-    final end = source.indexOf('*/', index + 2);
-    return end == -1 ? len : end + 2;
+    var depth = 1;
+    var pos = index + 2;
+    while (pos < len && depth > 0) {
+      if (source.startsWith('/*', pos)) {
+        depth++;
+        pos += 2;
+      } else if (source.startsWith('*/', pos)) {
+        depth--;
+        pos += 2;
+      } else {
+        pos++;
+      }
+    }
+    _writeMasked(out, source, index, pos);
+    return pos;
   }
   var raw = false;
   var pos = index;
   if (source[pos] == 'r' &&
+      (pos == 0 || !_isIdentifierChar(source.codeUnitAt(pos - 1))) &&
       pos + 1 < len &&
       (source[pos + 1] == "'" || source[pos + 1] == '"')) {
     raw = true;
@@ -147,15 +186,117 @@ int _skipDartCommentOrString(String source, int index) {
       pos + 2 < len && source[pos + 1] == ch && source[pos + 2] == ch;
   final delim = triple ? ch * 3 : ch;
   pos += delim.length;
+  _writeMasked(out, source, index, pos);
   while (pos < len) {
     if (!raw && source[pos] == r'\') {
-      pos += 2;
+      final end = pos + 1 < len ? pos + 2 : len;
+      _writeMasked(out, source, pos, end);
+      pos = end;
       continue;
     }
-    if (source.startsWith(delim, pos)) return pos + delim.length;
+    if (source.startsWith(delim, pos)) {
+      final end = pos + delim.length;
+      _writeMasked(out, source, pos, end);
+      return end;
+    }
+    if (!raw && source.startsWith(r'${', pos)) {
+      _writeMasked(out, source, pos, pos + 2);
+      pos += 2;
+      var braceDepth = 1;
+      while (pos < len && braceDepth > 0) {
+        final next = _scanDartCommentOrString(source, pos, out);
+        if (next > pos) {
+          pos = next;
+          continue;
+        }
+        final c = source[pos];
+        if (c == '{') {
+          braceDepth++;
+          out?.write('{');
+        } else if (c == '}') {
+          braceDepth--;
+          out?.write(braceDepth == 0 ? ' ' : '}');
+        } else {
+          out?.write(c);
+        }
+        pos++;
+      }
+      continue;
+    }
+    out?.write(source[pos] == '\n' ? '\n' : ' ');
     pos++;
   }
   return len;
+}
+
+/// Advances past a Dart comment or string literal starting at [index], or
+/// returns [index] unchanged if none starts there.
+int _skipDartCommentOrString(String source, int index) =>
+    _scanDartCommentOrString(source, index, null);
+
+String _stripDartCommentsAndStrings(String source) {
+  final len = source.length;
+  final out = StringBuffer();
+  var i = 0;
+  while (i < len) {
+    final next = _scanDartCommentOrString(source, i, out);
+    if (next > i) {
+      i = next;
+      continue;
+    }
+    out.write(source[i]);
+    i++;
+  }
+  return out.toString();
+}
+
+List<String> _findRawShowModalBottomSheetViolations(
+  String source,
+  String filePath,
+) {
+  final stripped = _stripDartCommentsAndStrings(source);
+  final rawLines = source.split('\n');
+  final violations = <String>[];
+  final identRe = RegExp(r'\bshowModalBottomSheet\b');
+  final len = stripped.length;
+
+  int skipWhitespace(int pos) {
+    while (pos < len) {
+      final ch = stripped[pos];
+      if (ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n') {
+        pos++;
+      } else {
+        break;
+      }
+    }
+    return pos;
+  }
+
+  for (final match in identRe.allMatches(stripped)) {
+    var pos = skipWhitespace(match.end);
+    if (pos < len && stripped[pos] == '<') {
+      var depth = 1;
+      pos++;
+      while (pos < len && depth > 0) {
+        final ch = stripped[pos];
+        if (ch == ';') break;
+        if (ch == '<') {
+          depth++;
+        } else if (ch == '>') {
+          depth--;
+        }
+        pos++;
+      }
+      if (depth != 0) continue;
+      pos = skipWhitespace(pos);
+    }
+    if (pos < len && stripped[pos] == '(') {
+      final line =
+          '\n'.allMatches(stripped.substring(0, match.start)).length + 1;
+      violations.add('$filePath:$line: ${rawLines[line - 1].trimLeft()}');
+    }
+  }
+  return violations;
 }
 
 /// Source text between an opening bracket (already consumed at [start]) and
@@ -282,6 +423,160 @@ void main() {
         isEmpty,
         reason: 'Use showJournalMessage or TransientFeedbackController:\n'
             '${violations.join('\n')}',
+      );
+    });
+
+    test(
+        'app and pages route modal bottom sheets through showJournalModalSheet',
+        () {
+      final libDir = _resolveLibDir();
+      final violations = <String>[];
+      for (final file in _dartFiles(libDir)) {
+        final norm = file.path.replaceAll('\\', '/');
+        if (norm
+            .endsWith('lib/src/features/widgets/journal_modal_sheet.dart')) {
+          continue;
+        }
+        violations.addAll(
+          _findRawShowModalBottomSheetViolations(
+            file.readAsStringSync(),
+            file.path,
+          ),
+        );
+      }
+      expect(
+        violations,
+        isEmpty,
+        reason:
+            'Use showJournalModalSheet instead of raw showModalBottomSheet:\n'
+            '${violations.join('\n')}',
+      );
+    });
+
+    test(
+        'modal bottom sheet detector catches bypasses and ignores comments and strings',
+        () {
+      const multilineCall = '''
+Future<void> open(BuildContext context) {
+  return showModalBottomSheet
+      (
+    context: context,
+    builder: (_) => const SizedBox(),
+  );
+}
+''';
+      expect(
+        _findRawShowModalBottomSheetViolations(multilineCall, 'a.dart'),
+        hasLength(1),
+      );
+
+      const nestedGenericsCall = '''
+Future<void> open(BuildContext context) {
+  return showModalBottomSheet<List<Map<String, int>>>(
+    context: context,
+    builder: (_) => const SizedBox(),
+  );
+}
+''';
+      expect(
+        _findRawShowModalBottomSheetViolations(nestedGenericsCall, 'b.dart'),
+        hasLength(1),
+      );
+
+      const blockCommentCall = '''
+Future<void> open(BuildContext context) {
+  return showModalBottomSheet/* ok */(
+    context: context,
+    builder: (_) => const SizedBox(),
+  );
+}
+Future<void> open2(BuildContext context) {
+  return showModalBottomSheet /* a */ <List<int>> /* b */ (
+    context: context,
+    builder: (_) => const SizedBox(),
+  );
+}
+''';
+      expect(
+        _findRawShowModalBottomSheetViolations(blockCommentCall, 'c.dart'),
+        hasLength(2),
+      );
+
+      const safeSamples = r"""
+// showModalBottomSheet(context: context, builder: (_) => const SizedBox());
+/*
+  showModalBottomSheet(context: context, builder: (_) => const SizedBox());
+  /* nested comment showModalBottomSheet<List<int>>( */
+  showModalBottomSheet/* still inside outer comment */(
+*/
+const a = 'showModalBottomSheet(';
+const b = "showModalBottomSheet<int>(";
+const c = 'escaped \' showModalBottomSheet(';
+const d = 'trailing \\';
+const e = r'raw showModalBottomSheet(';
+const f = r"raw showModalBottomSheet<List<int>>(";
+const h = '''
+triple single showModalBottomSheet(
+''';
+""";
+      const safeTripleDouble = r'''
+const g = """
+triple double showModalBottomSheet(
+""";
+''';
+      expect(
+        _findRawShowModalBottomSheetViolations(safeSamples, 'safe.dart'),
+        isEmpty,
+      );
+      expect(
+        _findRawShowModalBottomSheetViolations(
+          safeTripleDouble,
+          'safe_double.dart',
+        ),
+        isEmpty,
+      );
+    });
+
+    test(
+        'modal bottom sheet detector handles Dart string interpolation recursively',
+        () {
+      const interpolatedCall = r'''
+String render(BuildContext context, WidgetBuilder build) {
+  return '${showModalBottomSheet(context: context, builder: build)}';
+}
+''';
+      expect(
+        _findRawShowModalBottomSheetViolations(
+          interpolatedCall,
+          'interp_call.dart',
+        ),
+        hasLength(1),
+      );
+
+      const interpolatedSafeStringArg = r'''
+String render() {
+  return '${wrap('showModalBottomSheet(')}';
+}
+''';
+      expect(
+        _findRawShowModalBottomSheetViolations(
+          interpolatedSafeStringArg,
+          'interp_safe.dart',
+        ),
+        isEmpty,
+      );
+
+      const nestedInterpolatedCall = r'''
+String render(BuildContext context, WidgetBuilder build) {
+  return '${'${showModalBottomSheet(context: context, builder: build)}'}';
+}
+''';
+      expect(
+        _findRawShowModalBottomSheetViolations(
+          nestedInterpolatedCall,
+          'interp_nested.dart',
+        ),
+        hasLength(1),
       );
     });
 
@@ -448,5 +743,191 @@ JournalGroupedCard(
         },
       );
     }
+  });
+
+  group('M3 · JournalPalette.subtle, modal sheet, and context menu', () {
+    double contrastRatio(Color fg, Color bg) {
+      final l1 = fg.computeLuminance();
+      final l2 = bg.computeLuminance();
+      return (math.max(l1, l2) + 0.05) / (math.min(l1, l2) + 0.05);
+    }
+
+    test('JournalPalette.subtle meets WCAG AA across paper/sheet/parchment',
+        () {
+      expect(Journal.muted, const Color(0xFF363C44));
+      expect(Journal.entryTitle.fontSize, 15.5);
+      expect(Journal.entryTitle.height, 1.38);
+      expect(Journal.entryTitle.fontWeight, FontWeight.w400);
+      expect(Journal.display.fontSize, 30);
+      expect(Journal.display.fontWeight, FontWeight.w400);
+
+      final light = StudyAssistantTheme.light.extension<JournalPalette>()!;
+      final dark = StudyAssistantTheme.dark.extension<JournalPalette>()!;
+      expect(light.subtle, const Color(0xFF565E69));
+      expect(dark.subtle, const Color(0xFFA5A096));
+
+      for (final p in [light, dark]) {
+        expect(contrastRatio(p.subtle, p.paper), greaterThanOrEqualTo(4.5));
+        expect(contrastRatio(p.subtle, p.sheet), greaterThanOrEqualTo(4.5));
+        expect(contrastRatio(p.subtle, p.parchment), greaterThanOrEqualTo(4.5));
+      }
+
+      final copied = light.copyWith(subtle: const Color(0xFF445566));
+      expect(copied.subtle, const Color(0xFF445566));
+      expect(copied, isNot(equals(light)));
+      expect(copied.hashCode, isNot(equals(light.hashCode)));
+      expect(light.copyWith(), equals(light));
+      expect(light.copyWith().hashCode, equals(light.hashCode));
+
+      final mid = light.lerp(dark, 0.5);
+      expect(mid.subtle, Color.lerp(light.subtle, dark.subtle, 0.5));
+    });
+
+    testWidgets(
+        'modalSheetAnimationStyle uses 180ms easeOut dismiss and honors reduced motion',
+        (tester) async {
+      late AnimationStyle normalStyle;
+      late AnimationStyle reducedStyle;
+
+      await tester.pumpWidget(
+        MediaQuery(
+          data: const MediaQueryData(disableAnimations: false),
+          child: Builder(
+            builder: (context) {
+              normalStyle = JournalMotion.modalSheetAnimationStyle(context);
+              return const SizedBox.shrink();
+            },
+          ),
+        ),
+      );
+
+      await tester.pumpWidget(
+        MediaQuery(
+          data: const MediaQueryData(disableAnimations: true),
+          child: Builder(
+            builder: (context) {
+              reducedStyle = JournalMotion.modalSheetAnimationStyle(context);
+              return const SizedBox.shrink();
+            },
+          ),
+        ),
+      );
+
+      expect(normalStyle.duration, const Duration(milliseconds: 280));
+      expect(normalStyle.reverseDuration, const Duration(milliseconds: 180));
+      expect(normalStyle.curve, JournalMotion.criticalCurve);
+      expect(normalStyle.reverseCurve, JournalMotion.easeOut);
+      expect(reducedStyle, AnimationStyle.noAnimation);
+    });
+
+    testWidgets(
+        'showJournalModalSheet injects animation style without forcing transparent surface',
+        (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: StudyAssistantTheme.light,
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => TextButton(
+                onPressed: () {
+                  showJournalModalSheet<void>(
+                    context: context,
+                    builder: (_) => const SizedBox(
+                      height: 120,
+                      child: Center(child: Text('共享弹窗内容')),
+                    ),
+                  );
+                },
+                child: const Text('打开弹窗'),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('打开弹窗'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('共享弹窗内容'), findsOneWidget);
+      final route = ModalRoute.of(tester.element(find.text('共享弹窗内容')))
+          as ModalBottomSheetRoute<void>;
+      expect(
+        route.sheetAnimationStyle?.reverseDuration,
+        const Duration(milliseconds: 180),
+      );
+      expect(route.sheetAnimationStyle?.reverseCurve, JournalMotion.easeOut);
+      final bottomSheet = tester.widget<BottomSheet>(find.byType(BottomSheet));
+      expect(
+        bottomSheet.backgroundColor,
+        StudyAssistantTheme.light.extension<JournalPalette>()!.sheet,
+      );
+      expect(bottomSheet.backgroundColor, isNot(Colors.transparent));
+    });
+
+    testWidgets(
+        'JournalContextMenuAction.selected highlights with accent and keeps destructive priority',
+        (tester) async {
+      final semantics = tester.ensureSemantics();
+      try {
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: StudyAssistantTheme.light,
+            home: Scaffold(
+              body: Builder(
+                builder: (context) => TextButton(
+                  onPressed: () {
+                    showJournalContextMenu(
+                      context: context,
+                      anchorRect: const Rect.fromLTWH(40, 80, 140, 40),
+                      useSelectionFeedback: true,
+                      actions: [
+                        JournalContextMenuAction(
+                          label: '当前排序',
+                          icon: Icons.schedule_rounded,
+                          selected: true,
+                          onSelected: () {},
+                        ),
+                        JournalContextMenuAction(
+                          label: '危险操作',
+                          icon: Icons.delete_outline_rounded,
+                          destructive: true,
+                          selected: true,
+                          onSelected: () {},
+                        ),
+                      ],
+                    );
+                  },
+                  child: const Text('打开菜单'),
+                ),
+              ),
+            ),
+          ),
+        );
+
+        await tester.tap(find.text('打开菜单'));
+        await tester.pumpAndSettle();
+
+        final light = StudyAssistantTheme.light.extension<JournalPalette>()!;
+        final selectedText = tester.widget<Text>(find.text('当前排序'));
+        expect(selectedText.style?.color, light.accent);
+        expect(find.byIcon(Icons.check_rounded), findsOneWidget);
+        final checkIcon = tester.widget<Icon>(find.byIcon(Icons.check_rounded));
+        expect(checkIcon.color, light.accent);
+        final selectedSemantics =
+            tester.getSemantics(find.text('当前排序')).getSemanticsData();
+        expect(selectedSemantics.flagsCollection.isSelected, Tristate.isTrue);
+
+        final destructiveText = tester.widget<Text>(find.text('危险操作'));
+        expect(destructiveText.style?.color, light.berry);
+        final destructiveSemantics =
+            tester.getSemantics(find.text('危险操作')).getSemanticsData();
+        expect(
+          destructiveSemantics.flagsCollection.isSelected,
+          isNot(Tristate.isTrue),
+        );
+      } finally {
+        semantics.dispose();
+      }
+    });
   });
 }

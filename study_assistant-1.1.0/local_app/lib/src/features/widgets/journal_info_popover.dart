@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../app/journal.dart';
 import 'journal_buttons.dart';
+import 'journal_modal_sheet.dart';
 
 class JournalInfoButton extends StatelessWidget {
   const JournalInfoButton({
@@ -41,11 +42,8 @@ Future<void> showJournalInfoSheet(
   required String title,
   required List<String> items,
 }) {
-  return showModalBottomSheet<void>(
+  return showJournalModalSheet<void>(
     context: context,
-    useRootNavigator: true,
-    isScrollControlled: true,
-    useSafeArea: true,
     backgroundColor: Colors.transparent,
     builder: (sheetContext) {
       final journal = Journal.of(sheetContext);

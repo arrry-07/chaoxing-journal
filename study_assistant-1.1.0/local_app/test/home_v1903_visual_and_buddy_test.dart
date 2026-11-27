@@ -1190,7 +1190,7 @@ void main() {
       expect(transformUp.transform.storage[0], 1.0);
 
       // Filter modal bottom sheet opens with normal duration, supports upward rubber-band preserving search focus/text, downward dismiss, and reduced motion.
-      await tester.tap(find.byKey(const ValueKey('current-home-sort')));
+      await tester.tap(find.text('搜索与筛选'));
       await tester.pump(const Duration(milliseconds: 120));
       expect(find.text('搜索、筛选与排序'), findsOneWidget);
       await tester.pumpAndSettle();
@@ -1246,7 +1246,7 @@ void main() {
 
       // Under reduced motion, modal sheet opens immediately on first frame and handle upward drag produces zero displacement.
       await _pumpHome(tester, store, now: now, disableAnimations: true);
-      await tester.tap(find.byKey(const ValueKey('current-home-sort')));
+      await tester.tap(find.text('搜索与筛选'));
       await tester.pump();
       expect(find.text('搜索、筛选与排序'), findsOneWidget);
       final reducedHandleY = tester.getTopLeft(filterHandleFinder).dy;

@@ -1,0 +1,763 @@
+{
+  "schema_version": 1,
+  "diagram_type": "erd",
+  "meta": {
+    "title": "原生提醒状态库物理表结构 (SQLite v10)",
+    "locale": "zh-CN",
+    "output": "docs/architecture/reminder-db.erd.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/arrry-07/chaoxing-journal.git",
+      "provider": "github",
+      "revision": "d8b7f47c4dcb3ef44c7d719d6c76d7bef4fa9a97"
+    },
+    "views": [
+      {
+        "id": "epoch_lease",
+        "label": "信号认领与账号代次",
+        "focus": [
+          "accounts",
+          "notification_signals",
+          "notification_attempts"
+        ],
+        "note": "notification_signals 记录监听增量并由 notification_attempts 凭 claim_token 认领，accounts 维护 session_epoch 与双版本门禁。"
+      },
+      {
+        "id": "alarm_delivery",
+        "label": "课业快照与闹钟投递",
+        "focus": [
+          "accounts",
+          "snapshots",
+          "events"
+        ],
+        "note": "snapshots 存按账号隔离的课业状态与时间来源，events 绑定 notification_id 与精确闹钟调度状态。"
+      },
+      {
+        "id": "audit_evidence",
+        "label": "观测历史与调度证据",
+        "focus": [
+          "accounts",
+          "reminder_history",
+          "reminder_schedule_evidence"
+        ],
+        "note": "reminder_history 按 history_generation 追加全链路观测，reminder_schedule_evidence 锁定调度状态证据。"
+      }
+    ]
+  },
+  "layout": {
+    "mode": "grid",
+    "gapX": 68,
+    "gapY": 36
+  },
+  "entities": [
+    {
+      "id": "notification_signals",
+      "label": "notification_signals",
+      "sublabel": "学习通通知监听增量信号",
+      "tag": "信号与认领",
+      "row": 0,
+      "col": 0,
+      "attributes": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "key": "pk"
+        },
+        {
+          "name": "account_hash",
+          "type": "TEXT",
+          "key": [
+            "fk",
+            "uk"
+          ],
+          "references": "accounts.account_hash"
+        },
+        {
+          "name": "session_epoch",
+          "type": "INTEGER"
+        },
+        {
+          "name": "signal_key",
+          "type": "TEXT",
+          "key": "uk"
+        },
+        {
+          "name": "received_at",
+          "type": "INTEGER",
+          "key": "uk"
+        },
+        {
+          "name": "consumed_version",
+          "type": "INTEGER"
+        }
+      ],
+      "sources": [
+        {
+          "path": "study_assistant-1.1.0/local_app/android/app/src/main/kotlin/com/example/studyassistant/ReminderDatabase.kt",
+          "line": 283,
+          "end_line": 292,
+          "label": "notification_signals 建表"
+        },
+        {
+          "path": "study_assistant-1.1.0/local_app/android/app/src/main/kotlin/com/example/studyassistant/ReminderDatabase.kt",
+          "line": 388,
+          "end_line": 390,
+          "label": "signal 接收时间索引"
+        }
+      ]
+    },
+    {
+      "id": "notification_attempts",
+      "label": "notification_attempts",
+      "sublabel": "信号检查认领与回滚租约",
+      "tag": "信号与认领",
+      "row": 1,
+      "col": 0,
+      "attributes": [
+        {
+          "name": "account_hash",
+          "type": "TEXT",
+          "key": [
+            "pk",
+            "fk"
+          ],
+          "references": "accounts.account_hash"
+        },
+        {
+          "name": "session_epoch",
+          "type": "INTEGER"
+        },
+        {
+          "name": "claim_token",
+          "type": "TEXT"
+        },
+        {
+          "name": "owner_work_id",
+          "type": "TEXT"
+        },
+        {
+          "name": "claimed_version",
+          "type": "INTEGER"
+        },
+        {
+          "name": "claimed_at",
+          "type": "INTEGER"
+        },
+        {
+          "name": "prior_attempted_version",
+          "type": "INTEGER"
+        },
+        {
+          "name": "prior_last_signal_check_at",
+          "type": "INTEGER"
+        },
+        {
+          "name": "prior_consumed_version",
+          "type": "INTEGER"
+        },
+        {
+          "name": "phase",
+          "type": "TEXT"
+        }
+      ],
+      "sources": [
+        {
+          "path": "study_assistant-1.1.0/local_app/android/app/src/main/kotlin/com/example/studyassistant/ReminderDatabase.kt",
+          "line": 398,
+          "end_line": 415,
+          "label": "notification_attempts 建表"
+        }
+      ]
+    },
+    {
+      "id": "accounts",
+      "label": "accounts",
+      "sublabel": "账号代次 · 策略 · 双版本门禁",
+      "tag": "账号代次中枢",
+      "row": 1,
+      "col": 1,
+      "attributes": [
+        {
+          "name": "account_hash",
+          "type": "TEXT",
+          "key": "pk"
+        },
+        {
+          "name": "session_epoch",
+          "type": "INTEGER"
+        },
+        {
+          "name": "active",
+          "type": "INTEGER"
+        },
+        {
+          "name": "background_enabled",
+          "type": "INTEGER"
+        },
+        {
+          "name": "interval_minutes",
+          "type": "INTEGER"
+        },
+        {
+          "name": "listener_enabled",
+          "type": "INTEGER"
+        },
+        {
+          "name": "new_assignment_enabled",
+          "type": "INTEGER"
+        },
+        {
+          "name": "show_details",
+          "type": "INTEGER"
+        },
+        {
+          "name": "baseline_completed",
+          "type": "INTEGER"
+        },
+        {
+          "name": "baselined_sources",
+          "type": "TEXT"
+        },
+        {
+          "name": "known_ids",
+          "type": "TEXT"
+        },
+        {
+          "name": "sent_new_ids",
+          "type": "TEXT"
+        },
+        {
+          "name": "pending_update",
+          "type": "INTEGER"
+        },
+        {
+          "name": "mutation_version",
+          "type": "INTEGER"
+        },
+        {
+          "name": "pending_signal_version",
+          "type": "INTEGER"
+        },
+        {
+          "name": "consumed_signal_version",
+          "type": "INTEGER"
+        },
+        {
+          "name": "last_signal_at",
+          "type": "INTEGER"
+        },
+        {
+          "name": "attempted_signal_version",
+          "type": "INTEGER"
+        },
+        {
+          "name": "last_signal_check_at",
+          "type": "INTEGER"
+        },
+        {
+          "name": "claim_token",
+          "type": "TEXT"
+        },
+        {
+          "name": "last_attempt_at",
+          "type": "INTEGER"
+        },
+        {
+          "name": "last_data_success_at",
+          "type": "INTEGER"
+        },
+        {
+          "name": "last_full_success_at",
+          "type": "INTEGER"
+        },
+        {
+          "name": "last_failure",
+          "type": "TEXT"
+        },
+        {
+          "name": "next_check_at",
+          "type": "INTEGER"
+        },
+        {
+          "name": "migration_state",
+          "type": "TEXT"
+        },
+        {
+          "name": "allow_urgent_night_breakthrough",
+          "type": "INTEGER"
+        },
+        {
+          "name": "deadline_channel_id",
+          "type": "TEXT"
+        },
+        {
+          "name": "updated_at",
+          "type": "INTEGER"
+        }
+      ],
+      "sources": [
+        {
+          "path": "study_assistant-1.1.0/local_app/android/app/src/main/kotlin/com/example/studyassistant/ReminderDatabase.kt",
+          "line": 199,
+          "end_line": 230,
+          "label": "accounts 主表定义 (29列)"
+        },
+        {
+          "path": "study_assistant-1.1.0/local_app/android/app/src/main/kotlin/com/example/studyassistant/ReminderDatabase.kt",
+          "line": 340,
+          "end_line": 369,
+          "label": "v8-v10 渠道与夜间穿透升级"
+        }
+      ]
+    },
+    {
+      "id": "snapshots",
+      "label": "snapshots",
+      "sublabel": "课业信任与资格快照",
+      "tag": "课业快照与闹钟",
+      "row": 0,
+      "col": 2,
+      "attributes": [
+        {
+          "name": "account_hash",
+          "type": "TEXT",
+          "key": [
+            "pk",
+            "fk"
+          ],
+          "references": "accounts.account_hash"
+        },
+        {
+          "name": "assignment_id",
+          "type": "TEXT",
+          "key": "pk"
+        },
+        {
+          "name": "session_epoch",
+          "type": "INTEGER"
+        },
+        {
+          "name": "course_name",
+          "type": "TEXT"
+        },
+        {
+          "name": "title",
+          "type": "TEXT"
+        },
+        {
+          "name": "deadline_at",
+          "type": "INTEGER"
+        },
+        {
+          "name": "event_kind",
+          "type": "TEXT"
+        },
+        {
+          "name": "deadline_source",
+          "type": "TEXT"
+        },
+        {
+          "name": "deadline_trusted",
+          "type": "INTEGER"
+        },
+        {
+          "name": "deadline_read_failed",
+          "type": "INTEGER"
+        },
+        {
+          "name": "completed",
+          "type": "INTEGER"
+        },
+        {
+          "name": "hidden",
+          "type": "INTEGER"
+        },
+        {
+          "name": "followed",
+          "type": "INTEGER"
+        },
+        {
+          "name": "formal",
+          "type": "INTEGER"
+        },
+        {
+          "name": "in_assignment_scope",
+          "type": "INTEGER"
+        },
+        {
+          "name": "status",
+          "type": "TEXT"
+        }
+      ],
+      "sources": [
+        {
+          "path": "study_assistant-1.1.0/local_app/android/app/src/main/kotlin/com/example/studyassistant/ReminderDatabase.kt",
+          "line": 234,
+          "end_line": 253,
+          "label": "snapshots 物理表定义"
+        }
+      ]
+    },
+    {
+      "id": "events",
+      "label": "events",
+      "sublabel": "已规划闹钟提醒事件",
+      "tag": "课业快照与闹钟",
+      "row": 1,
+      "col": 2,
+      "attributes": [
+        {
+          "name": "event_id",
+          "type": "TEXT",
+          "key": "pk"
+        },
+        {
+          "name": "account_hash",
+          "type": "TEXT",
+          "key": "fk",
+          "references": "accounts.account_hash"
+        },
+        {
+          "name": "session_epoch",
+          "type": "INTEGER"
+        },
+        {
+          "name": "type",
+          "type": "TEXT"
+        },
+        {
+          "name": "assignment_id",
+          "type": "TEXT",
+          "key": "fk",
+          "references": "snapshots.assignment_id"
+        },
+        {
+          "name": "course_name",
+          "type": "TEXT"
+        },
+        {
+          "name": "title",
+          "type": "TEXT"
+        },
+        {
+          "name": "notify_at",
+          "type": "INTEGER"
+        },
+        {
+          "name": "deadline_at",
+          "type": "INTEGER"
+        },
+        {
+          "name": "event_kind",
+          "type": "TEXT"
+        },
+        {
+          "name": "deadline_source",
+          "type": "TEXT"
+        },
+        {
+          "name": "offsets",
+          "type": "TEXT"
+        },
+        {
+          "name": "batch_id",
+          "type": "TEXT"
+        },
+        {
+          "name": "status",
+          "type": "TEXT"
+        },
+        {
+          "name": "notification_id",
+          "type": "INTEGER"
+        },
+        {
+          "name": "created_at",
+          "type": "INTEGER"
+        },
+        {
+          "name": "updated_at",
+          "type": "INTEGER"
+        }
+      ],
+      "sources": [
+        {
+          "path": "study_assistant-1.1.0/local_app/android/app/src/main/kotlin/com/example/studyassistant/ReminderDatabase.kt",
+          "line": 257,
+          "end_line": 280,
+          "label": "events 闹钟事件表与状态索引"
+        },
+        {
+          "path": "study_assistant-1.1.0/local_app/android/app/src/main/kotlin/com/example/studyassistant/ReminderDatabase.kt",
+          "line": 382,
+          "end_line": 386,
+          "label": "v7 通知与作业查询索引"
+        }
+      ]
+    },
+    {
+      "id": "reminder_history",
+      "label": "reminder_history",
+      "sublabel": "提醒全链路观测流水",
+      "tag": "观测历史与证据",
+      "row": 2,
+      "col": 1,
+      "attributes": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "key": "pk"
+        },
+        {
+          "name": "account_hash",
+          "type": "TEXT",
+          "key": [
+            "fk",
+            "uk"
+          ],
+          "references": "accounts.account_hash"
+        },
+        {
+          "name": "session_epoch",
+          "type": "INTEGER"
+        },
+        {
+          "name": "history_generation",
+          "type": "INTEGER",
+          "key": "uk"
+        },
+        {
+          "name": "observation_id",
+          "type": "TEXT",
+          "key": "uk"
+        },
+        {
+          "name": "operation_sequence",
+          "type": "INTEGER"
+        },
+        {
+          "name": "subject_kind",
+          "type": "TEXT"
+        },
+        {
+          "name": "subject_id",
+          "type": "TEXT"
+        },
+        {
+          "name": "logical_key",
+          "type": "TEXT"
+        },
+        {
+          "name": "category",
+          "type": "TEXT"
+        },
+        {
+          "name": "stage",
+          "type": "TEXT"
+        },
+        {
+          "name": "reason_code",
+          "type": "TEXT"
+        },
+        {
+          "name": "observed_at",
+          "type": "INTEGER"
+        },
+        {
+          "name": "scheduled_at",
+          "type": "INTEGER"
+        },
+        {
+          "name": "notification_id",
+          "type": "INTEGER"
+        },
+        {
+          "name": "batch_key",
+          "type": "TEXT"
+        }
+      ],
+      "sources": [
+        {
+          "path": "study_assistant-1.1.0/local_app/android/app/src/main/kotlin/com/example/studyassistant/ReminderDatabase.kt",
+          "line": 417,
+          "end_line": 452,
+          "label": "reminder_history 观测日志与索引"
+        }
+      ]
+    },
+    {
+      "id": "reminder_schedule_evidence",
+      "label": "reminder_schedule_evidence",
+      "sublabel": "提醒调度确认证据快照",
+      "tag": "观测历史与证据",
+      "row": 2,
+      "col": 2,
+      "attributes": [
+        {
+          "name": "account_hash",
+          "type": "TEXT",
+          "key": [
+            "pk",
+            "fk"
+          ],
+          "references": "accounts.account_hash"
+        },
+        {
+          "name": "history_generation",
+          "type": "INTEGER",
+          "key": "pk"
+        },
+        {
+          "name": "logical_key",
+          "type": "TEXT",
+          "key": "pk"
+        },
+        {
+          "name": "session_epoch",
+          "type": "INTEGER"
+        },
+        {
+          "name": "operation_sequence",
+          "type": "INTEGER"
+        },
+        {
+          "name": "subject_kind",
+          "type": "TEXT"
+        },
+        {
+          "name": "subject_id",
+          "type": "TEXT"
+        },
+        {
+          "name": "category",
+          "type": "TEXT"
+        },
+        {
+          "name": "scheduled_at",
+          "type": "INTEGER"
+        },
+        {
+          "name": "notification_id",
+          "type": "INTEGER"
+        },
+        {
+          "name": "expected_payload",
+          "type": "TEXT"
+        },
+        {
+          "name": "state",
+          "type": "TEXT"
+        },
+        {
+          "name": "confirmed_at",
+          "type": "INTEGER"
+        }
+      ],
+      "sources": [
+        {
+          "path": "study_assistant-1.1.0/local_app/android/app/src/main/kotlin/com/example/studyassistant/ReminderDatabase.kt",
+          "line": 454,
+          "end_line": 475,
+          "label": "reminder_schedule_evidence 建表"
+        },
+        {
+          "path": "study_assistant-1.1.0/local_app/android/app/src/main/kotlin/com/example/studyassistant/ReminderDatabase.kt",
+          "line": 392,
+          "end_line": 395,
+          "label": "v7 调度证据主体索引"
+        }
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "id": "signals_account",
+      "from": "notification_signals",
+      "to": "accounts",
+      "label": "增量信号",
+      "fromCardinality": "many",
+      "toCardinality": "one"
+    },
+    {
+      "id": "attempts_account",
+      "from": "notification_attempts",
+      "to": "accounts",
+      "label": "认领租约",
+      "fromCardinality": "one",
+      "fromOptional": true,
+      "toCardinality": "one"
+    },
+    {
+      "id": "snapshots_account",
+      "from": "snapshots",
+      "to": "accounts",
+      "label": "所属账号",
+      "fromCardinality": "many",
+      "toCardinality": "one"
+    },
+    {
+      "id": "events_account",
+      "from": "events",
+      "to": "accounts",
+      "label": "所属账号",
+      "fromCardinality": "many",
+      "toCardinality": "one"
+    },
+    {
+      "id": "events_snapshot",
+      "from": "events",
+      "to": "snapshots",
+      "label": "对应课业",
+      "fromCardinality": "many",
+      "fromOptional": true,
+      "toCardinality": "one",
+      "identifying": false,
+      "variant": "dashed"
+    },
+    {
+      "id": "history_account",
+      "from": "reminder_history",
+      "to": "accounts",
+      "label": "观测流水",
+      "fromCardinality": "many",
+      "toCardinality": "one"
+    },
+    {
+      "id": "evidence_account",
+      "from": "reminder_schedule_evidence",
+      "to": "accounts",
+      "label": "调度证据",
+      "fromCardinality": "many",
+      "toCardinality": "one"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "SQLite v10 与有声渠道迁移",
+      "items": [
+        "库文件 assignment_reminders_v1.db 当前 DATABASE_VERSION = 10，含 7 张物理表与 107 个真实列",
+        "v8 引入 allow_urgent_night_breakthrough、deadline_channel_id 与快照/事件 deadline_source",
+        "v9→v10 将旧版 deadline_channel_id 自动迁移至 assignment_deadlines_v3，保留既有渠道独立性"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "事务级账号代次隔离与防脏写",
+      "items": [
+        "SQLite 建表未启用外键级联，而是通过 @Synchronized transaction 按 (account_hash, session_epoch) 清理隔离",
+        "accounts 的 pending_update、mutation_version 与 claim_token 串联两阶段提醒计划提交与并发互斥",
+        "notification_attempts 备份 prior_* 版本以便后台信号检查取消或失败时完整回滚"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "复合主键与查询索引约束",
+      "items": [
+        "snapshots 主键为 (account_hash, assignment_id)；reminder_schedule_evidence 主键为 (account_hash, history_generation, logical_key)",
+        "notification_signals 对 (account_hash, signal_key, received_at) 建唯一约束，reminder_history 对 (account_hash, history_generation, observation_id) 建唯一索引",
+        "V7 起补齐 events_notification_id、events_account_assignment、notification_signals_received_at 与 reminder_schedule_evidence_subject 索引"
+      ]
+    }
+  ]
+}

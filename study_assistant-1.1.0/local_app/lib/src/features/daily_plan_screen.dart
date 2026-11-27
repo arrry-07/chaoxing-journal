@@ -12,6 +12,7 @@ import '../services/rule_planning_service.dart';
 import 'widgets/data_recovery_warning.dart';
 import 'widgets/journal_buttons.dart';
 import 'widgets/journal_grouped_card.dart';
+import 'widgets/journal_modal_sheet.dart';
 import 'widgets/journal_picker_sheet.dart';
 
 class DailyPlanScreen extends StatefulWidget {
@@ -163,11 +164,8 @@ class _DailyPlanState extends State<DailyPlanScreen> {
       setState(() => message = '没有可规划作业，请先同步或查看其他日期。');
       return;
     }
-    final result = await showModalBottomSheet<String>(
+    final result = await showJournalModalSheet<String>(
       context: context,
-      useRootNavigator: true,
-      isScrollControlled: true,
-      useSafeArea: true,
       builder: (_) => _PlannerSheet(
         store: widget.store,
         day: day,

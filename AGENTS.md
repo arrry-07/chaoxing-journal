@@ -30,3 +30,9 @@
 - [PROJECT_STATE.md](docs/ai-workflow/PROJECT_STATE.md) 维护当前迭代和最近两版入口；[CHANGELOG.md](CHANGELOG.md) 维护已交付行为，版本身份核对源码、Git 和 GitHub Release；测试和产物的详细证据归对应发布记录。
 - `docs/plans/` 保留最多两份正在执行或待执行的方案；复杂任务换手时才写交接，`docs/ai-workflow/handoffs/` 只留当前有效的一份。完成或失效即用 `git mv` 移入对应归档。
 - 新增计划、交接、验收统一命名 `YYYY-MM-DD-vX.Y.Z-<主题>.md`：`dev` 分支日常开发与方案一律使用当前/下个 `dev` 修订号（如 `v1.8.27`、`v1.8.28`、`v1.8.29`），严禁提前冠名未获授权的下一正式版号（如 `v1.90.0`）；仅在维护者明确下达正式发版指令后才切换正式版号。正式发布收口的同一提交归档本轮已完成方案、过期交接、第三旧及更早验收与其证据，并滚动归档工程状态。步骤与目标路径见[文档索引](docs/README.md#发布收口与归档)。
+
+## 架构导航与更新约定
+
+- 跨模块排查、重构或梳理调用链前，先读 [ARCHITECTURE.md](docs/architecture/ARCHITECTURE.md) 快速定位入口与不变量；日常严禁读取 `docs/architecture/*.html`（含前端渲染代码，白耗上下文），`*.json` 仅在刷新架构图时读写。
+- 架构文档仅为定位导航而非源码真源，动手改码前必须读盘核实实际源码；若发现图文与最新代码脱节，一律以代码为准并在汇报中提示刷新。
+- 单文件修 Bug、样式文案微调等小改动不更新架构图；大版本收口、跨模块重构、模块增删拆分或核心数据流/状态机/不变量变更时，基于 `docs/architecture/*.json` 增量修改并重跑 `finalize` 与 `export-svg`，同步更新 `ARCHITECTURE.md` 基线 Commit。
