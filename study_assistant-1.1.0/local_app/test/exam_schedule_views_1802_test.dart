@@ -135,7 +135,11 @@ void main() {
     await t.pumpWidget(MaterialApp(
         home: Scaffold(
             body: AssignmentCard(
-                assignment: a, examSources: [a, n], now: _now, onTap: () {}))));
+                assignment: a,
+                examSources: [a, n],
+                now: _now,
+                showFullDeadline: false,
+                onTap: () {}))));
     expect(find.text('07:06'), findsOneWidget);
     expect(find.text('考试时间：11-16 07:06:00 至 11-30 07:06:31'), findsNothing);
     expect(find.text('时长 60 分钟'), findsOneWidget);
