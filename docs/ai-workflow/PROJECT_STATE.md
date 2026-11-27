@@ -5,7 +5,7 @@
 ## 当前迭代进度（正式版 1.92.0+132；dev 与 main 已同步收口）
 
 - **1.92.0+132 正式基线（当前最新）**：PR `#67` / `#68` / `#69` 最终合入 `55e5d6e`，annotated Tag `v1.92.0`（`5b7bf90e` → `55e5d6e`），GitHub Release `459719737`（`latest`，`64,607,886` B，SHA-256 `f5fffb04...`），Gitee `update-manual.json` 与 `update-stable.json` 双索引均已推进至 `1.92.0+132`（未传 APK 镜像）；已完成 MuMu「学习通」保数据浅/深双主题 6/6 项实机验收（0 崩溃/0 溢出，4 条 `v3` 有声渠道就绪），详见[验收与发布记录](../reviews/2026-11-26-v1.92.0-Clawd2.0文字舞台8bit音效与轻量收口正式发布验收记录.md)。
-- **dev 当前状态**：与 `main` 同步收口（无在途未归档方案，下一轮 `dev` 自测包自 `1.92.1+133` 起步），详见[dev 本地状态](DEV_STATE.md)。
+- **dev 当前状态**：`v1.92.1` 全量拆缝重构与 UI/交互精修 Stage 1 开发与跨厂商 Gate 闭环 PASS（代码终版 `b17b2ec`，全量门禁 `+2174 ~1` / 132 项 Python 全绿），待第二段新窗打 `1.92.1+133` MuMu 自测包与 6 项目视验收，详见[当前方案](../plans/2026-11-27-v1.92.1-全量拆缝重构与UI交互精修方案.md)与[dev 本地状态](DEV_STATE.md)。
 
 ## 最近 2 个正式发布版本
 
@@ -15,5 +15,5 @@
 ## 待补证与按需入口
 
 - 隔离 API 26/30/31/32/33/34/35 已覆盖 4 批 22 类 `androidTest` 0 失败；物理 OEM 真机复测 `v3` 有声渠道锁屏外放/通知音量归零/Doze/120Hz 高刷/8-bit 外放与移除动画联动、多校 `backclazzdata` 与 `clazzId` 分布、官方活动课精度、自然 `9010` 及真实改期/`completeTime` 样本仍待按样本补证。
-- `CalendarScreen` 气泡滚动锚点对齐、`AssignmentStore` / `AssignmentListScreen` 拆缝重构、`FB-002`、30 天发布时间核实及云端同步/反馈（`FB-015` / `FB-017`）规划见[反馈台账](../待处理体验反馈.md) 与 [路线图](../ROADMAP.md)。
+- `FB-002`、30 天发布时间核实及云端同步/反馈（`FB-015` / `FB-017`）规划见[反馈台账](../待处理体验反馈.md) 与 [路线图](../ROADMAP.md)；`v1.92.1` 架构导航图已同步至 `a33f066`（见[架构导航](../architecture/ARCHITECTURE.md)）。
 - [仓库规则](../../AGENTS.md) · [文档路由](../README.md) · [验证范围](VALIDATION.md) · [历史工程状态](../archive/PROJECT_STATE_HISTORY.md)（仅按用户点名的版本追溯）
