@@ -263,7 +263,7 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
     navGlassBorder: Color(0x16FFF8EB),
     navGlassHighlight: Color(0x26FFF8EB),
     inputFill: Color(0xFF1B1A17),
-    inputBorder: Color(0xFF757067),
+    inputBorder: Color(0xFF7A756C),
     inputBorderDisabled: Color(0xFF423F39),
     cardShadowContact: Color(0x24000000),
     cardShadowAmbient: Color(0x38000000),

@@ -363,6 +363,29 @@ void main() {
     expect(find.byKey(const ValueKey('assignment-detail-course-link')),
         findsNothing);
   });
+
+  testWidgets(
+      'opening Chaoxing app disables web button without switching its label to 正在请求浏览器…',
+      (tester) async {
+    final gate = Completer<bool>();
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (_) => gate.future);
+
+    await launch(tester);
+    final openPrimary = find.byKey(const ValueKey('assignment-detail-open'));
+    await reveal(tester, openPrimary);
+    await tester.tap(openPrimary);
+    await tester.pump();
+
+    expect(find.text('正在打开…'), findsOneWidget);
+    expect(find.text('正在请求浏览器…'), findsNothing);
+    expect(find.text('用浏览器打开'), findsOneWidget);
+    final openWeb = find.byKey(const ValueKey('assignment-detail-open-web'));
+    expect(tester.widget<OutlinedButton>(openWeb).onPressed, isNull);
+
+    gate.complete(false);
+    await tester.pumpAndSettle();
+  });
 }
 
 const _url =

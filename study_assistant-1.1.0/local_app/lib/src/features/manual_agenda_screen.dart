@@ -599,9 +599,11 @@ class _EditorState extends State<ManualEntryEditor> {
   late DateTime? at;
   ManualEntry? _entry;
   bool _missingEntry = false;
-  bool busy = false;
   bool _dirty = false;
   bool _saving = false;
+  bool _attaching = false;
+  bool _togglingDone = false;
+  bool get busy => _saving || _attaching || _togglingDone;
   bool _moreOptionsExpanded = false;
   int _lastFilledMoreCount = 0;
   UnsavedEditGuard? _leaveGuard;
@@ -828,7 +830,7 @@ class _EditorState extends State<ManualEntryEditor> {
       return;
     }
     setState(() {
-      busy = true;
+      _attaching = true;
       _attachmentHint = null;
     });
     try {
@@ -847,7 +849,7 @@ class _EditorState extends State<ManualEntryEditor> {
         setState(() => _attachmentHint = result.message);
       }
     } finally {
-      if (mounted) setState(() => busy = false);
+      if (mounted) setState(() => _attaching = false);
     }
   }
 
@@ -861,7 +863,7 @@ class _EditorState extends State<ManualEntryEditor> {
       return;
     }
     setState(() {
-      busy = true;
+      _attaching = true;
       _attachmentHint = null;
     });
     try {
@@ -881,7 +883,7 @@ class _EditorState extends State<ManualEntryEditor> {
         setState(() => _attachmentHint = result.message);
       }
     } finally {
-      if (mounted) setState(() => busy = false);
+      if (mounted) setState(() => _attaching = false);
     }
   }
 
@@ -892,7 +894,7 @@ class _EditorState extends State<ManualEntryEditor> {
       return;
     }
     setState(() {
-      busy = true;
+      _attaching = true;
       _attachmentHint = null;
     });
     try {
@@ -912,7 +914,7 @@ class _EditorState extends State<ManualEntryEditor> {
         setState(() => _attachmentHint = result.message);
       }
     } finally {
-      if (mounted) setState(() => busy = false);
+      if (mounted) setState(() => _attaching = false);
     }
   }
 
@@ -988,7 +990,7 @@ class _EditorState extends State<ManualEntryEditor> {
     final entry = _entry;
     if (entry == null || busy) return;
     final nextDone = !entry.done;
-    setState(() => busy = true);
+    setState(() => _togglingDone = true);
     final ok = await widget.store.saveNotebook(
       (n) => n.withEntries([
         for (final item in n.entries)
@@ -998,7 +1000,7 @@ class _EditorState extends State<ManualEntryEditor> {
     );
     if (!mounted) return;
     setState(() {
-      busy = false;
+      _togglingDone = false;
       if (ok) _entry = entry.completed(nextDone);
     });
     if (ok) {
@@ -1034,7 +1036,6 @@ class _EditorState extends State<ManualEntryEditor> {
     );
     if (confirmed != true || !mounted) return;
     setState(() {
-      busy = true;
       _saving = true;
     });
     final ok = await widget.store.saveNotebook(
@@ -1059,7 +1060,6 @@ class _EditorState extends State<ManualEntryEditor> {
     if (!mounted || !ok) {
       if (mounted) {
         setState(() {
-          busy = false;
           _saving = false;
           if (!ok) {
             error = widget.store.saveFeedback(
@@ -1168,7 +1168,6 @@ class _EditorState extends State<ManualEntryEditor> {
     }
     final editorRoute = ModalRoute.of(context);
     setState(() {
-      busy = true;
       _saving = true;
       error = null;
       _timeError = null;
@@ -1225,7 +1224,6 @@ class _EditorState extends State<ManualEntryEditor> {
       return;
     }
     setState(() {
-      busy = false;
       _saving = false;
       error = feedback;
     });
@@ -1662,8 +1660,8 @@ class _EditorState extends State<ManualEntryEditor> {
                             ),
                           JournalPrimaryButton(
                             buttonKey: const ValueKey('manual-editor-save'),
-                            loading: busy,
-                            label: busy ? '正在保存…' : '保存个人安排',
+                            loading: _saving,
+                            label: _saving ? '正在保存…' : '保存个人安排',
                             onPressed: busy ? null : save,
                           ),
                         ],

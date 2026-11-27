@@ -621,6 +621,8 @@ class HomeTimelineList extends StatelessWidget {
           entry: item.manual!,
           actions: manualActions,
           pinned: pinned,
+          showFullDeadline:
+              pinned || isRecovery || sortOrder == HomeSortOrder.courseName,
           dragHandle: dragHandle,
           pinnedVisibleKeys: pinnedVisibleKeys,
           bouncePulse: pinPulseByKey[item.pinKey] ?? 0,

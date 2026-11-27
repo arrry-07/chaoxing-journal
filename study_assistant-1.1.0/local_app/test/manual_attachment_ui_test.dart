@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -44,6 +45,7 @@ class _FakeAttachmentService extends ManualAttachmentService {
   AttachmentBatchResult nextGallery = const AttachmentBatchResult();
   AttachmentSingleResult nextFile = const AttachmentSingleResult();
   AttachmentOpenStatus nextOpenStatus = AttachmentOpenStatus.ok;
+  Completer<AttachmentSingleResult>? cameraGate;
   int? lastPickImagesMaxCount;
   final openedAttachments = <ManualAttachment>[];
   final deletedPaths = <String>[];
@@ -56,7 +58,8 @@ class _FakeAttachmentService extends ManualAttachmentService {
   }
 
   @override
-  Future<AttachmentSingleResult> capturePhoto() async => nextCamera;
+  Future<AttachmentSingleResult> capturePhoto() =>
+      cameraGate?.future ?? Future.value(nextCamera);
 
   @override
   Future<AttachmentBatchResult> pickImages({required int maxCount}) async {
@@ -93,6 +96,30 @@ Future<AssignmentStore> _makeStore(_FakeAttachmentService attachments) async {
   );
   await store.restoreSession();
   return store;
+}
+
+class _SlowSaveStore extends AssignmentStore {
+  _SlowSaveStore({
+    required super.sessionStore,
+    required super.notificationService,
+    required super.widgetSnapshotService,
+    required super.manualAttachmentService,
+    this.saveGate,
+  });
+
+  final Completer<bool>? saveGate;
+
+  @override
+  Future<bool> saveNotebook(
+    StudyNotebook Function(StudyNotebook) update,
+    int expectedEpoch,
+  ) async {
+    if (saveGate != null) {
+      final allowed = await saveGate!.future;
+      if (!allowed) return false;
+    }
+    return super.saveNotebook(update, expectedEpoch);
+  }
 }
 
 void main() {
@@ -450,5 +477,121 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.textContaining('不包含本地图片与文件附件'), findsOneWidget);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+      'ManualEntryEditor separates attachment picking from saving and keeps 正在保存… visible with disableAnimations',
+      (tester) async {
+    await initializeDateFormatting('zh_CN');
+    SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
+    final service = _FakeAttachmentService();
+    final cameraGate = Completer<AttachmentSingleResult>();
+    service.cameraGate = cameraGate;
+    final saveGate = Completer<bool>();
+    final store = _SlowSaveStore(
+      sessionStore: core.Session(),
+      notificationService: core.Notifications(),
+      widgetSnapshotService: core.WidgetService(),
+      manualAttachmentService: service,
+      saveGate: saveGate,
+    );
+    await store.restoreSession();
+    addTearDown(store.dispose);
+
+    Future<void> openEditor({
+      required AssignmentStore targetStore,
+      required bool disableAnimations,
+    }) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: StudyAssistantTheme.light,
+          builder: (context, child) => MediaQuery(
+            data: MediaQuery.of(context)
+                .copyWith(disableAnimations: disableAnimations),
+            child: child!,
+          ),
+          home: Scaffold(
+            body: Builder(
+              builder: (ctx) => TextButton(
+                onPressed: () => Navigator.of(ctx).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => ManualEntryEditor(store: targetStore),
+                  ),
+                ),
+                child: const Text('打开编辑器'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('打开编辑器'));
+      await tester.pumpAndSettle();
+    }
+
+    await openEditor(targetStore: store, disableAnimations: true);
+
+    final moreToggle = find.byKey(const ValueKey('manual-more-options-toggle'));
+    await tester.ensureVisible(moreToggle);
+    await tester.tap(moreToggle);
+    await tester.pumpAndSettle();
+
+    final cameraBtn = find.byKey(const ValueKey('attachment-add-camera'));
+    await tester.scrollUntilVisible(
+      cameraBtn,
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(cameraBtn);
+    await tester.pump();
+
+    // During attachment capture: save button is disabled, stays labeled '保存个人安排', no spinner.
+    final saveFinder = find.byKey(const ValueKey('manual-editor-save'));
+    expect(tester.widget<FilledButton>(saveFinder).onPressed, isNull);
+    expect(find.text('保存个人安排'), findsOneWidget);
+    expect(find.text('正在保存…'), findsNothing);
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+
+    cameraGate.complete(const AttachmentSingleResult());
+    await tester.pumpAndSettle();
+
+    // During save under disableAnimations: true: shows '正在保存…' without spinner.
+    await tester.enterText(find.byType(TextFormField).first, '异步保存待办');
+    await tester.pump();
+    await tester.tap(saveFinder);
+    await tester.pump();
+
+    expect(tester.widget<FilledButton>(saveFinder).onPressed, isNull);
+    expect(find.text('正在保存…'), findsOneWidget);
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+    expect(tester.takeException(), isNull);
+
+    saveGate.complete(true);
+    await tester.pumpAndSettle();
+    expect(find.text('打开编辑器'), findsOneWidget);
+
+    // During save under disableAnimations: false: shows spinner + '正在保存…' on one line.
+    final animatedGate = Completer<bool>();
+    final animatedStore = _SlowSaveStore(
+      sessionStore: core.Session(),
+      notificationService: core.Notifications(),
+      widgetSnapshotService: core.WidgetService(),
+      manualAttachmentService: _FakeAttachmentService(),
+      saveGate: animatedGate,
+    );
+    await animatedStore.restoreSession();
+    addTearDown(animatedStore.dispose);
+    await openEditor(targetStore: animatedStore, disableAnimations: false);
+    await tester.enterText(find.byType(TextFormField).first, '动画保存待办');
+    await tester.pump();
+    await tester.tap(saveFinder);
+    await tester.pump();
+
+    expect(find.text('正在保存…'), findsOneWidget);
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    expect(tester.takeException(), isNull);
+
+    animatedGate.complete(true);
+    await tester.pumpAndSettle();
+    expect(find.text('打开编辑器'), findsOneWidget);
   });
 }

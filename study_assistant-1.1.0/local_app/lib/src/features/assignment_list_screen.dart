@@ -1401,7 +1401,12 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
           context,
           recoveryActive: recoveryScope != null,
           busy: busy,
-          onAddManual: () => _manualActions.openEditor(context),
+          onAddManual: () => _manualActions.openEditor(
+            context,
+            initialKind: _typeFilter == AssignmentTypeFilter.exam
+                ? ManualEntry.kindExam
+                : ManualEntry.kindTodo,
+          ),
           onRefresh: () => refresh(syncAction),
           onOpenMoreMenu: (anchorContext) =>
               unawaited(_openMoreMenu(anchorContext)),

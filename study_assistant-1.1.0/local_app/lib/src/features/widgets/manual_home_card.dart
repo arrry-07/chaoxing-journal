@@ -69,7 +69,7 @@ class ManualHomeCard extends StatelessWidget {
     final railWidth = AssignmentCard.measureRailWidth(
       context,
       inPinnedSection: inPinnedSection,
-      showCountdown: countdown,
+      showCountdown: !showFullDeadline && !inPinnedSection && countdown,
     );
     final today =
         at != null && AssignmentQuery.dayKey(at) == AssignmentQuery.dayKey(now);
@@ -171,14 +171,15 @@ class ManualHomeCard extends StatelessWidget {
               height: 1.22,
             ),
           ),
-          Text(
-            remaining,
-            style: journal.metadata.copyWith(
-              color: pinUrgent ? journal.accent : journal.subtle,
-              fontSize: 11,
-              height: 1.22,
+          if (remaining != dateLabel)
+            Text(
+              remaining,
+              style: journal.metadata.copyWith(
+                color: pinUrgent ? journal.accent : journal.subtle,
+                fontSize: 11,
+                height: 1.22,
+              ),
             ),
-          ),
         ],
       );
     }
@@ -208,15 +209,15 @@ class ManualHomeCard extends StatelessWidget {
             : quietHoursSkipped
                 ? '夜间静音时段未排期'
                 : null;
-    final fullDeadlineLine = showFullDeadline && !inPinnedSection && at != null
-        ? (() {
-            final beijingAt = AssignmentQuery.beijing(at);
-            final crossYear =
-                beijingAt.year != AssignmentQuery.beijing(now).year;
-            return DateFormat(
-              crossYear ? 'yyyy年M月d日 HH:mm' : 'M月d日 HH:mm',
-            ).format(beijingAt);
-          })()
+    final beijingAt = at == null ? null : AssignmentQuery.beijing(at);
+    final crossYear = beijingAt != null &&
+        beijingAt.year != AssignmentQuery.beijing(now).year;
+    final fullDeadlineLine = beijingAt != null &&
+            ((showFullDeadline && !inPinnedSection) ||
+                (inPinnedSection && crossYear))
+        ? DateFormat(
+            crossYear ? 'yyyy年M月d日 HH:mm' : 'M月d日 HH:mm',
+          ).format(beijingAt)
         : null;
     final auxiliary = <String>[
       if (fullDeadlineLine != null) fullDeadlineLine,

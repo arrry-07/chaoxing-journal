@@ -113,7 +113,7 @@ void main() {
     test('dark palette exposes the documented values', () {
       const palette = JournalPalette.dark;
       expect(palette.inputFill, const Color(0xFF1B1A17));
-      expect(palette.inputBorder, const Color(0xFF757067));
+      expect(palette.inputBorder, const Color(0xFF7A756C));
       expect(palette.inputBorderDisabled, const Color(0xFF423F39));
       expect(palette.cardShadowContact, const Color(0x24000000));
       expect(palette.cardShadowAmbient, const Color(0x38000000));
@@ -125,6 +125,8 @@ void main() {
       expect(palette.cardBorder, const Color(0x14FFF8EB));
       expect(palette.sageBorder, const Color(0xFF3D4C6E));
       expect(_contrastRatio(palette.inputBorder, palette.sheet),
+          greaterThanOrEqualTo(3.0));
+      expect(_contrastRatio(palette.inputBorder, palette.sheetElevated),
           greaterThanOrEqualTo(3.0));
       expect(_contrastRatio(palette.inputBorder, palette.inputFill),
           greaterThanOrEqualTo(3.0));

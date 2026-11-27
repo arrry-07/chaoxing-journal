@@ -606,14 +606,15 @@ class AssignmentCard extends StatelessWidget {
               height: 1.22,
             ),
           ),
-          Text(
-            remLabel,
-            style: journal.metadata.copyWith(
-              color: remColor,
-              fontSize: 11,
-              height: 1.22,
+          if (remLabel != dateLabel)
+            Text(
+              remLabel,
+              style: journal.metadata.copyWith(
+                color: remColor,
+                fontSize: 11,
+                height: 1.22,
+              ),
             ),
-          ),
         ],
       );
     }

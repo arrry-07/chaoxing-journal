@@ -155,7 +155,9 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
   final _links = ExternalLinkService();
   final ScrollController _scrollController = ScrollController();
   final ValueNotifier<double> _headerProgress = ValueNotifier<double>(0.0);
-  bool _opening = false, _hiding = false, _refreshing = false;
+  _DetailOpeningTarget? _openingTarget;
+  bool get _opening => _openingTarget != null;
+  bool _hiding = false, _refreshing = false;
   bool _openFailedFallback = false;
   bool _togglingPin = false;
   bool _savingManualDeadline = false;
@@ -242,7 +244,7 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
     final url = _currentUrl;
     if (url == null) return;
     setState(() {
-      _opening = true;
+      _openingTarget = _DetailOpeningTarget.web;
       _openFailedFallback = false;
       _actionMessage = null;
       _actionMessageTarget = null;
@@ -252,7 +254,7 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
     if (!opened) widget.store.cancelAssignmentVisit(widget.assignmentId);
     if (!mounted) return;
     setState(() {
-      _opening = false;
+      _openingTarget = null;
       _openFailedFallback = false;
       _actionMessage = opened
           ? '已请求浏览器打开。页面是否可用、登录及提交状态请在网页中核对。'
@@ -266,7 +268,7 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
     final url = _currentUrl;
     if (url == null) return;
     setState(() {
-      _opening = true;
+      _openingTarget = _DetailOpeningTarget.app;
       _openFailedFallback = false;
       _actionMessage = null;
       _actionMessageTarget = null;
@@ -279,7 +281,7 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
     }
     if (!mounted) return;
     setState(() {
-      _opening = false;
+      _openingTarget = null;
       _openFailedFallback = failed;
       _actionMessage = failed
           ? '未能打开学习通，请确认已安装并登录后重试；也可以改用浏览器打开或复制$_itemLabel链接。'
@@ -1579,7 +1581,7 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
                                     ? null
                                     : _openAssignment,
                             icon: Icons.open_in_new_rounded,
-                            label: _opening
+                            label: _openingTarget == _DetailOpeningTarget.app
                                 ? '正在打开…'
                                 : assignment.isExam
                                     ? '在学习通内查看$_itemLabel'
@@ -1596,7 +1598,9 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
                                     ? null
                                     : _openWeb,
                             icon: Icons.open_in_browser_rounded,
-                            label: _opening ? '正在请求浏览器…' : '用浏览器打开',
+                            label: _openingTarget == _DetailOpeningTarget.web
+                                ? '正在请求浏览器…'
+                                : '用浏览器打开',
                           ),
                         ],
                       ),
@@ -1819,6 +1823,8 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
 }
 
 enum _DetailNoticeTarget { opening, records, restore, pin, manual }
+
+enum _DetailOpeningTarget { app, web }
 
 class _DetailActionNotice extends StatelessWidget {
   const _DetailActionNotice({
