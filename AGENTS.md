@@ -6,7 +6,7 @@
 | --- | --- |
 | L0 热层 | 默认必读本文件与 [PROJECT_STATE.md](docs/ai-workflow/PROJECT_STATE.md)。两份合计最多 80 行。日常 `dev` 以这两份建立项目上下文，修改前核对分支、HEAD、工作区、暂存区及相关代码和测试。 |
 | L1 温层 | 按目标点读 [文档索引](docs/README.md)、[验证规则](docs/ai-workflow/VALIDATION.md)、[路线图](docs/ROADMAP.md)、[反馈台账](docs/待处理体验反馈.md)、`docs/guides/`、`docs/plans/` 当前方案及有效交接。查发布证据时从状态页进入最近两版记录。 |
-| L2 冷层 | `docs/archive/**` 默认禁读。所有 AI Agent 日常开发、排查及审读时严禁主动扫描、遍历或读取归档；仅在用户明确点名追溯某个历史版本时，按该版本定向访问。全仓内容检索用 `rg -g '!docs/archive/**'`，子代理同样遵守。 |
+| L2 冷层 | `docs/archive/**` 与 `docs/architecture/*.html`、`*.svg` 默认禁读（已由根 `.ignore` 默认排除搜索）。所有 AI Agent 日常开发、排查及审读时严禁主动扫描或读取归档与渲染 HTML；仅在用户明确点名追溯某个历史版本时定向访问。 |
 | Skill 路由 | 动手出方案、改代码、查疑难 Bug、审代码或打包发版前**必查** [Skill 强制路由表](.agents/rules/skill-routing.md)，命中场景须先 `read_file` 加载对应 `SKILL.md`（提示词再长也不得跳过）。 |
 
 ## 日常开发与正式发布
@@ -19,7 +19,7 @@
 - 第三方 API、版本兼容或升级先查锁文件（Flutter 用 `pubspec.lock`），再用 Context7 核对对应版本文档。项目内部逻辑直接检查本地源码和测试。
 - 视觉与布局改动须有当前任务的明确要求；功能修复只改必需的可观察界面状态，并在交付中说明。无关视觉问题只记录。
 - 保留已有修改和未跟踪的 `docs/feedback/`、`scripts/demo-video/` 及个人材料。凭据、Cookie、账号响应或敏感日志不得进入提交。保持 Flutter、脚本、参考实现与 CI 约定的目录路径。
-- **分级研发闭环**：① ≤3 文件且不碰核心契约的小步快修，当前窗直改快检推送（可按需 `@verifier` 抽检，自测包可攒批打）；② 跨模块迭代落盘 4 模块精简方案，在当前窗 `/clear` 或新开纯 `Neon (high)` 对话按全局 `staged-release-gate`（模型分流、执行纪律、Gate 审查与分级返工均以该技能为唯一真源）跑完 `/goal` 闭环 → 按[自测包步骤](docs/guides/开发与贡献.md#mumu-自测包)升 `Z+1` 原签名打包并在 MuMu 保数据核验（纯逻辑无 UI 改动可按方案暂缓攒批）→ 阶段收口更新状态文档推送；正式发版等明确指令。
+- **分级研发闭环**：按全局 `staged-release-gate` 分三档推进：① ≤3 文件局部小修，同窗直改快检推送；② 4–12 文件单模块或常规 UI 迭代，先对照 `ARCHITECTURE.md` 落盘 4 模块规格书，新窗 `Orchestrator (Neon)` 单气呵成实现快检 + 1 次零父历史独立 Gate 审查 + 涉 UI 当轮左移打快包上 MuMu 保数据审图；③ 跨模块/双端/状态机重构跑两段式 `/goal` 闭环；测试按功能模块就地维护契约断言（禁新建 `v192x_*_test.dart` 快照文件），随收口代码同笔提交更新 `DEV_STATE.md` 推 `dev`；正式发版等明确指令。
 - **MuMu 验收口径**：采用「基础保数据冒烟 + 本轮及尚未发版的核心改动路径」；涉及学习通线上接口最多集中刷新 1 次，避免高频请求触发 `9010`；未改同步解析时不重复刷线上接口，始终保留登录态、课程与课业数据。
 - 支持两段节奏：日常在 `dev` 每完成 1–3 个修订版可先过本地全量门禁再提集成 PR 合入 `main` 跑云端 CI（不修改 `README.md`/`CHANGELOG.md`/`安装与使用.md`，不打 Tag）；维护者明确要求正式发版后，再提轻量版本冻结 PR（升 `Y+1` 归零 `Z` 并同步正式文档）合入 `main`、构建验收并打 Tag 发布。紧急 Hotfix 从**最新正式版 Tag** 起步，发布后同步回 `main` 与 `dev`。正式版采用标准无前导零三段 `X.Y.Z` 与 `vX.Y.Z`（`Y` 上限 `99`，满 `99` 进 `X+1.0.0`），构建号高于全部测试包；每次正式版自动更新 `update-manual.json`，仅在大更新或紧急热修时显式开启 `--promote-stable` 推进 `update-stable.json`（细则见[版本号与迭代规则](docs/ai-workflow/VALIDATION.md#版本号与迭代分级规则)）。
 - 正式发布逐关核对 [CI、原签名 APK、设备及回下载](docs/ai-workflow/VALIDATION.md#集成验收与正式发布)。GitHub 每包必发，Gitee 自动更新小索引、按需手动镜像 APK，细则见[分发指南](docs/guides/更新渠道与国内分发.md)。
