@@ -1,3 +1,5 @@
+import 'dart:ui' show Tristate;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -831,7 +833,7 @@ void main() {
       expect(store.syncCalls, 0);
     });
 
-    testWidgets('sort entry opens the shared panel and only apply saves',
+    testWidgets('filter entry opens the shared panel and only apply saves',
         (tester) async {
       final store = _ScreenStore()
         ..replaceAssignmentsForTest([
@@ -843,7 +845,7 @@ void main() {
       addTearDown(store.dispose);
       await _pumpScreen(tester, store);
 
-      await tester.tap(find.byKey(const ValueKey('current-home-sort')));
+      await tester.tap(find.text('搜索与筛选'));
       await tester.pumpAndSettle();
       expect(find.text('搜索、筛选与排序'), findsOneWidget);
       expect(
@@ -868,6 +870,72 @@ void main() {
       expect(store.homeFilters.sortOrder, HomeSortOrder.deadlineDesc);
       expect(find.text('时间远到近'), findsOneWidget);
       expect(store.syncCalls, 0);
+    });
+
+    testWidgets(
+        'sort pill opens inline context menu with selected state and switches in one tap',
+        (tester) async {
+      final semantics = tester.ensureSemantics();
+      try {
+        final store = _ScreenStore()
+          ..homeFilters = const HomeFilters(
+            query: '数学',
+            type: AssignmentTypeFilter.homework,
+            deadline: AssignmentDeadlineFilter.notExpired,
+          )
+          ..replaceAssignmentsForTest([
+            _work('w',
+                course: '课程',
+                title: '数学作业',
+                due: DateTime.now().add(const Duration(days: 1))),
+          ]);
+        addTearDown(store.dispose);
+        await _pumpScreen(tester, store);
+
+        await tester.tap(find.byKey(const ValueKey('current-home-sort')));
+        await tester.pumpAndSettle();
+
+        expect(find.text('搜索、筛选与排序'), findsNothing);
+        expect(find.text('时间：近到远'), findsOneWidget);
+        expect(find.text('时间：远到近'), findsOneWidget);
+        expect(find.text('按课程'), findsOneWidget);
+
+        final light = StudyAssistantTheme.light.extension<JournalPalette>()!;
+        final activeText = tester.widget<Text>(find.text('时间：近到远'));
+        expect(activeText.style?.color, light.accent);
+        expect(find.byIcon(Icons.check_rounded), findsOneWidget);
+        expect(
+          tester
+              .getSemantics(find.text('时间：近到远'))
+              .getSemanticsData()
+              .flagsCollection
+              .isSelected,
+          Tristate.isTrue,
+        );
+
+        await tester.tap(find.text('时间：远到近'));
+        await tester.pumpAndSettle();
+        expect(store.homeFilters.sortOrder, HomeSortOrder.deadlineDesc);
+        expect(store.homeFilters.query, '数学');
+        expect(store.homeFilters.type, AssignmentTypeFilter.homework);
+        expect(store.homeFilters.deadline, AssignmentDeadlineFilter.notExpired);
+        expect(find.text('时间远到近'), findsOneWidget);
+        expect(store.syncCalls, 0);
+
+        await tester.tap(find.byKey(const ValueKey('current-home-sort')));
+        await tester.pumpAndSettle();
+        expect(
+          tester.widget<Text>(find.text('时间：远到近')).style?.color,
+          light.accent,
+        );
+        await tester.tap(find.text('按课程'));
+        await tester.pumpAndSettle();
+        expect(store.homeFilters.sortOrder, HomeSortOrder.courseName);
+        expect(find.text('按课程'), findsOneWidget);
+        expect(store.syncCalls, 0);
+      } finally {
+        semantics.dispose();
+      }
     });
 
     testWidgets('status owns its row and actions keep 48dp targets',
@@ -913,7 +981,7 @@ void main() {
           tester
               .widget<Semantics>(find.byWidgetPredicate((widget) =>
                   widget is Semantics &&
-                  widget.properties.label == '当前排序：时间近到远，打开搜索、筛选与排序'))
+                  widget.properties.label == '当前排序：时间近到远，切换排序方式'))
               .properties
               .button,
           isTrue);
@@ -1010,7 +1078,7 @@ void main() {
       await _pumpScreen(tester, store);
       final index = store.homeDisplayIndex;
 
-      await tester.tap(find.byKey(const ValueKey('current-home-sort')));
+      await tester.tap(find.text('搜索与筛选'));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('type-exam')));
       await tester.pumpAndSettle();

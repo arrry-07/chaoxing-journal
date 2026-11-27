@@ -290,6 +290,37 @@ void main() {
       );
     });
 
+    test(
+        'app and pages route modal bottom sheets through showJournalModalSheet',
+        () {
+      final libDir = _resolveLibDir();
+      final modalSheetRe =
+          RegExp(r'\bshowModalBottomSheet\s*(?:<[^>]*>)?\s*\(');
+      final violations = <String>[];
+      for (final file in _dartFiles(libDir)) {
+        final norm = file.path.replaceAll('\\', '/');
+        if (norm
+            .endsWith('lib/src/features/widgets/journal_modal_sheet.dart')) {
+          continue;
+        }
+        final lines = file.readAsLinesSync();
+        for (var i = 0; i < lines.length; i++) {
+          final trimmed = lines[i].trimLeft();
+          if (trimmed.startsWith('//')) continue;
+          if (modalSheetRe.hasMatch(trimmed)) {
+            violations.add('${file.path}:${i + 1}: $trimmed');
+          }
+        }
+      }
+      expect(
+        violations,
+        isEmpty,
+        reason:
+            'Use showJournalModalSheet instead of raw showModalBottomSheet:\n'
+            '${violations.join('\n')}',
+      );
+    });
+
     test('JournalGroupedCard children never include bare spacers', () {
       // The card inserts a divider between direct children, so a SizedBox
       // spacer there draws stray rules; free-form content goes in one Column.
