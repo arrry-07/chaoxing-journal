@@ -66,14 +66,6 @@ void main() {
         expect(t.getSize(actionButton).width, greaterThanOrEqualTo(48));
         if (scale >= 2.0) {
           expect(find.text('打开作业'), findsOneWidget);
-        } else {
-          final microLabel = find.descendant(
-            of: actionButton,
-            matching: find.text('学习通'),
-          );
-          expect(microLabel, findsOneWidget);
-          expect(
-              t.widget<Text>(microLabel).style?.fontFamily, Journal.uiFamily);
         }
         final titleRect = t.getRect(find.text(item.title));
         final actionRect = t.getRect(actionButton);

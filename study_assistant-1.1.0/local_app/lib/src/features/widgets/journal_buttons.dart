@@ -51,42 +51,17 @@ class JournalPrimaryButton extends StatelessWidget {
         fontSize: 15,
       ),
     );
-    final reduceMotion = MediaQuery.disableAnimationsOf(context);
-    final loadingText = Text(
-      label,
-      maxLines: 1,
-      softWrap: false,
-      overflow: TextOverflow.ellipsis,
-      style: journal.entryTitle.copyWith(
-        color: enabled ? fg : journal.muted,
-        fontWeight: FontWeight.w600,
-        fontSize: 15,
-      ),
-    );
-    final Widget child;
-    if (loading) {
-      final content = reduceMotion
-          ? loadingText
-          : Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                SizedBox.square(
-                  dimension: 16,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: enabled ? fg : journal.muted,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                loadingText,
-              ],
-            );
-      child = FittedBox(fit: BoxFit.scaleDown, child: content);
-    } else {
-      child = singleLineLabel
-          ? FittedBox(fit: BoxFit.scaleDown, child: labelText)
-          : labelText;
-    }
+    final child = loading
+        ? SizedBox.square(
+            dimension: 18,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              color: enabled ? fg : journal.muted,
+            ),
+          )
+        : (singleLineLabel
+            ? FittedBox(fit: BoxFit.scaleDown, child: labelText)
+            : labelText);
 
     final style = FilledButton.styleFrom(
       minimumSize: Size(expanded ? double.infinity : 0, height),

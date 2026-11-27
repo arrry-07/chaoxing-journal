@@ -1,3 +1,5 @@
+import 'dart:ui' show ImageFilter;
+
 import 'package:flutter/material.dart';
 
 import '../../app/journal.dart';
@@ -27,8 +29,10 @@ class JournalSliverHeader extends StatelessWidget {
       return const SizedBox.shrink();
     }
     final reduced = JournalMotion.isReducedMotion(context);
-    final surfaceColor =
-        reduced ? journal.paper : journal.paper.withValues(alpha: 0.98);
+    final isDark = journal.isDark;
+    final topAlpha = reduced ? 0.97 : 0.95;
+    final midAlpha = reduced ? 0.93 : (isDark ? 0.91 : 0.90);
+    final baseAlpha = reduced ? 0.90 : (isDark ? 0.86 : 0.84);
 
     final titleBar = SizedBox(
       height: 52,
@@ -64,7 +68,18 @@ class JournalSliverHeader extends StatelessWidget {
 
     final bodyContainer = Container(
       padding: const EdgeInsets.symmetric(horizontal: 18),
-      color: surfaceColor,
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          stops: const [0.0, 0.68, 1.0],
+          colors: [
+            journal.paper.withValues(alpha: topAlpha),
+            journal.paper.withValues(alpha: midAlpha),
+            journal.paper.withValues(alpha: baseAlpha),
+          ],
+        ),
+      ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -81,16 +96,37 @@ class JournalSliverHeader extends StatelessWidget {
 
     final body = IgnorePointer(
       ignoring: progress < 0.35,
-      child: bodyContainer,
+      child: reduced
+          ? bodyContainer
+          : ClipRect(
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 10.0, sigmaY: 10.0),
+                child: bodyContainer,
+              ),
+            ),
     );
 
-    final divider = IgnorePointer(
+    final feather = IgnorePointer(
       ignoring: true,
-      child: Divider(
-        key: const ValueKey('journal-sliver-header-divider'),
-        height: 0.8,
-        thickness: 0.8,
-        color: journal.divider,
+      child: SizedBox(
+        height: 18.0,
+        child: DecoratedBox(
+          key: const ValueKey('journal-sliver-header-feather'),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              stops: const [0.0, 0.22, 0.50, 0.78, 1.0],
+              colors: [
+                journal.paper.withValues(alpha: baseAlpha),
+                journal.paper.withValues(alpha: baseAlpha * 0.78),
+                journal.paper.withValues(alpha: baseAlpha * 0.42),
+                journal.paper.withValues(alpha: baseAlpha * 0.14),
+                journal.paper.withValues(alpha: 0.0),
+              ],
+            ),
+          ),
+        ),
       ),
     );
 
@@ -101,7 +137,7 @@ class JournalSliverHeader extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           body,
-          divider,
+          feather,
         ],
       ),
     );

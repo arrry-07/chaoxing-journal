@@ -126,10 +126,9 @@ void main() {
     ));
     await tester.pumpAndSettle();
 
-    expect(find.text('搜索与筛选 (2)'), findsOneWidget);
+    expect(find.text('已筛选'), findsOneWidget);
     expect(find.text('类型：考试'), findsOneWidget);
     expect(find.text('期限：7天内'), findsOneWidget);
-    expect(find.text('排序：时间远到近'), findsOneWidget);
     expect(find.text('没有符合搜索、类型或期限条件的记录'), findsOneWidget);
 
     await tester.tap(find.text('类型：考试'));

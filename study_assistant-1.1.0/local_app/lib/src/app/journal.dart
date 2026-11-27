@@ -39,7 +39,6 @@ class Journal {
   static const displayFamily = 'LXGW WenKai Screen';
   static const titleFamily = displayFamily;
   static const bodyFamily = displayFamily;
-  static const uiFamily = 'sans-serif';
   static const bodyFallback = [
     'HarmonyOS Sans SC',
     'MiSans',
@@ -99,7 +98,7 @@ class Journal {
     color: muted,
   );
   static const time = TextStyle(
-    fontFamily: uiFamily,
+    fontFamily: bodyFamily,
     fontFamilyFallback: bodyFallback,
     fontSize: 14.5,
     fontWeight: FontWeight.w400,
@@ -108,7 +107,7 @@ class Journal {
     color: ink,
   );
   static const statHero = TextStyle(
-    fontFamily: uiFamily,
+    fontFamily: bodyFamily,
     fontFamilyFallback: bodyFallback,
     fontSize: 30,
     fontWeight: FontWeight.w700,
@@ -117,7 +116,7 @@ class Journal {
     color: ink,
   );
   static const pillLabel = TextStyle(
-    fontFamily: uiFamily,
+    fontFamily: bodyFamily,
     fontFamilyFallback: bodyFallback,
     fontSize: 13,
     fontWeight: FontWeight.w400,
@@ -165,9 +164,8 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
     required this.navGlassFill,
     required this.navGlassBorder,
     required this.navGlassHighlight,
-    required this.inputFill,
-    required this.inputBorder,
-    required this.inputBorderDisabled,
+    required this.ambientPrimaryGlow,
+    required this.ambientWarmGlow,
     required this.cardShadowContact,
     required this.cardShadowAmbient,
     required this.cardTopHighlight,
@@ -213,9 +211,8 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
     navGlassFill: Color(0xD9FFFFFF),
     navGlassBorder: Color(0xB3E5E5E0),
     navGlassHighlight: Color(0x80FFFFFF),
-    inputFill: Color(0xFFF8F7F4),
-    inputBorder: Color(0xFF8E8B82),
-    inputBorderDisabled: Color(0xFFD6D4CC),
+    ambientPrimaryGlow: Color(0x163D63DD),
+    ambientWarmGlow: Color(0x12D97757),
     cardShadowContact: Color(0x071F2328),
     cardShadowAmbient: Color(0x0A1F2328),
     cardTopHighlight: Color(0xB8FFFFFF),
@@ -262,9 +259,8 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
     navGlassFill: Color(0xCC242320),
     navGlassBorder: Color(0x16FFF8EB),
     navGlassHighlight: Color(0x26FFF8EB),
-    inputFill: Color(0xFF1B1A17),
-    inputBorder: Color(0xFF7A756C),
-    inputBorderDisabled: Color(0xFF423F39),
+    ambientPrimaryGlow: Color(0x1C88A8F8),
+    ambientWarmGlow: Color(0x1AE5896B),
     cardShadowContact: Color(0x24000000),
     cardShadowAmbient: Color(0x38000000),
     cardTopHighlight: Color(0x18FFF8EB),
@@ -309,9 +305,8 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
   final Color navGlassFill;
   final Color navGlassBorder;
   final Color navGlassHighlight;
-  final Color inputFill;
-  final Color inputBorder;
-  final Color inputBorderDisabled;
+  final Color ambientPrimaryGlow;
+  final Color ambientWarmGlow;
   final Color cardShadowContact;
   final Color cardShadowAmbient;
   final Color cardTopHighlight;
@@ -385,9 +380,8 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
     Color? navGlassFill,
     Color? navGlassBorder,
     Color? navGlassHighlight,
-    Color? inputFill,
-    Color? inputBorder,
-    Color? inputBorderDisabled,
+    Color? ambientPrimaryGlow,
+    Color? ambientWarmGlow,
     Color? cardShadowContact,
     Color? cardShadowAmbient,
     Color? cardTopHighlight,
@@ -432,9 +426,8 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
         navGlassFill: navGlassFill ?? this.navGlassFill,
         navGlassBorder: navGlassBorder ?? this.navGlassBorder,
         navGlassHighlight: navGlassHighlight ?? this.navGlassHighlight,
-        inputFill: inputFill ?? this.inputFill,
-        inputBorder: inputBorder ?? this.inputBorder,
-        inputBorderDisabled: inputBorderDisabled ?? this.inputBorderDisabled,
+        ambientPrimaryGlow: ambientPrimaryGlow ?? this.ambientPrimaryGlow,
+        ambientWarmGlow: ambientWarmGlow ?? this.ambientWarmGlow,
         cardShadowContact: cardShadowContact ?? this.cardShadowContact,
         cardShadowAmbient: cardShadowAmbient ?? this.cardShadowAmbient,
         cardTopHighlight: cardTopHighlight ?? this.cardTopHighlight,
@@ -488,10 +481,9 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
       navGlassBorder: Color.lerp(navGlassBorder, other.navGlassBorder, t)!,
       navGlassHighlight:
           Color.lerp(navGlassHighlight, other.navGlassHighlight, t)!,
-      inputFill: Color.lerp(inputFill, other.inputFill, t)!,
-      inputBorder: Color.lerp(inputBorder, other.inputBorder, t)!,
-      inputBorderDisabled:
-          Color.lerp(inputBorderDisabled, other.inputBorderDisabled, t)!,
+      ambientPrimaryGlow:
+          Color.lerp(ambientPrimaryGlow, other.ambientPrimaryGlow, t)!,
+      ambientWarmGlow: Color.lerp(ambientWarmGlow, other.ambientWarmGlow, t)!,
       cardShadowContact:
           Color.lerp(cardShadowContact, other.cardShadowContact, t)!,
       cardShadowAmbient:
@@ -547,9 +539,8 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
           navGlassFill == other.navGlassFill &&
           navGlassBorder == other.navGlassBorder &&
           navGlassHighlight == other.navGlassHighlight &&
-          inputFill == other.inputFill &&
-          inputBorder == other.inputBorder &&
-          inputBorderDisabled == other.inputBorderDisabled &&
+          ambientPrimaryGlow == other.ambientPrimaryGlow &&
+          ambientWarmGlow == other.ambientWarmGlow &&
           cardShadowContact == other.cardShadowContact &&
           cardShadowAmbient == other.cardShadowAmbient &&
           cardTopHighlight == other.cardTopHighlight &&
@@ -595,9 +586,8 @@ class JournalPalette extends ThemeExtension<JournalPalette> {
         navGlassFill,
         navGlassBorder,
         navGlassHighlight,
-        inputFill,
-        inputBorder,
-        inputBorderDisabled,
+        ambientPrimaryGlow,
+        ambientWarmGlow,
         cardShadowContact,
         cardShadowAmbient,
         cardTopHighlight,

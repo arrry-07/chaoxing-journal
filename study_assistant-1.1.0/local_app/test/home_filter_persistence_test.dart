@@ -64,7 +64,6 @@ Assignment work(DateTime due) => Assignment(
     lastSyncedAt: DateTime.now());
 
 Future<void> tapSheetOption(WidgetTester tester, String label) async {
-  await tester.pumpAndSettle();
   final target = find.text(label);
   await tester.ensureVisible(target);
   await tester.pumpAndSettle();
@@ -286,11 +285,12 @@ void main() {
     await t.pumpWidget(
         MaterialApp(home: Scaffold(body: AssignmentListScreen(store: s))));
     await t.pumpAndSettle();
-    await t.tap(find.text('搜索与筛选 (2)'));
+    await t.tap(find.text('已筛选'));
     await t.pumpAndSettle();
     expect(find.text('已选课程（当前无可显示作业）'), findsOneWidget);
     expect(find.text('private:class'), findsNothing);
     await t.enterText(find.byType(TextField), '新条件');
+    await t.testTextInput.receiveAction(TextInputAction.done);
     await t.pumpAndSettle();
     await tapSheetOption(t, '应用');
     expect(find.text('搜索、筛选与排序未能保存，请重试；原偏好已保留'), findsOneWidget);
@@ -316,11 +316,10 @@ void main() {
         child: Scaffold(body: AssignmentListScreen(store: store)),
       ),
     ));
-    await tester.tap(find.byKey(const ValueKey('home-filter-action')));
+    await tester.tap(find.byTooltip('搜索与筛选'));
     await tester.pumpAndSettle();
-    expect(
-        find.byKey(const ValueKey('home-filter-drag-handle')), findsOneWidget);
-    await tester.ensureVisible(find.text('清空条件'));
+    expect(find.text('搜索、筛选与排序'), findsOneWidget);
+    await tester.ensureVisible(find.text('清空筛选'));
     await tester.pump();
     await tester.ensureVisible(find.text('取消'));
     await tester.pump();
@@ -330,67 +329,6 @@ void main() {
     await tester.tap(find.text('应用'));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
-  });
-
-  testWidgets(
-      'three-tier filter sheet keeps apply/cancel visible at 360dp 1.3x with keyboard open',
-      (tester) async {
-    tester.view.devicePixelRatio = 1;
-    tester.view.physicalSize = const Size(360, 640);
-    tester.view.viewInsets = const FakeViewPadding(bottom: 240);
-    addTearDown(tester.view.resetDevicePixelRatio);
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetViewInsets);
-
-    final store = makeStore(Session());
-    addTearDown(store.dispose);
-    await store.restoreSession();
-    store.replaceAssignmentsForTest(
-        [work(DateTime.now().add(const Duration(days: 1)))]);
-
-    await tester.pumpWidget(MaterialApp(
-      theme: StudyAssistantTheme.light,
-      home: MediaQuery(
-        data: const MediaQueryData(textScaler: TextScaler.linear(1.3)),
-        child: Scaffold(body: AssignmentListScreen(store: store)),
-      ),
-    ));
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.byKey(const ValueKey('home-filter-action')));
-    await tester.pumpAndSettle();
-
-    final field = find.byType(TextField);
-    expect(
-      tester.widget<TextField>(field).decoration?.hintText,
-      '搜索课业或课程',
-    );
-    await tester.enterText(field, '数学');
-    await tester.pumpAndSettle();
-    expect(
-        find.byKey(const ValueKey('home-filter-clear-query')), findsOneWidget);
-
-    final applyBtn = find.widgetWithText(FilledButton, '应用');
-    final cancelBtn = find.widgetWithText(TextButton, '取消');
-    expect(applyBtn, findsOneWidget);
-    expect(cancelBtn, findsOneWidget);
-
-    final applyRect = tester.getRect(applyBtn);
-    final cancelRect = tester.getRect(cancelBtn);
-    // Above the 240dp keyboard inset (visible viewport height = 640 - 240 = 400).
-    expect(applyRect.bottom, lessThanOrEqualTo(400.0));
-    expect(cancelRect.bottom, lessThanOrEqualTo(400.0));
-    expect(applyRect.overlaps(tester.getRect(field)), isFalse);
-    expect(tester.takeException(), isNull);
-
-    // Clear query icon clears text without closing, then submit triggers apply.
-    await tester.tap(find.byKey(const ValueKey('home-filter-clear-query')));
-    await tester.pumpAndSettle();
-    await tester.enterText(field, '练习');
-    await tester.testTextInput.receiveAction(TextInputAction.search);
-    await tester.pumpAndSettle();
-    expect(store.homeFilters.query, '练习');
-    await tester.pumpWidget(const SizedBox.shrink());
   });
 
   testWidgets('home deadline picker keeps three choices with all first',
@@ -453,17 +391,17 @@ void main() {
     await t.pumpAndSettle();
     await t.enterText(find.byType(TextField), '数学');
     await tapSheetOption(t, '未逾期');
-    await tapSheetOption(t, '时间远到近');
+    await tapSheetOption(t, '时间：远到近（考试按开考）');
     await tapSheetOption(t, '应用');
     expect(s.homeFilters.sortOrder, HomeSortOrder.deadlineDesc);
-    expect(find.byKey(const ValueKey('current-home-sort')), findsNothing);
-    expect(find.text('排序：时间远到近'), findsOneWidget);
+    expect(find.byKey(const ValueKey('current-home-sort')), findsOneWidget);
+    expect(find.text('时间远到近'), findsOneWidget);
     for (final tab in ['日历', '统计', '我的']) {
       await t.tap(find.text(tab));
       await t.pumpAndSettle();
       await t.tap(find.text('首页'));
       await t.pumpAndSettle();
-      expect(find.text('搜索与筛选 (2)'), findsOneWidget);
+      expect(find.text('已筛选'), findsOneWidget);
       expect(s.homeFilters.query, '数学');
       expect(s.homeFilters.sortOrder, HomeSortOrder.deadlineDesc);
     }
@@ -478,20 +416,18 @@ void main() {
     s.replaceAssignmentsForTest([]);
     await t.pump();
     expect(s.homeFilters.query, '数学');
-    await t.tap(find.text('搜索与筛选 (2)'));
+    await t.tap(find.text('已筛选'));
     await t.pumpAndSettle();
     await t.enterText(find.byType(TextField), '不保存');
     await tapSheetOption(t, '按课程');
-    await t.tap(find.byKey(const ValueKey('home-filter-sheet-clear')));
-    await t.pumpAndSettle();
+    await tapSheetOption(t, '清空筛选');
     await tapSheetOption(t, '取消');
     expect(s.homeFilters.query, '数学');
     expect(s.homeFilters.deadline, AssignmentDeadlineFilter.notExpired);
     expect(s.homeFilters.sortOrder, HomeSortOrder.deadlineDesc);
-    await t.tap(find.text('搜索与筛选 (2)'));
+    await t.tap(find.text('已筛选'));
     await t.pumpAndSettle();
-    await t.tap(find.byKey(const ValueKey('home-filter-sheet-clear')));
-    await t.pumpAndSettle();
+    await tapSheetOption(t, '清空筛选');
     await tapSheetOption(t, '应用');
     expect(s.homeFilters.query, '');
     expect(s.homeFilters.deadline, AssignmentDeadlineFilter.all);
@@ -513,9 +449,8 @@ void main() {
 
     await t.tap(find.text('搜索与筛选'));
     await t.pumpAndSettle();
-    expect(
-        find.byKey(const ValueKey('home-filter-drag-handle')), findsOneWidget);
-    await tapSheetOption(t, '时间远到近');
+    expect(find.text('搜索、筛选与排序'), findsOneWidget);
+    await tapSheetOption(t, '时间：远到近（考试按开考）');
 
     session.account = 'B';
     await s.restoreSession();
@@ -606,13 +541,13 @@ void main() {
     ));
     await t.pumpAndSettle();
 
-    await t.tap(find.text('搜索与筛选 (1)'));
+    await t.tap(find.text('已筛选'));
     await t.pumpAndSettle();
     expect(find.text('全部课程'), findsOneWidget);
     await tapSheetOption(t, '应用');
     expect(s.homeFilters.courseKey, isNull);
 
-    await t.tap(find.text('搜索与筛选 (1)'));
+    await t.tap(find.text('已筛选'));
     await t.pumpAndSettle();
 
     now = now.add(const Duration(hours: 1));
@@ -653,7 +588,8 @@ void main() {
     await t.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('sort summary chip ignores stale tap across account switch',
+  testWidgets(
+      'sort menu blocks stale open before rebuild and stale selection across account switch',
       (t) async {
     final session = Session();
     final s = makeStore(session);
@@ -667,12 +603,31 @@ void main() {
       MaterialApp(home: Scaffold(body: AssignmentListScreen(store: s))),
     );
     await t.pumpAndSettle();
-    expect(find.text('排序：按课程'), findsOneWidget);
 
-    // Account changes before the stale chip rebuilds: tapping chip must not pollute A or B.
+    // Account changes before the stale button rebuilds: tapping sort must not open the menu.
     session.account = 'B';
     await s.restoreSession();
-    await t.tap(find.text('排序：按课程'));
+    await t.tap(find.byKey(const ValueKey('current-home-sort')));
+    await t.pumpAndSettle();
+    expect(find.text('时间：远到近'), findsNothing);
+    expect(s.homeFilters.sortOrder, HomeSortOrder.deadlineAsc);
+
+    // Menu opens on account A, then account switches to B before selection: neither A nor B is polluted.
+    session.account = 'A';
+    await s.restoreSession();
+    await t.pumpAndSettle();
+    expect(s.homeFilters.sortOrder, HomeSortOrder.courseName);
+
+    await t.tap(find.byKey(const ValueKey('current-home-sort')));
+    await t.pumpAndSettle();
+    expect(find.text('时间：远到近'), findsOneWidget);
+
+    session.account = 'B';
+    await s.restoreSession();
+    await t.pumpAndSettle();
+    expect(s.homeFilters.sortOrder, HomeSortOrder.deadlineAsc);
+
+    await t.tap(find.text('时间：远到近'));
     await t.pumpAndSettle();
     expect(s.homeFilters.sortOrder, HomeSortOrder.deadlineAsc);
 
@@ -747,7 +702,7 @@ void main() {
     ));
     await t.pumpAndSettle();
 
-    await t.tap(find.text('搜索与筛选 (1)'));
+    await t.tap(find.text('已筛选'));
     await t.pumpAndSettle();
 
     final courseRow = find.byKey(const ValueKey('home-course-filter'));

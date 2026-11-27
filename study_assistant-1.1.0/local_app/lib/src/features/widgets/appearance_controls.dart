@@ -253,9 +253,8 @@ class _ThemeSwatch extends StatelessWidget {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       SizedBox(
-                        key: ValueKey('theme-swatch-preview-${mode.name}'),
                         width: double.infinity,
-                        height: 78,
+                        height: 56,
                         child: preview,
                       ),
                       const SizedBox(height: 6),
@@ -334,91 +333,36 @@ class _SwatchPreview extends StatelessWidget {
   }
 
   Widget _miniPage(JournalPalette palette) {
-    if (compact) {
-      return ColoredBox(
-        color: palette.paper,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 9),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              FractionallySizedBox(
-                widthFactor: 0.68,
-                child: Container(
-                  height: 3,
-                  decoration: BoxDecoration(
-                    color: palette.ink,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 5),
-              FractionallySizedBox(
-                widthFactor: 0.44,
-                child: Container(
-                  height: 2.5,
-                  decoration: BoxDecoration(
-                    color: palette.muted,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-
     return ColoredBox(
       color: palette.paper,
       child: Padding(
-        padding: const EdgeInsets.all(8),
-        child: Container(
-          decoration: BoxDecoration(
-            color: palette.sheet,
-            borderRadius: BorderRadius.circular(7),
-            border: Border.all(color: palette.rule, width: 0.7),
-          ),
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              FractionallySizedBox(
-                widthFactor: 0.74,
-                child: Container(
-                  height: 4.5,
-                  decoration: BoxDecoration(
-                    color: palette.ink,
-                    borderRadius: BorderRadius.circular(2.5),
-                  ),
+        padding: EdgeInsets.symmetric(horizontal: compact ? 9 : 12),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            FractionallySizedBox(
+              widthFactor: 0.68,
+              child: Container(
+                height: compact ? 3 : 3.5,
+                decoration: BoxDecoration(
+                  color: palette.ink,
+                  borderRadius: BorderRadius.circular(2),
                 ),
               ),
-              const SizedBox(height: 8),
-              FractionallySizedBox(
-                widthFactor: 0.50,
-                child: Container(
-                  height: 3.5,
-                  decoration: BoxDecoration(
-                    color: palette.muted,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
+            ),
+            SizedBox(height: compact ? 5 : 7),
+            FractionallySizedBox(
+              widthFactor: 0.44,
+              child: Container(
+                height: compact ? 2.5 : 3,
+                decoration: BoxDecoration(
+                  color: palette.muted,
+                  borderRadius: BorderRadius.circular(2),
                 ),
               ),
-              const SizedBox(height: 7),
-              FractionallySizedBox(
-                widthFactor: 0.32,
-                child: Container(
-                  height: 3,
-                  decoration: BoxDecoration(
-                    color: palette.accent.withValues(alpha: 0.7),
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );

@@ -387,7 +387,7 @@ class _CourseListScreenState extends State<CourseListScreen> {
                         hintText: '搜索课程或教师...',
                         hintStyle: journal.metadata,
                         filled: true,
-                        fillColor: journal.inputFill,
+                        fillColor: journal.parchment,
                         isDense: true,
                         prefixIcon: Icon(
                           Icons.search_rounded,
@@ -411,18 +411,16 @@ class _CourseListScreenState extends State<CourseListScreen> {
                         ),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(14),
-                          borderSide: BorderSide(
-                              color: journal.inputBorder, width: 1.0),
+                          borderSide: BorderSide.none,
                         ),
                         enabledBorder: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(14),
-                          borderSide: BorderSide(
-                              color: journal.inputBorder, width: 1.0),
+                          borderSide: BorderSide.none,
                         ),
                         focusedBorder: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(14),
                           borderSide:
-                              BorderSide(color: journal.accent, width: 1.5),
+                              BorderSide(color: journal.accent, width: 1.1),
                         ),
                       ),
                     ),

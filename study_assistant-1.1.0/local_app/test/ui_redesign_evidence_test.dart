@@ -235,8 +235,7 @@ void main() {
         if (RegExp(r'[A-Za-z0-9\u4e00-\u9fff]').hasMatch(span.text ?? '')) {
           final isPageTitle = (span.style?.fontSize ?? 0) >= 20 &&
               family == Journal.titleFamily;
-          final isUiFont = family == Journal.uiFamily;
-          if (!isPageTitle && !isUiFont) {
+          if (!isPageTitle) {
             expect(family, Journal.bodyFamily,
                 reason: '$scene $width $scale: ${span.text}');
           }

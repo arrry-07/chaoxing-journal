@@ -53,8 +53,7 @@ void main() {
     await launch(tester);
     expect(find.textContaining('2026年11月5日 08:30'), findsOneWidget);
     expect(find.text('在学习通内打开作业'), findsOneWidget);
-    expect(find.text('用浏览器打开'), findsOneWidget);
-    expect(find.textContaining('用浏览器打开可能需要另行登录'), findsOneWidget);
+    expect(find.textContaining('学习通内打开作业网页'), findsOneWidget);
   });
   testWidgets(
       'go to Chaoxing failure stays in assistant without browser or completing work',
@@ -79,60 +78,9 @@ void main() {
       findsOneWidget,
     );
     expect(
-      find.byKey(const ValueKey('assignment-open-fallback-web')),
-      findsOneWidget,
-    );
-    expect(
-      find.byKey(const ValueKey('assignment-open-fallback-copy')),
-      findsOneWidget,
-    );
-    expect(
       find.byKey(const ValueKey('assignment-records-result')),
       findsNothing,
     );
-
-    // Tapping quick fallback "用浏览器打开" inside notice launches browser.
-    await tester
-        .tap(find.byKey(const ValueKey('assignment-open-fallback-web')));
-    await tester.pumpAndSettle();
-    expect(requests.map((c) => c.method),
-        ['openChaoxingAssignment', 'openBrowser']);
-    expect(find.textContaining('已请求浏览器打开'), findsOneWidget);
-  });
-
-  testWidgets(
-      'open failure fallback copy link opens confirmation dialog and copies URL',
-      (tester) async {
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(channel, (_) async => false);
-    final copied = <String>[];
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(SystemChannels.platform, (call) async {
-      if (call.method == 'Clipboard.setData') {
-        copied.add((call.arguments as Map)['text'] as String);
-      }
-      return null;
-    });
-    addTearDown(() => TestDefaultBinaryMessengerBinding
-        .instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(SystemChannels.platform, null));
-
-    await launch(tester);
-    final openBtn = find.byKey(const ValueKey('assignment-detail-open'));
-    await tester.ensureVisible(openBtn);
-    await tester.tap(openBtn);
-    await tester.pumpAndSettle();
-
-    final fallbackCopy =
-        find.byKey(const ValueKey('assignment-open-fallback-copy'));
-    expect(fallbackCopy, findsOneWidget);
-    await tester.ensureVisible(fallbackCopy);
-    await tester.tap(fallbackCopy);
-    await tester.pumpAndSettle();
-    expect(find.textContaining('本人设备'), findsOneWidget);
-    await tester.tap(find.text('确认复制'));
-    await tester.pumpAndSettle();
-    expect(copied, [_url]);
   });
 
   testWidgets(
@@ -175,7 +123,7 @@ void main() {
       return gate.future;
     });
     final store = await launch(tester);
-    final open = find.byKey(const ValueKey('assignment-detail-open-web'));
+    final open = find.text('打开作业网页');
     await tester.ensureVisible(open);
     await tester.tap(open);
     await tester.tap(open);
@@ -186,7 +134,7 @@ void main() {
     gate.complete(true);
     await tester.pumpAndSettle();
     expect(store.item.isCompleted, isFalse);
-    expect(find.textContaining('已请求浏览器打开'), findsOneWidget);
+    expect(find.textContaining('可能需要另行登录'), findsOneWidget);
     expect(find.textContaining('已进入作业'), findsNothing);
   });
 
@@ -198,9 +146,8 @@ void main() {
       throw PlatformException(code: 'no_browser');
     });
     await launch(tester);
-    final openWeb = find.byKey(const ValueKey('assignment-detail-open-web'));
-    await tester.ensureVisible(openWeb);
-    await tester.tap(openWeb);
+    await tester.ensureVisible(find.text('打开作业网页'));
+    await tester.tap(find.text('打开作业网页'));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
     expect(find.textContaining('未能启动浏览器'), findsOneWidget);
@@ -362,29 +309,6 @@ void main() {
         find.byKey(const ValueKey('assignment-detail-course')), findsOneWidget);
     expect(find.byKey(const ValueKey('assignment-detail-course-link')),
         findsNothing);
-  });
-
-  testWidgets(
-      'opening Chaoxing app disables web button without switching its label to 正在请求浏览器…',
-      (tester) async {
-    final gate = Completer<bool>();
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(channel, (_) => gate.future);
-
-    await launch(tester);
-    final openPrimary = find.byKey(const ValueKey('assignment-detail-open'));
-    await reveal(tester, openPrimary);
-    await tester.tap(openPrimary);
-    await tester.pump();
-
-    expect(find.text('正在打开…'), findsOneWidget);
-    expect(find.text('正在请求浏览器…'), findsNothing);
-    expect(find.text('用浏览器打开'), findsOneWidget);
-    final openWeb = find.byKey(const ValueKey('assignment-detail-open-web'));
-    expect(tester.widget<OutlinedButton>(openWeb).onPressed, isNull);
-
-    gate.complete(false);
-    await tester.pumpAndSettle();
   });
 }
 

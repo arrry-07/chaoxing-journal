@@ -160,7 +160,7 @@ void main() {
     addTearDown(store.dispose);
     await _pump(tester, store);
 
-    final reset = find.widgetWithText(TextButton, '清空条件');
+    final reset = find.widgetWithText(TextButton, '重置条件');
     final size = tester.getSize(reset);
     expect(size.width, greaterThanOrEqualTo(48));
     expect(size.height, greaterThanOrEqualTo(48));
@@ -184,7 +184,7 @@ void main() {
       ..replaceAssignmentsForTest([_work()]);
     addTearDown(success.dispose);
     await _pump(tester, success);
-    await tester.tap(find.widgetWithText(TextButton, '清空条件'));
+    await tester.tap(find.widgetWithText(TextButton, '重置条件'));
     await tester.pumpAndSettle();
     expect(success.homeFilters.query, '');
     expect(success.homeFilters.deadline, AssignmentDeadlineFilter.all);
@@ -207,6 +207,6 @@ void main() {
     expect(tester.takeException(), isNull);
     final tag = _tagInk('关键词：非常长的关键词用于检查换行与触控区域是否仍然完整');
     expect(tester.getSize(tag).height, greaterThanOrEqualTo(48));
-    expect(find.widgetWithText(TextButton, '清空条件'), findsOneWidget);
+    expect(find.text('重置条件'), findsOneWidget);
   });
 }

@@ -111,7 +111,8 @@ Future<void> _pump(
 }
 
 Future<void> _openFilters(WidgetTester tester) async {
-  final target = find.byKey(const ValueKey('home-filter-action'));
+  final active = find.text('已筛选');
+  final target = active.evaluate().isNotEmpty ? active : find.text('搜索与筛选');
   await tester.ensureVisible(target);
   await tester.tap(target);
   await tester.pumpAndSettle();

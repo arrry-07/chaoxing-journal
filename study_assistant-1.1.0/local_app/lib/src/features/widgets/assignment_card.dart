@@ -427,31 +427,22 @@ class AssignmentCard extends StatelessWidget {
                 ? '查看考试'
                 : '打开作业';
 
-    final compactMicroLabel = previewOnly
-        ? '待保存'
-        : opening
-            ? '打开中'
-            : '学习通';
-
     Widget buildLaunchControl() {
       final journal = Journal.of(context);
       final enabled = !previewOnly && !opening && onOpenAssignment != null;
-      Widget buildIcon(double iconSize, double spinnerSize) =>
-          opening && !reduceMotion
-              ? SizedBox.square(
-                  dimension: spinnerSize,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: journal.ink,
-                  ),
-                )
-              : Icon(
-                  opening
-                      ? Icons.hourglass_top_rounded
-                      : Icons.open_in_new_rounded,
-                  size: iconSize,
-                  color: enabled ? journal.muted : journal.ruleStrong,
-                );
+      final iconWidget = opening && !reduceMotion
+          ? SizedBox.square(
+              dimension: 15,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: journal.ink,
+              ),
+            )
+          : Icon(
+              opening ? Icons.hourglass_top_rounded : Icons.open_in_new_rounded,
+              size: 18,
+              color: enabled ? journal.muted : journal.ruleStrong,
+            );
 
       if (largeText) {
         return Semantics(
@@ -479,7 +470,7 @@ class AssignmentCard extends StatelessWidget {
                     borderRadius: BorderRadius.circular(20),
                   ),
                 ),
-                icon: buildIcon(18, 15),
+                icon: iconWidget,
                 label: ExcludeSemantics(
                   child: Text(
                     shortOpenLabel,
@@ -511,30 +502,7 @@ class AssignmentCard extends StatelessWidget {
             onPressed: enabled ? onOpenAssignment : null,
             constraints: const BoxConstraints.tightFor(width: 48, height: 48),
             padding: EdgeInsets.zero,
-            icon: Column(
-              mainAxisSize: MainAxisSize.min,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                buildIcon(16, 14),
-                const SizedBox(height: 2),
-                FittedBox(
-                  fit: BoxFit.scaleDown,
-                  child: Text(
-                    compactMicroLabel,
-                    maxLines: 1,
-                    softWrap: false,
-                    style: TextStyle(
-                      fontFamily: Journal.uiFamily,
-                      fontFamilyFallback: Journal.bodyFallback,
-                      fontSize: 10,
-                      fontWeight: FontWeight.w500,
-                      height: 1.05,
-                      color: enabled ? journal.muted : journal.subtle,
-                    ),
-                  ),
-                ),
-              ],
-            ),
+            icon: iconWidget,
           ),
         ),
       );

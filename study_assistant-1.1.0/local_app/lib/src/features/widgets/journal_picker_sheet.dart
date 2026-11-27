@@ -655,9 +655,9 @@ class _JournalPickerSheetBodyState<T>
               style: journal.entryTitle.copyWith(fontSize: 14.5),
               decoration: InputDecoration(
                 hintText: widget.searchHint,
-                hintStyle: journal.metadata.copyWith(color: journal.subtle),
+                hintStyle: journal.metadata,
                 filled: true,
-                fillColor: journal.inputFill,
+                fillColor: journal.parchment,
                 isDense: true,
                 prefixIcon: Icon(
                   Icons.search_rounded,
@@ -681,17 +681,15 @@ class _JournalPickerSheetBodyState<T>
                 ),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(14),
-                  borderSide:
-                      BorderSide(color: journal.inputBorder, width: 1.0),
+                  borderSide: BorderSide.none,
                 ),
                 enabledBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(14),
-                  borderSide:
-                      BorderSide(color: journal.inputBorder, width: 1.0),
+                  borderSide: BorderSide.none,
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(14),
-                  borderSide: BorderSide(color: journal.accent, width: 1.5),
+                  borderSide: BorderSide(color: journal.accent, width: 1.1),
                 ),
               ),
             ),

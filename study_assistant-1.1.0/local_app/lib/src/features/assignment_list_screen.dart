@@ -662,19 +662,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
         JournalContextMenuAction(
           label: '添加课业或待办',
           icon: Icons.add_rounded,
-          onSelected: () => _manualActions.openEditor(
-            context,
-            initialKind: _typeFilter == AssignmentTypeFilter.exam
-                ? ManualEntry.kindExam
-                : ManualEntry.kindTodo,
-          ),
-        ),
-        JournalContextMenuAction(
-          label: '个人待办与考试',
-          icon: Icons.checklist_rounded,
-          onSelected: () {
-            if (mounted) context.push('/agenda');
-          },
+          onSelected: () => _manualActions.openEditor(context),
         ),
         JournalContextMenuAction(
           label: '每日计划',
@@ -682,15 +670,6 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
           onSelected: () {
             if (mounted) context.push('/plan');
           },
-        ),
-        JournalContextMenuAction(
-          label: '切换主题（当前：${store.display.themeMode.label}）',
-          icon: switch (store.display.themeMode) {
-            JournalThemeMode.system => Icons.brightness_auto_outlined,
-            JournalThemeMode.light => Icons.light_mode_outlined,
-            JournalThemeMode.dark => Icons.dark_mode_outlined,
-          },
-          onSelected: () => _cycleTheme(context),
         ),
         JournalContextMenuAction(
           label: '复制近 7 天待办',
@@ -991,21 +970,14 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
         store.account != openingAccount) {
       return;
     }
-    final nextQuery = selection.query.trim();
-    final filtersChanged = nextQuery != _query.trim() ||
-        selection.courseKey != _courseKey ||
-        selection.deadline != _deadlineFilter ||
-        selection.type != _typeFilter;
-    if (filtersChanged) {
-      _preExamStripFilters = null;
-      _preExamStripEpoch = null;
-    }
+    _preExamStripFilters = null;
+    _preExamStripEpoch = null;
     _pendingSortOrder = null;
     _pendingSortEpoch = null;
     _pendingSortSeq++;
     await _saveFilters(
       HomeFilters(
-        query: nextQuery,
+        query: selection.query.trim(),
         courseKey: selection.courseKey,
         deadline: selection.deadline,
         type: selection.type,
@@ -1239,6 +1211,8 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             recoveryItemCount: data.items.length,
             syncErrorOrPending: syncErrorOrPending,
             displayPrefs: store.display,
+            accountEpoch: epoch,
+            account: account,
             buddyMood: data.buddyMood,
             homeSnapshot: data.homeSnapshot,
             stageAnchor: _stageAnchor,
@@ -1261,6 +1235,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             courseOptions: data.options,
             syncProgressLabel: _syncProgressLabel(store),
             hasTimelineItems: data.sortedTimelineItems.isNotEmpty,
+            onOpenAgenda: () => context.push('/agenda'),
             onRefresh: () => refresh(syncAction),
             onRetrySync: () => refresh(HomeSyncAction.retry),
             onOpenSyncIssues: () => context.push('/sync?expand=issues'),
@@ -1281,12 +1256,14 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                 account,
               ));
             },
+            onCycleTheme: () => _cycleTheme(context),
             onOpenMoreMenu: (anchorContext) =>
                 unawaited(_openMoreMenu(anchorContext)),
             onExitRecoveryScope: () => _exitRecoveryScope(context),
             onOpenPlan: () => context.push('/plan'),
             onToggleUpcomingExam: _toggleUpcomingExamView,
             onOpenFilters: () => unawaited(_openFilters()),
+            onSelectSortOrder: _selectSortOrder,
             onAddManual: () => _manualActions.openEditor(
               context,
               initialKind: _typeFilter == AssignmentTypeFilter.exam
@@ -1340,9 +1317,6 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
               ),
               epoch,
               account,
-            ),
-            onResetSortOrder: () => unawaited(
-              _selectSortOrder(HomeSortOrder.deadlineAsc, epoch, account),
             ),
             onResetAllFilters: () {
               _preExamStripFilters = null;
@@ -1404,17 +1378,13 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
 
         final headerActions = buildHomeSliverActions(
           context,
+          themeMode: store.display.themeMode,
           recoveryActive: recoveryScope != null,
           busy: busy,
-          onAddManual: () => _manualActions.openEditor(
-            context,
-            initialKind: _typeFilter == AssignmentTypeFilter.exam
-                ? ManualEntry.kindExam
-                : ManualEntry.kindTodo,
-          ),
+          onAddManual: () => _manualActions.openEditor(context),
+          onOpenAgenda: () => context.push('/agenda'),
           onRefresh: () => refresh(syncAction),
-          onOpenMoreMenu: (anchorContext) =>
-              unawaited(_openMoreMenu(anchorContext)),
+          onCycleTheme: () => _cycleTheme(context),
         );
         final showSliverBuddy = showPixelBuddy &&
             !JournalLayout.isLargeText(context) &&
@@ -1433,6 +1403,33 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
         return Stack(
           key: _homeStackKey,
           children: [
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              height: 240,
+              child: IgnorePointer(
+                child: RepaintBoundary(
+                  child: ValueListenableBuilder<double>(
+                    valueListenable: _scrollOffset,
+                    builder: (context, offset, _) {
+                      final fade = (1.0 - offset / 110.0).clamp(0.0, 1.0);
+                      if (fade <= 0.01) {
+                        return const SizedBox.shrink();
+                      }
+                      return CustomPaint(
+                        key: const ValueKey('home-ambient-glow'),
+                        painter: HomeAmbientGlowPainter(
+                          primaryGlow: journal.ambientPrimaryGlow,
+                          warmGlow: journal.ambientWarmGlow,
+                          fade: fade,
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ),
+            ),
             listView,
             Positioned(
               top: 0,

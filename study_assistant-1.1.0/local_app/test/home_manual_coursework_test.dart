@@ -9,11 +9,9 @@ import 'package:study_assistant_mobile/src/app/app_shell.dart';
 import 'package:study_assistant_mobile/src/app/unsaved_edit_guard.dart';
 import 'package:study_assistant_mobile/src/features/assignment_list_screen.dart';
 import 'package:study_assistant_mobile/src/features/manual_agenda_screen.dart';
-import 'package:study_assistant_mobile/src/features/widgets/assignment_card.dart';
 import 'package:study_assistant_mobile/src/features/widgets/manual_home_card.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/models/course.dart';
-import 'package:study_assistant_mobile/src/models/display_preferences.dart';
 import 'package:study_assistant_mobile/src/models/home_filters.dart';
 import 'package:study_assistant_mobile/src/models/personal_workspace.dart';
 import 'package:study_assistant_mobile/src/models/study_notebook.dart';
@@ -175,8 +173,6 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('home-add-manual')));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextFormField).at(0), '新手动待办');
-    await tester.tap(find.byKey(const ValueKey('manual-more-options-toggle')));
-    await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextFormField).at(1), '高等数学');
     await tester.tap(find.text('保存个人安排'));
     await tester.pumpAndSettle();
@@ -626,8 +622,6 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const ValueKey('manual-more-options-toggle')));
-    await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('从我的课程选择'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('高等数学').last);
@@ -687,161 +681,5 @@ void main() {
     expect(find.text('放弃未保存的修改？'), findsNothing);
     expect(find.text('home'), findsOneWidget);
     expect(store.notebook.entries, isEmpty);
-  });
-
-  testWidgets(
-      'course sort forwards showFullDeadline to ManualHomeCard, aligns rail width under countdown, and keeps cross-year pinned dates',
-      (tester) async {
-    final testNow = DateTime.utc(2026, 11, 27, 4, 0); // 12:00 Beijing
-    final work = _work(
-      'w-course-sort',
-      title: '按课程作业',
-      due: testNow.add(const Duration(hours: 6)), // 18:00 Beijing
-      syncedAt: testNow,
-    );
-    final manual = _manual(
-      'm-course-sort',
-      title: '按课程手动待办',
-      at: testNow.add(const Duration(hours: 7)), // 19:00 Beijing
-    );
-    final store = await _store([work], entries: [manual], clock: () => testNow);
-    addTearDown(store.dispose);
-    await store.saveDisplay(const DisplayPreferences(countdown: true));
-    await store.saveHomeFilters(
-      const HomeFilters(sortOrder: HomeSortOrder.courseName),
-      store.accountEpoch,
-    );
-    await _pumpHome(tester, store, testNow);
-
-    final manualCard =
-        tester.widget<ManualHomeCard>(find.byType(ManualHomeCard));
-    expect(manualCard.showFullDeadline, isTrue);
-    expect(find.textContaining('11月27日 19:00'), findsOneWidget);
-    expect(
-      tester.getTopLeft(find.text('按课程手动待办')).dx,
-      closeTo(tester.getTopLeft(find.text('按课程作业')).dx, 0.01),
-    );
-
-    final crossYearManual = _manual(
-      'm-pinned-cross-year',
-      title: '跨年置顶考试',
-      kind: ManualEntry.kindExam,
-      at: DateTime.utc(2027, 1, 5, 6, 0), // 2027-01-05 14:00 Beijing
-    );
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: StudyAssistantTheme.light,
-        home: Scaffold(
-          body: ManualHomeCard(
-            entry: crossYearManual,
-            now: testNow,
-            inPinnedSection: true,
-            onTap: () {},
-            onToggleDone: () {},
-          ),
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-    expect(find.textContaining('2027年1月5日 14:00'), findsOneWidget);
-  });
-
-  testWidgets('pinned +34h tomorrow cards do not duplicate 明天 in left rail',
-      (tester) async {
-    final bjNow = DateTime.utc(2026, 11, 27, 4, 50); // 12:50 Beijing
-    final tomorrowEvening =
-        DateTime.utc(2026, 11, 28, 14, 50); // 22:50+1 Beijing (+34h)
-    final work = _work(
-      'w-tomorrow-pin',
-      title: '次日晚间置顶作业',
-      due: tomorrowEvening,
-      syncedAt: bjNow,
-    );
-    final manual = _manual(
-      'm-tomorrow-pin',
-      title: '次日晚间置顶待办',
-      at: tomorrowEvening,
-    );
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: StudyAssistantTheme.light,
-        home: Scaffold(
-          body: Column(
-            children: [
-              AssignmentCard(
-                assignment: work,
-                now: bjNow,
-                inPinnedSection: true,
-                showFullDeadline: true,
-                onTap: () {},
-              ),
-              ManualHomeCard(
-                entry: manual,
-                now: bjNow,
-                inPinnedSection: true,
-                showFullDeadline: true,
-                onTap: () {},
-                onToggleDone: () {},
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    expect(
-      find.descendant(
-        of: find.byType(AssignmentCard),
-        matching: find.text('明天'),
-      ),
-      findsOneWidget,
-    );
-    expect(
-      find.descendant(
-        of: find.byType(ManualHomeCard),
-        matching: find.text('明天'),
-      ),
-      findsOneWidget,
-    );
-  });
-
-  testWidgets(
-      'home sliver add button prefills exam kind when exam filter is active',
-      (tester) async {
-    tester.view.physicalSize = const Size(360, 800);
-    tester.view.devicePixelRatio = 1.0;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-
-    final exams = [
-      for (var i = 0; i < 15; i++)
-        _manual(
-          'm-exam-$i',
-          kind: ManualEntry.kindExam,
-          title: '手动考试 $i',
-          at: now.add(Duration(hours: 3 + i)),
-        ),
-    ];
-    final store = await _store([], entries: exams, clock: () => now);
-    addTearDown(store.dispose);
-    await store.saveHomeFilters(
-      const HomeFilters(type: AssignmentTypeFilter.exam),
-      store.accountEpoch,
-    );
-    await _pumpHome(tester, store, now);
-
-    await tester.drag(find.byType(Scrollable).first, const Offset(0, -360));
-    await tester.pumpAndSettle();
-
-    final sliverAdd = find.byKey(const ValueKey('home-sliver-add-manual'));
-    expect(sliverAdd, findsOneWidget);
-    await tester.tap(sliverAdd);
-    await tester.pumpAndSettle();
-
-    final editor =
-        tester.widget<ManualEntryEditor>(find.byType(ManualEntryEditor));
-    expect(editor.initialKind, ManualEntry.kindExam);
-    expect(find.text('考试必须填写时间'), findsOneWidget);
   });
 }

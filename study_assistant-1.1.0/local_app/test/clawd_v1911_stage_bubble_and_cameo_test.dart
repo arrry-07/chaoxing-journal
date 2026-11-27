@@ -678,7 +678,8 @@ void main() {
       expect(
         tester.getRect(bubbleFinder).right,
         lessThanOrEqualTo(
-          tester.getRect(find.byTooltip('刷新作业')).left - 7.5,
+          tester.getRect(find.byKey(const ValueKey('home-agenda-entry'))).left -
+              7.5,
         ),
       );
       await tester.tap(bubbleFinder);
@@ -716,7 +717,7 @@ void main() {
       expect(
         tester.getRect(buddyFinder).right,
         lessThanOrEqualTo(
-          tester.getRect(find.byTooltip('刷新作业')).left,
+          tester.getRect(find.byKey(const ValueKey('home-agenda-entry'))).left,
         ),
       );
       expect(find.text('呜哇！快放我下来，够不着字啦！'), findsOneWidget);
@@ -1056,13 +1057,14 @@ void main() {
       expect(find.text('噗咚，安全着陆！'), findsOneWidget);
       final landingBubble =
           tester.getRect(find.byKey(const ValueKey('clawd-speech-bubble')));
-      final actionLeftRect = tester.getRect(find.byTooltip('刷新作业'));
+      final agendaRect =
+          tester.getRect(find.byKey(const ValueKey('home-agenda-entry')));
       expect(landingBubble.left, greaterThanOrEqualTo(16.0 - 0.1));
-      expect(landingBubble.right, lessThanOrEqualTo(actionLeftRect.left - 7.5));
+      expect(landingBubble.right, lessThanOrEqualTo(agendaRect.left - 7.5));
       await tester.pump(const Duration(milliseconds: 2000));
       await tester.pumpAndSettle();
 
-      // 4) 330dp narrow screen sliver bubble stays strictly <= safeRight (330 - 18 - 3*48 - 8 = 160.0).
+      // 4) 330dp narrow screen sliver bubble stays strictly <= safeRight (330 - 18 - 4*48 - 8 = 112.0).
       tester.view.physicalSize = const Size(330, 720);
       await tester.pumpWidget(
         MaterialApp.router(
@@ -1078,7 +1080,7 @@ void main() {
       final sliverBubbleRect =
           tester.getRect(find.byKey(const ValueKey('clawd-speech-bubble')));
       expect(sliverBubbleRect.left, greaterThanOrEqualTo(18.0 - 0.1));
-      expect(sliverBubbleRect.right, lessThanOrEqualTo(160.0 + 0.1));
+      expect(sliverBubbleRect.right, lessThanOrEqualTo(112.0 + 0.1));
       expect(tester.takeException(), isNull);
       await tester.pump(const Duration(milliseconds: 2600));
       await tester.pumpAndSettle();
@@ -1302,7 +1304,7 @@ void main() {
         final buddyFinder = find.byKey(const ValueKey('home-pixel-buddy'));
         final syncStatusFinder = find.byKey(const ValueKey('home-sync-status'));
         final bubbleFinder = find.byKey(const ValueKey('clawd-speech-bubble'));
-        final refreshFinder = find.byTooltip('刷新作业');
+        final agendaFinder = find.byKey(const ValueKey('home-agenda-entry'));
 
         // Single-line bubble.
         await tester.tap(buddyFinder);
@@ -1310,10 +1312,10 @@ void main() {
         expect(bubbleFinder, findsOneWidget);
         var bubbleRect = tester.getRect(bubbleFinder);
         var statusRect = tester.getRect(syncStatusFinder);
-        var refreshRect = tester.getRect(refreshFinder);
+        var agendaRect = tester.getRect(agendaFinder);
         expect(bubbleRect.overlaps(statusRect), isFalse);
         expect(bubbleRect.top, greaterThanOrEqualTo(statusRect.bottom + 1.5));
-        expect(bubbleRect.right, lessThanOrEqualTo(refreshRect.left - 7.5));
+        expect(bubbleRect.right, lessThanOrEqualTo(agendaRect.left - 7.5));
 
         // 3+ rapid combo triggers long 2-line tsundere bubble -> still zero overlap.
         await tester.tap(buddyFinder);
@@ -1326,10 +1328,10 @@ void main() {
         );
         bubbleRect = tester.getRect(bubbleFinder);
         statusRect = tester.getRect(syncStatusFinder);
-        refreshRect = tester.getRect(refreshFinder);
+        agendaRect = tester.getRect(agendaFinder);
         expect(bubbleRect.overlaps(statusRect), isFalse);
         expect(bubbleRect.top, greaterThanOrEqualTo(statusRect.bottom + 1.5));
-        expect(bubbleRect.right, lessThanOrEqualTo(refreshRect.left - 7.5));
+        expect(bubbleRect.right, lessThanOrEqualTo(agendaRect.left - 7.5));
 
         await tester.pump(const Duration(milliseconds: 2600));
         await tester.pumpAndSettle();
@@ -1389,12 +1391,12 @@ void main() {
 
       final titleFinder = find.text('课业手记');
       final buddyFinder = find.byKey(const ValueKey('home-pixel-buddy'));
-      final refreshFinder = find.byTooltip('刷新作业');
+      final agendaFinder = find.byKey(const ValueKey('home-agenda-entry'));
 
       void expectSafeBounds(String phase) {
         final titleRect = tester.getRect(titleFinder);
         final buddyRect = tester.getRect(buddyFinder);
-        final refreshRect = tester.getRect(refreshFinder);
+        final agendaRect = tester.getRect(agendaFinder);
         expect(
           buddyRect.overlaps(titleRect),
           isFalse,
@@ -1407,7 +1409,7 @@ void main() {
         );
         expect(
           buddyRect.right,
-          lessThanOrEqualTo(refreshRect.left + 0.01),
+          lessThanOrEqualTo(agendaRect.left + 0.01),
           reason: '$phase: buddy crossed right actions boundary',
         );
       }

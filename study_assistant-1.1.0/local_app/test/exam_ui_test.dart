@@ -392,14 +392,13 @@ void main() {
     expect(find.textContaining('考试时间未知'), findsNothing);
     expect(find.text('期末考试'), findsOneWidget);
     expect(find.text('课后作业'), findsNothing);
-    await _tap(tester, '搜索与筛选 (1)');
+    await _tap(tester, '已筛选');
     await _tap(tester, '按课程');
     await _tap(tester, '应用');
     expect(store.homeFilters.type, AssignmentTypeFilter.exam);
     expect(store.homeFilters.sortOrder, HomeSortOrder.courseName);
-    await _tap(tester, '搜索与筛选 (1)');
-    await tester.tap(find.byKey(const ValueKey('home-filter-sheet-clear')));
-    await tester.pumpAndSettle();
+    await _tap(tester, '已筛选');
+    await _tap(tester, '清空筛选');
     await _tap(tester, '应用');
     expect(store.homeFilters.type, AssignmentTypeFilter.all);
     expect(store.homeFilters.sortOrder, HomeSortOrder.courseName);

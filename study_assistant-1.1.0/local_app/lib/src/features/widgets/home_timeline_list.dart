@@ -684,7 +684,7 @@ class HomeTimelineList extends StatelessWidget {
           actions: [
             JournalPrimaryButton(
               expanded: false,
-              label: '清空条件',
+              label: '清除搜索与筛选条件',
               onPressed: onClearAllFilters,
             ),
           ],

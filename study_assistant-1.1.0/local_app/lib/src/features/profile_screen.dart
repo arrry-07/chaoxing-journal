@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:math' as math;
 
 import 'display_settings_screen.dart';
@@ -57,7 +56,6 @@ class _ProfileScreenState extends State<ProfileScreen>
   bool _tickerEnabled = true;
   bool _isCurrentRoute = true;
   bool _reducedMotion = false;
-  final _feedback = TransientFeedbackController();
   late int _lastAccountEpoch;
   String? _lastAccount;
 
@@ -132,7 +130,6 @@ class _ProfileScreenState extends State<ProfileScreen>
         _lastAccount != widget.store.account) {
       _lastAccountEpoch = widget.store.accountEpoch;
       _lastAccount = widget.store.account;
-      _feedback.dismiss();
       _localClawdController?.resetForAccountChange();
     }
     _syncClawdEnvironment();
@@ -204,7 +201,6 @@ class _ProfileScreenState extends State<ProfileScreen>
       _lastAccountEpoch = widget.store.accountEpoch;
       _lastAccount = widget.store.account;
       widget.store.addListener(_onStoreChanged);
-      _feedback.dismiss();
       _localClawdController?.resetForAccountChange();
       _syncClawdEnvironment();
     }
@@ -228,7 +224,6 @@ class _ProfileScreenState extends State<ProfileScreen>
     _scrollOffset.dispose();
     _cameoAnchor.dispose();
     _localClawdController?.dispose();
-    _feedback.dispose();
     super.dispose();
   }
 
@@ -311,18 +306,58 @@ class _ProfileScreenState extends State<ProfileScreen>
                           clipBehavior: Clip.antiAlias,
                           child: IconTheme.merge(
                             data: IconThemeData(color: journal.ink),
-                            child: _SettingsTile(
-                              icon: Icons.school_outlined,
-                              title: '我的课程',
-                              subtitle: store.courses.isEmpty
-                                  ? '暂无课程，前往查看与同步'
-                                  : '已同步 ${store.courses.length} 门课程',
-                              compactSubtitle: true,
-                              onTap: () => context.push('/courses'),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                _SettingsTile(
+                                  icon: Icons.school_outlined,
+                                  title: '我的课程',
+                                  subtitle: store.courses.isEmpty
+                                      ? '暂无课程，前往查看与同步'
+                                      : '已同步 ${store.courses.length} 门课程',
+                                  compactSubtitle: true,
+                                  onTap: () => context.push('/courses'),
+                                ),
+                                Divider(
+                                  height: 1,
+                                  indent: 56,
+                                  endIndent: 16,
+                                  color: journal.divider,
+                                ),
+                                _SettingsTile(
+                                  icon: Icons.library_books_outlined,
+                                  title: '课程通知与章节',
+                                  subtitle: store.courseNotices.items.isEmpty &&
+                                          store.courseChapters.byCourse.isEmpty
+                                      ? '手动查看课程通知与章节任务点进度'
+                                      : '未读通知 ${store.unreadCourseNoticeCount} 条 · 待完成小节 ${store.pendingChapterSectionCount} 处',
+                                  compactSubtitle: true,
+                                  onTap: () => context.push('/course-hub'),
+                                ),
+                                Divider(
+                                  height: 1,
+                                  indent: 56,
+                                  endIndent: 16,
+                                  color: journal.divider,
+                                ),
+                                _SettingsTile(
+                                  icon: Icons.event_note_outlined,
+                                  title: '个人待办与考试',
+                                  subtitle: store.notebook.entries.isEmpty
+                                      ? '手动记录待办与考试'
+                                      : '进行中 $activeAgendaCount 项 · 已完成 $doneAgendaCount 项',
+                                  compactSubtitle: true,
+                                  onTap: () => context.push('/agenda'),
+                                ),
+                              ],
                             ),
                           ),
                         ),
-                        const SizedBox(height: 12),
+                        const SizedBox(height: 14),
+                        Padding(
+                          padding: EdgeInsets.fromLTRB(4, 4, 4, 8),
+                          child: Text('设置', style: journal.section),
+                        ),
                         AppearanceControls(
                           store: store,
                           onMore: () {
@@ -338,33 +373,6 @@ class _ProfileScreenState extends State<ProfileScreen>
                               );
                             }
                           },
-                        ),
-                        const SizedBox(height: 12),
-                        _SettingsCard(
-                          title: '其他入口',
-                          accentColor: journal.ink,
-                          headerColor: journal.sage,
-                          children: [
-                            _SettingsTile(
-                              icon: Icons.library_books_outlined,
-                              title: '课程通知与章节',
-                              subtitle: store.courseNotices.items.isEmpty &&
-                                      store.courseChapters.byCourse.isEmpty
-                                  ? '手动查看课程通知与章节任务点进度'
-                                  : '未读通知 ${store.unreadCourseNoticeCount} 条 · 待完成小节 ${store.pendingChapterSectionCount} 处',
-                              compactSubtitle: true,
-                              onTap: () => context.push('/course-hub'),
-                            ),
-                            _SettingsTile(
-                              icon: Icons.event_note_outlined,
-                              title: '个人待办与考试',
-                              subtitle: store.notebook.entries.isEmpty
-                                  ? '手动记录待办与考试'
-                                  : '进行中 $activeAgendaCount 项 · 已完成 $doneAgendaCount 项',
-                              compactSubtitle: true,
-                              onTap: () => context.push('/agenda'),
-                            ),
-                          ],
                         ),
                         const SizedBox(height: 12),
                         _SettingsCard(
@@ -456,34 +464,17 @@ class _ProfileScreenState extends State<ProfileScreen>
                             ),
                             _SettingsTile(
                               icon: Icons.code,
-                              title: 'GitHub 项目',
-                              subtitle: '如果课业手记帮到你，欢迎在 GitHub 点个 Star。谢谢支持！',
-                              compactSubtitle: true,
-                              onTap: () => _openGithub(context),
-                              trailingWidget: OutlinedButton(
-                                key: const ValueKey('profile-github-copy'),
-                                onPressed: () => _copyGithubUrl(context),
-                                style: OutlinedButton.styleFrom(
-                                  foregroundColor: journal.ink,
-                                  side: BorderSide(
-                                    color: journal.ruleStrong,
-                                    width: 0.8,
-                                  ),
-                                  tapTargetSize: MaterialTapTargetSize.padded,
-                                  minimumSize: const Size(0, 34),
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 10,
-                                    vertical: 6,
-                                  ),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(10),
-                                  ),
-                                  textStyle: journal.pillLabel.copyWith(
-                                    fontSize: 12.5,
-                                  ),
-                                ),
-                                child: const Text('复制链接'),
-                              ),
+                              title: 'GitHub 源码',
+                              subtitle: 'github.com/arrry-07/chaoxing-journal',
+                              trailing: Icons.open_in_new,
+                              onTap: () async {
+                                await Clipboard.setData(
+                                    const ClipboardData(text: _githubUrl));
+                                if (context.mounted) {
+                                  showJournalMessage(context, '链接已复制');
+                                }
+                              },
+                              trailingOnPressed: () => _openGithub(context),
                             ),
                           ],
                         ),
@@ -619,31 +610,12 @@ class _ProfileScreenState extends State<ProfileScreen>
     showJournalMessage(context, '退出未完成，请稍后重试；本机记录可能尚未全部清理');
   }
 
-  Future<void> _copyGithubUrl(
-    BuildContext context, {
-    String url = _githubUrl,
-  }) async {
-    await Clipboard.setData(ClipboardData(text: url));
-    if (context.mounted) {
-      showJournalMessage(context, '链接已复制');
-    }
-  }
-
   Future<void> _openGithub(BuildContext context, {bool issues = false}) async {
-    final url = issues ? '$_githubUrl/issues' : _githubUrl;
-    final opened =
-        await (externalLinkService ?? ExternalLinkService()).openUrl(url);
+    final opened = await (externalLinkService ?? ExternalLinkService()).openUrl(
+      issues ? '$_githubUrl/issues' : _githubUrl,
+    );
     if (!opened && context.mounted) {
-      _feedback.show(
-        context,
-        SnackBar(
-          content: const Text('无法打开 GitHub 链接，请检查浏览器或网络'),
-          action: SnackBarAction(
-            label: '复制链接',
-            onPressed: () => unawaited(_copyGithubUrl(context, url: url)),
-          ),
-        ),
-      );
+      showJournalMessage(context, '无法打开 GitHub 链接，请检查浏览器或网络');
     }
   }
 
@@ -868,58 +840,43 @@ class _SettingsTile extends StatelessWidget {
     this.onTap,
     this.subtitle,
     this.compactSubtitle = false,
-    this.trailingWidget,
+    this.trailing = Icons.chevron_right,
+    this.trailingOnPressed,
   });
 
   final IconData icon;
   final String title;
   final String? subtitle;
   final bool compactSubtitle;
+  final IconData trailing;
   final VoidCallback? onTap;
-  final Widget? trailingWidget;
+  final VoidCallback? trailingOnPressed;
 
   @override
   Widget build(BuildContext context) {
     final journal = Journal.of(context);
-    final largeText = JournalLayout.isLargeText(context);
-    final narrowScaled = MediaQuery.sizeOf(context).width <= 380 &&
-        MediaQuery.textScalerOf(context).scale(14) >= 18.0;
-    final stackTrailingBelow =
-        trailingWidget != null && (largeText || narrowScaled);
-    final subtitleStyle = compactSubtitle
-        ? Theme.of(context).textTheme.bodySmall?.copyWith(
-              fontSize: 12,
-              height: 1.4,
-              color: journal.muted,
-            )
-        : null;
-    final subtitleWidget = subtitle == null && !stackTrailingBelow
-        ? null
-        : stackTrailingBelow
-            ? Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (subtitle != null) Text(subtitle!),
-                  const SizedBox(height: 8),
-                  trailingWidget!,
-                ],
-              )
-            : Text(subtitle!);
     return JournalPressableScale(
       enabled: onTap != null,
       pressScale: 0.985,
       child: ListTile(
         leading: Icon(icon, color: IconTheme.of(context).color, size: 22),
         title: Text(title, style: journal.entryTitle),
-        subtitle: subtitleWidget,
-        subtitleTextStyle: subtitleStyle,
-        trailing: stackTrailingBelow
-            ? null
-            : trailingWidget ??
-                (onTap == null
-                    ? null
-                    : Icon(Icons.chevron_right, color: journal.muted)),
+        subtitle: subtitle == null ? null : Text(subtitle!),
+        subtitleTextStyle: compactSubtitle
+            ? Theme.of(context).textTheme.bodySmall?.copyWith(
+                  fontSize: 12,
+                  height: 1.4,
+                  color: journal.muted,
+                )
+            : null,
+        trailing: trailingOnPressed != null
+            ? IconButton(
+                tooltip: '打开链接',
+                onPressed: trailingOnPressed,
+                icon: Icon(trailing))
+            : onTap == null
+                ? null
+                : Icon(trailing, color: journal.muted),
         onTap: onTap,
       ),
     );

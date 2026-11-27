@@ -26,8 +26,7 @@ import 'package:study_assistant_mobile/src/services/secure_session_store.dart';
 import 'package:study_assistant_mobile/src/services/widget_snapshot_service.dart';
 
 void main() {
-  testWidgets('GitHub row opens repo while copy button has >=48dp touch target',
-      (t) async {
+  testWidgets('source open is an independent labeled button', (t) async {
     SharedPreferences.setMockInitialValues({});
     final store = AssignmentStore(
         sessionStore: _MemorySessionStore(),
@@ -36,25 +35,8 @@ void main() {
     addTearDown(store.dispose);
     await t.pumpWidget(
         MaterialApp(home: Scaffold(body: ProfileScreen(store: store))));
-    await t.scrollUntilVisible(find.text('GitHub 项目'), 400);
-    expect(
-      find.text('如果课业手记帮到你，欢迎在 GitHub 点个 Star。谢谢支持！'),
-      findsOneWidget,
-    );
-    final copyBtn = find.byKey(const ValueKey('profile-github-copy'));
-    expect(copyBtn, findsOneWidget);
-    expect(t.getSize(copyBtn).height, greaterThanOrEqualTo(48));
-    final button = t.widget<OutlinedButton>(copyBtn);
-    expect(button.style?.tapTargetSize, MaterialTapTargetSize.padded);
-    final minSize = button.style?.minimumSize?.resolve(<WidgetState>{});
-    expect(minSize, isNotNull);
-    expect(minSize!.height, lessThan(48));
-    expect(minSize.height, 34);
-    final buttonMaterial = find.descendant(
-      of: copyBtn,
-      matching: find.byType(Material),
-    );
-    expect(t.getSize(buttonMaterial.first).height, lessThan(48));
+    await t.scrollUntilVisible(find.text('GitHub 源码'), 400);
+    expect(find.byTooltip('打开链接'), findsOneWidget);
   });
 
   testWidgets('profile uses tinted groups and berry destructive actions',
@@ -425,7 +407,7 @@ void main() {
   });
 
   testWidgets(
-      'GitHub row opens repo, copy button copies link, and failed open offers fallback copy; about keeps credits accessible',
+      'source copies link while independent button opens it; about keeps credits accessible',
       (t) async {
     SharedPreferences.setMockInitialValues({});
     final external = _FakeExternalLinkService();
@@ -447,35 +429,17 @@ void main() {
     await t.pumpWidget(MaterialApp(
         home: Scaffold(
             body: ProfileScreen(store: store, externalLinkService: external))));
-    final row = find.widgetWithText(ListTile, 'GitHub 项目');
-    await t.scrollUntilVisible(row, 240);
+    final row = find.widgetWithText(ListTile, 'GitHub 源码');
     await t.ensureVisible(row);
     await t.pumpAndSettle();
-    await t.tap(find.text('GitHub 项目'));
-    await t.pumpAndSettle();
-    expect(
-        external.openedUrls, ['https://github.com/arrry-07/chaoxing-journal']);
-    expect(copied, isEmpty);
-
-    await t.tap(find.byKey(const ValueKey('profile-github-copy')));
+    await t.tap(find.text('GitHub 源码'));
     await t.pumpAndSettle();
     expect(copied, ['https://github.com/arrry-07/chaoxing-journal']);
+    expect(external.openedUrls, isEmpty);
+    await t.tap(find.byTooltip('打开链接'));
+    await t.pumpAndSettle();
+    expect(copied.length, 1);
     expect(external.openedUrls.length, 1);
-
-    external.openResult = false;
-    await t.tap(find.text('GitHub 项目'));
-    await t.pumpAndSettle();
-    expect(find.text('无法打开 GitHub 链接，请检查浏览器或网络'), findsOneWidget);
-    final snackCopyAction = find.descendant(
-      of: find.byType(SnackBar),
-      matching: find.text('复制链接'),
-    );
-    expect(snackCopyAction, findsOneWidget);
-    await t.tap(snackCopyAction);
-    await t.pumpAndSettle();
-    expect(copied.length, 2);
-    expect(find.text('链接已复制'), findsOneWidget);
-
     await t.ensureVisible(find.text('关于我们'));
     await t.tap(find.text('关于我们'));
     await t.pumpAndSettle();
@@ -484,14 +448,9 @@ void main() {
     expect(find.textContaining('维护者 arrry-07'), findsOneWidget);
   });
 
-  testWidgets(
-      'profile groups courses, appearance, other entries and settings in order',
+  testWidgets('profile settings contain reminder and sync entries',
       (tester) async {
     SharedPreferences.setMockInitialValues({});
-    tester.view.physicalSize = const Size(360, 800);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
     final store = AssignmentStore(
       sessionStore: _MemorySessionStore(),
       notificationService: _NoopNotificationService(),
@@ -501,57 +460,19 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
-        builder: (context, child) => MediaQuery(
-          data: MediaQuery.of(context).copyWith(
-            textScaler: const TextScaler.linear(1.3),
-          ),
-          child: child!,
-        ),
         home: Scaffold(body: ProfileScreen(store: store)),
       ),
     );
-    await tester.pumpAndSettle();
 
-    expect(find.text('设置'), findsNothing);
-    final coursesCard = find.byKey(const ValueKey('profile-group-courses'));
-    expect(
-      find.descendant(of: coursesCard, matching: find.text('我的课程')),
-      findsOneWidget,
-    );
-    expect(
-      find.descendant(of: coursesCard, matching: find.text('课程通知与章节')),
-      findsNothing,
-    );
-    expect(
-      find.descendant(of: coursesCard, matching: find.text('个人待办与考试')),
-      findsNothing,
-    );
-
-    // Theme swatches are 78dp tall and visible before '其他入口'.
-    final swatch = find.byKey(const ValueKey('theme-swatch-light'));
-    expect(tester.getSize(swatch).height, greaterThanOrEqualTo(76));
-    expect(
-      tester.getTopLeft(find.text('外观与交互')).dy,
-      lessThan(tester.getTopLeft(find.text('其他入口')).dy),
-    );
-    for (final label in [
-      '其他入口',
-      '课程通知与章节',
-      '个人待办与考试',
-      '同步与提醒',
-      '提醒与通知',
-      '同步学习通',
-      '记录与备份',
-      '学习记录',
-      '关于与更新',
-      '帮助与反馈',
-      '关于我们',
-      'GitHub 项目',
-    ]) {
+    expect(find.text('设置'), findsOneWidget);
+    expect(find.text('提醒与通知'), findsOneWidget);
+    expect(find.text('同步学习通'), findsOneWidget);
+    for (final label in ['外观与交互', '显示与小组件', '个人待办与考试', '学习记录']) {
       await tester.scrollUntilVisible(find.text(label), 180);
       expect(find.text(label), findsOneWidget);
     }
-    expect(tester.takeException(), isNull);
+    expect(find.text('帮助与反馈'), findsOneWidget);
+    expect(find.text('关于我们'), findsOneWidget);
   });
 
   testWidgets('compact course entry updates count and opens all courses',
@@ -756,89 +677,6 @@ void main() {
     expect(store.display.themeMode, JournalThemeMode.light);
     expect(tester.takeException(), isNull);
   });
-
-  testWidgets(
-      'GitHub copy button stacks below subtitle at 360dp @ 1.3x with zero overflow',
-      (tester) async {
-    SharedPreferences.setMockInitialValues({});
-    tester.view.physicalSize = const Size(360, 800);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-    final store = AssignmentStore(
-      sessionStore: _MemorySessionStore(),
-      notificationService: _NoopNotificationService(),
-      widgetSnapshotService: _NoopWidgetSnapshotService(),
-    );
-    addTearDown(store.dispose);
-
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: StudyAssistantTheme.light,
-        builder: (context, child) => MediaQuery(
-          data: MediaQuery.of(context).copyWith(
-            textScaler: const TextScaler.linear(1.3),
-          ),
-          child: child!,
-        ),
-        home: Scaffold(body: ProfileScreen(store: store)),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    final row = find.widgetWithText(ListTile, 'GitHub 项目');
-    await tester.scrollUntilVisible(row, 240);
-    await tester.ensureVisible(row);
-    await tester.pumpAndSettle();
-
-    final subtitle = find.text('如果课业手记帮到你，欢迎在 GitHub 点个 Star。谢谢支持！');
-    final copyBtn = find.byKey(const ValueKey('profile-github-copy'));
-    expect(subtitle, findsOneWidget);
-    expect(copyBtn, findsOneWidget);
-    final subtitleRect = tester.getRect(subtitle);
-    final buttonRect = tester.getRect(copyBtn);
-    expect(buttonRect.top, greaterThanOrEqualTo(subtitleRect.bottom - 1));
-    expect(tester.takeException(), isNull);
-  });
-
-  testWidgets(
-      'theme swatch previews are 78dp tall and fully visible above fold at 360x800 @ 1.0x',
-      (tester) async {
-    SharedPreferences.setMockInitialValues({});
-    tester.view.physicalSize = const Size(360, 800);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-    final store = AssignmentStore(
-      sessionStore: _MemorySessionStore(),
-      notificationService: _NoopNotificationService(),
-      widgetSnapshotService: _NoopWidgetSnapshotService(),
-    );
-    addTearDown(store.dispose);
-
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: StudyAssistantTheme.light,
-        home: Scaffold(body: ProfileScreen(store: store)),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    for (final mode in JournalThemeMode.values) {
-      final preview = find.byKey(ValueKey('theme-swatch-preview-${mode.name}'));
-      expect(preview, findsOneWidget);
-      final height = tester.getSize(preview).height;
-      expect(height, inInclusiveRange(76.0, 80.0));
-      expect(height, 78.0);
-
-      final card = find.byKey(ValueKey('theme-swatch-${mode.name}'));
-      expect(card, findsOneWidget);
-      final rect = tester.getRect(card);
-      expect(rect.top, greaterThanOrEqualTo(0));
-      expect(rect.bottom, lessThanOrEqualTo(800));
-    }
-    expect(tester.takeException(), isNull);
-  });
 }
 
 class _FakeUpdateService extends AppUpdateService {
@@ -919,7 +757,6 @@ class _SlowUpdateService extends AppUpdateService {
 class _FakeExternalLinkService extends ExternalLinkService {
   final openedUrls = <String>[];
   final installedApkPaths = <String>[];
-  bool openResult = true;
 
   @override
   Future<Map<String, dynamic>> inspectApk(String filePath) async =>
@@ -927,7 +764,7 @@ class _FakeExternalLinkService extends ExternalLinkService {
   @override
   Future<bool> openUrl(String url) async {
     openedUrls.add(url);
-    return openResult;
+    return true;
   }
 
   @override

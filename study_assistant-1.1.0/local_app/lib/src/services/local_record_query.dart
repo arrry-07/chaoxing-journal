@@ -12,7 +12,7 @@ enum StatsTimeRange {
   next30Days;
 
   String get label => switch (this) {
-        StatsTimeRange.all => '不限时间',
+        StatsTimeRange.all => '全部',
         StatsTimeRange.next7Days => '未来 7 天',
         StatsTimeRange.next30Days => '未来 30 天',
       };

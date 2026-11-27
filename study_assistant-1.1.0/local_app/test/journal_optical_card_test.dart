@@ -1,18 +1,8 @@
-import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:go_router/go_router.dart';
 import 'package:study_assistant_mobile/src/app/app_shell.dart';
 import 'package:study_assistant_mobile/src/app/journal.dart';
-import 'package:study_assistant_mobile/src/features/widgets/journal_floating_detail_header.dart';
 import 'package:study_assistant_mobile/src/features/widgets/journal_grouped_card.dart';
-import 'package:study_assistant_mobile/src/features/widgets/journal_picker_sheet.dart';
-import 'package:study_assistant_mobile/src/services/assignment_store.dart';
-import 'package:study_assistant_mobile/src/services/local_notification_service.dart';
-import 'package:study_assistant_mobile/src/services/secure_session_store.dart';
-import 'package:study_assistant_mobile/src/services/widget_snapshot_service.dart';
 
 const _inkKey = ValueKey('optical-card-ink');
 const _emphasizedKey = ValueKey('optical-card-emphasized');
@@ -80,19 +70,12 @@ CustomPaint _cardPaint(WidgetTester tester, Key key) =>
           .last,
     );
 
-double _contrastRatio(Color fg, Color bg) {
-  final l1 = fg.computeLuminance();
-  final l2 = bg.computeLuminance();
-  return (math.max(l1, l2) + 0.05) / (math.min(l1, l2) + 0.05);
-}
-
 void main() {
-  group('JournalPalette optical & input tokens', () {
+  group('JournalPalette optical tokens', () {
     test('light palette exposes the documented values', () {
       const palette = JournalPalette.light;
-      expect(palette.inputFill, const Color(0xFFF8F7F4));
-      expect(palette.inputBorder, const Color(0xFF8E8B82));
-      expect(palette.inputBorderDisabled, const Color(0xFFD6D4CC));
+      expect(palette.ambientPrimaryGlow, const Color(0x163D63DD));
+      expect(palette.ambientWarmGlow, const Color(0x12D97757));
       expect(palette.cardShadowContact, const Color(0x071F2328));
       expect(palette.cardShadowAmbient, const Color(0x0A1F2328));
       expect(palette.cardTopHighlight, const Color(0xB8FFFFFF));
@@ -104,17 +87,12 @@ void main() {
       expect(palette.paper, Journal.paper);
       expect(palette.sheet, Journal.sheet);
       expect(palette.sageBorder, Journal.sageBorder);
-      expect(_contrastRatio(palette.inputBorder, palette.paper),
-          greaterThanOrEqualTo(3.0));
-      expect(_contrastRatio(palette.inputBorder, palette.inputFill),
-          greaterThanOrEqualTo(3.0));
     });
 
     test('dark palette exposes the documented values', () {
       const palette = JournalPalette.dark;
-      expect(palette.inputFill, const Color(0xFF1B1A17));
-      expect(palette.inputBorder, const Color(0xFF7A756C));
-      expect(palette.inputBorderDisabled, const Color(0xFF423F39));
+      expect(palette.ambientPrimaryGlow, const Color(0x1C88A8F8));
+      expect(palette.ambientWarmGlow, const Color(0x1AE5896B));
       expect(palette.cardShadowContact, const Color(0x24000000));
       expect(palette.cardShadowAmbient, const Color(0x38000000));
       expect(palette.cardTopHighlight, const Color(0x18FFF8EB));
@@ -124,21 +102,14 @@ void main() {
       expect(palette.cardEmphasisBarGlow, const Color(0x3688A8F8));
       expect(palette.cardBorder, const Color(0x14FFF8EB));
       expect(palette.sageBorder, const Color(0xFF3D4C6E));
-      expect(_contrastRatio(palette.inputBorder, palette.sheet),
-          greaterThanOrEqualTo(3.0));
-      expect(_contrastRatio(palette.inputBorder, palette.sheetElevated),
-          greaterThanOrEqualTo(3.0));
-      expect(_contrastRatio(palette.inputBorder, palette.inputFill),
-          greaterThanOrEqualTo(3.0));
     });
 
-    test('copyWith carries every optical and input token', () {
+    test('copyWith carries every optical token', () {
       final light = JournalPalette.light;
       const changed = Color(0xFF123456);
       final copy = light.copyWith(
-        inputFill: changed,
-        inputBorder: changed,
-        inputBorderDisabled: changed,
+        ambientPrimaryGlow: changed,
+        ambientWarmGlow: changed,
         cardShadowContact: changed,
         cardShadowAmbient: changed,
         cardTopHighlight: changed,
@@ -147,9 +118,8 @@ void main() {
         cardEmphasisBar: changed,
         cardEmphasisBarGlow: changed,
       );
-      expect(copy.inputFill, changed);
-      expect(copy.inputBorder, changed);
-      expect(copy.inputBorderDisabled, changed);
+      expect(copy.ambientPrimaryGlow, changed);
+      expect(copy.ambientWarmGlow, changed);
       expect(copy.cardShadowContact, changed);
       expect(copy.cardShadowAmbient, changed);
       expect(copy.cardTopHighlight, changed);
@@ -169,14 +139,12 @@ void main() {
       expect(JournalPalette.dark.copyWith(), equals(JournalPalette.dark));
     });
 
-    test('equality and hashCode react to each optical and input token', () {
+    test('equality and hashCode react to each optical token', () {
       final mutations = <String, JournalPalette Function()>{
-        'inputFill': () =>
-            JournalPalette.light.copyWith(inputFill: const Color(0xFF000001)),
-        'inputBorder': () =>
-            JournalPalette.light.copyWith(inputBorder: const Color(0xFF000002)),
-        'inputBorderDisabled': () => JournalPalette.light
-            .copyWith(inputBorderDisabled: const Color(0xFF00000A)),
+        'ambientPrimaryGlow': () => JournalPalette.light
+            .copyWith(ambientPrimaryGlow: const Color(0xFF000001)),
+        'ambientWarmGlow': () => JournalPalette.light
+            .copyWith(ambientWarmGlow: const Color(0xFF000002)),
         'cardShadowContact': () => JournalPalette.light
             .copyWith(cardShadowContact: const Color(0xFF000003)),
         'cardShadowAmbient': () => JournalPalette.light
@@ -201,16 +169,15 @@ void main() {
       }
     });
 
-    test('lerp interpolates every optical and input token', () {
+    test('lerp interpolates every optical token', () {
       const light = JournalPalette.light;
       const dark = JournalPalette.dark;
       final mid = light.lerp(dark, 0.5);
       expect(mid.isDark, dark.isDark);
-      expect(mid.inputFill, Color.lerp(light.inputFill, dark.inputFill, 0.5));
-      expect(mid.inputBorder,
-          Color.lerp(light.inputBorder, dark.inputBorder, 0.5));
-      expect(mid.inputBorderDisabled,
-          Color.lerp(light.inputBorderDisabled, dark.inputBorderDisabled, 0.5));
+      expect(mid.ambientPrimaryGlow,
+          Color.lerp(light.ambientPrimaryGlow, dark.ambientPrimaryGlow, 0.5));
+      expect(mid.ambientWarmGlow,
+          Color.lerp(light.ambientWarmGlow, dark.ambientWarmGlow, 0.5));
       expect(mid.cardShadowContact,
           Color.lerp(light.cardShadowContact, dark.cardShadowContact, 0.5));
       expect(mid.cardShadowAmbient,
@@ -229,172 +196,6 @@ void main() {
           Color.lerp(light.cardEmphasisBarGlow, dark.cardEmphasisBarGlow, 0.5));
       expect(light.lerp(dark, 0), equals(light));
       expect(light.lerp(dark, 1), equals(dark));
-    });
-
-    test(
-        'Journal.uiFamily isolates numeric/pill styles from display/body serif',
-        () {
-      expect(Journal.uiFamily, 'sans-serif');
-      for (final style in [Journal.time, Journal.statHero, Journal.pillLabel]) {
-        expect(style.fontFamily, Journal.uiFamily);
-        expect(
-            style.fontFeatures, contains(const FontFeature.tabularFigures()));
-      }
-      for (final style in [
-        Journal.display,
-        Journal.pageTitle,
-        Journal.section,
-        Journal.entryTitle,
-        Journal.metadata,
-      ]) {
-        expect(style.fontFamily, Journal.displayFamily);
-      }
-    });
-
-    test(
-        'StudyAssistantTheme configures 5-state input borders and >=4.5:1 text contrast',
-        () {
-      for (final theme in [
-        StudyAssistantTheme.light,
-        StudyAssistantTheme.dark,
-      ]) {
-        final palette = _paletteFor(theme);
-        final dec = theme.inputDecorationTheme;
-        expect(dec.filled, isTrue);
-        expect(dec.fillColor, palette.inputFill);
-        expect((dec.enabledBorder as OutlineInputBorder).borderSide.color,
-            palette.inputBorder);
-        expect((dec.focusedBorder as OutlineInputBorder).borderSide.color,
-            palette.accent);
-        expect((dec.errorBorder as OutlineInputBorder).borderSide.color,
-            palette.berry);
-        expect((dec.focusedErrorBorder as OutlineInputBorder).borderSide.color,
-            palette.berry);
-        expect((dec.disabledBorder as OutlineInputBorder).borderSide.color,
-            palette.inputBorderDisabled);
-        expect(_contrastRatio(dec.hintStyle!.color!, palette.inputFill),
-            greaterThanOrEqualTo(4.5));
-        expect(_contrastRatio(dec.labelStyle!.color!, palette.inputFill),
-            greaterThanOrEqualTo(4.5));
-        expect(_contrastRatio(dec.errorStyle!.color!, palette.inputFill),
-            greaterThanOrEqualTo(4.5));
-      }
-    });
-  });
-
-  group('M1 system overlay, de-blurred detail header & picker border', () {
-    testWidgets(
-        'AppShell wraps Scaffold with AnnotatedRegion<SystemUiOverlayStyle>',
-        (tester) async {
-      final store = AssignmentStore(
-        sessionStore: SecureSessionStore(),
-        notificationService: LocalNotificationService(),
-        widgetSnapshotService: WidgetSnapshotService(),
-      );
-      addTearDown(store.dispose);
-      for (final theme in [
-        StudyAssistantTheme.light,
-        StudyAssistantTheme.dark,
-      ]) {
-        final palette = _paletteFor(theme);
-        final router = GoRouter(
-          initialLocation: '/assignments',
-          routes: [
-            ShellRoute(
-              builder: (_, __, child) =>
-                  AppShell(assignmentStore: store, child: child),
-              routes: [
-                GoRoute(
-                  path: '/assignments',
-                  builder: (_, __) => const SizedBox.shrink(),
-                ),
-              ],
-            ),
-          ],
-        );
-        addTearDown(router.dispose);
-        await tester.pumpWidget(MaterialApp.router(
-          key: ValueKey(palette.isDark),
-          theme: theme,
-          routerConfig: router,
-        ));
-        await tester.pumpAndSettle();
-        final region = tester.widget<AnnotatedRegion<SystemUiOverlayStyle>>(
-          find
-              .ancestor(
-                of: find.byType(Scaffold),
-                matching: find.byType(AnnotatedRegion<SystemUiOverlayStyle>),
-              )
-              .first,
-        );
-        expect(region.value.statusBarColor, Colors.transparent);
-        expect(region.value.systemNavigationBarColor, palette.paper);
-        expect(
-          region.value.statusBarIconBrightness,
-          palette.isDark ? Brightness.light : Brightness.dark,
-        );
-      }
-    });
-
-    testWidgets(
-        'JournalFloatingDetailHeader omits BackdropFilter and uses solid paper + divider',
-        (tester) async {
-      await tester.pumpWidget(MaterialApp(
-        theme: StudyAssistantTheme.light,
-        home: Scaffold(
-          body: JournalFloatingDetailHeader(
-            title: '详情标题',
-            scrollProgress: 1.0,
-            onBack: () {},
-          ),
-        ),
-      ));
-      expect(find.byType(BackdropFilter), findsNothing);
-      final boxes = tester.widgetList<DecoratedBox>(find.descendant(
-        of: find.byType(JournalFloatingDetailHeader),
-        matching: find.byType(DecoratedBox),
-      ));
-      final hasDividerBox = boxes.any((b) {
-        final dec = b.decoration;
-        return dec is BoxDecoration &&
-            dec.color == JournalPalette.light.paper.withValues(alpha: 0.98) &&
-            dec.border is Border;
-      });
-      expect(hasDividerBox, isTrue);
-    });
-
-    testWidgets(
-        'JournalPickerSheet search input uses inputBorder instead of BorderSide.none',
-        (tester) async {
-      await tester.pumpWidget(MaterialApp(
-        theme: StudyAssistantTheme.light,
-        home: Builder(
-          builder: (context) => Scaffold(
-            body: TextButton(
-              onPressed: () {
-                showJournalPickerSheet<String>(
-                  context,
-                  title: '选择课程',
-                  selectedValue: '',
-                  searchable: true,
-                  options: const [
-                    JournalPickerOption(value: 'a', label: '高等数学'),
-                  ],
-                );
-              },
-              child: const Text('open-picker'),
-            ),
-          ),
-        ),
-      ));
-      await tester.tap(find.text('open-picker'));
-      await tester.pumpAndSettle();
-      final field = tester.widget<TextField>(find.byType(TextField));
-      final enabledBorder =
-          field.decoration!.enabledBorder! as OutlineInputBorder;
-      expect(enabledBorder.borderSide.style, BorderStyle.solid);
-      expect(enabledBorder.borderSide.color, JournalPalette.light.inputBorder);
-      expect(field.decoration!.fillColor, JournalPalette.light.inputFill);
     });
   });
 

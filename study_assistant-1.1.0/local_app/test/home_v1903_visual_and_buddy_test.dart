@@ -293,12 +293,12 @@ void main() {
 
       await _pumpHome(tester, store, now: now);
 
-      expect(find.byKey(const ValueKey('home-ambient-glow')), findsNothing);
-      expect(find.byKey(const ValueKey('home-agenda-entry')), findsNothing);
-      expect(find.byKey(const ValueKey('home-theme-toggle')), findsNothing);
+      expect(find.byKey(const ValueKey('home-ambient-glow')), findsOneWidget);
 
-      // Top 2 action buttons & status/summary stay unframed.
+      // Top 4 action buttons & status/summary stay unframed.
       for (final key in const [
+        ValueKey('home-agenda-entry'),
+        ValueKey('home-theme-toggle'),
         ValueKey('home-more-menu'),
         ValueKey('home-sync-status'),
         ValueKey('home-due-summary'),
@@ -350,6 +350,7 @@ void main() {
       );
       expect(_sectionCardForText(tester, '逾期未交作业').emphasized, isFalse);
 
+      // Once scrolled >= 110dp, ambient glow fades out completely.
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('home-ambient-glow')), findsNothing);
     });
@@ -1141,6 +1142,7 @@ void main() {
 
       for (final finder in [
         find.text('搜索与筛选'),
+        find.byKey(const ValueKey('current-home-sort')),
         find.byKey(const ValueKey('home-add-manual')),
       ]) {
         final pressable = tester.widget<JournalPressableScale>(
@@ -1190,8 +1192,7 @@ void main() {
       // Filter modal bottom sheet opens with normal duration, supports upward rubber-band preserving search focus/text, downward dismiss, and reduced motion.
       await tester.tap(find.text('搜索与筛选'));
       await tester.pump(const Duration(milliseconds: 120));
-      expect(find.byKey(const ValueKey('home-filter-drag-handle')),
-          findsOneWidget);
+      expect(find.text('搜索、筛选与排序'), findsOneWidget);
       await tester.pumpAndSettle();
 
       await tester.tap(find.byType(TextField));
@@ -1241,15 +1242,13 @@ void main() {
 
       await tester.drag(filterHandleFinder, const Offset(0, 420));
       await tester.pumpAndSettle();
-      expect(
-          find.byKey(const ValueKey('home-filter-drag-handle')), findsNothing);
+      expect(find.text('搜索、筛选与排序'), findsNothing);
 
       // Under reduced motion, modal sheet opens immediately on first frame and handle upward drag produces zero displacement.
       await _pumpHome(tester, store, now: now, disableAnimations: true);
       await tester.tap(find.text('搜索与筛选'));
       await tester.pump();
-      expect(find.byKey(const ValueKey('home-filter-drag-handle')),
-          findsOneWidget);
+      expect(find.text('搜索、筛选与排序'), findsOneWidget);
       final reducedHandleY = tester.getTopLeft(filterHandleFinder).dy;
       final reducedPull =
           await tester.startGesture(tester.getCenter(filterHandleFinder));

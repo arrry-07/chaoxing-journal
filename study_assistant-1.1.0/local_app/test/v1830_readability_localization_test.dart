@@ -115,8 +115,8 @@ void _assertAllRenderedTextUsesWenKai(WidgetTester tester, String surface) {
     final family = resolved.fontFamily ?? defaultStyle.fontFamily;
     expect(
       family,
-      anyOf(Journal.bodyFamily, Journal.uiFamily),
-      reason: '$surface has unexpected fontFamily on Text("$data"): $family',
+      Journal.bodyFamily,
+      reason: '$surface has non-WenKai Text("$data"): $family',
     );
   }
 }
@@ -140,14 +140,11 @@ void main() {
     await tester.pumpAndSettle();
 
     final summaryText = tester.widget<Text>(find.textContaining('今日待交'));
-    final summaryColor = summaryText.style?.color ??
-        (summaryText.textSpan as TextSpan?)?.style?.color;
-    expect(summaryColor, isNot(Journal.berry));
-    expect(summaryColor, JournalPalette.light.accent);
+    expect(summaryText.style?.color, isNot(Journal.berry));
+    expect(summaryText.style?.color, JournalPalette.light.accent);
 
     final todayTimeText = tester.widget<Text>(find.text('13:00'));
     expect(todayTimeText.style?.color, JournalPalette.light.accent);
-    expect(todayTimeText.style?.fontFamily, Journal.uiFamily);
 
     final overdueHeading = tester.widget<Text>(find.textContaining('11月24日'));
     expect(overdueHeading.style?.color, isNot(Journal.berry));
@@ -183,7 +180,7 @@ void main() {
   });
 
   testWidgets(
-      'D8: detail primary and secondary buttons stack vertically with full width at 360dp, 1.3x, and 320dp',
+      'D8: detail primary and secondary buttons match height/width side-by-side at 360dp and stack cleanly at 1.3x / 320dp',
       (tester) async {
     final now = DateTime.utc(2026, 11, 25, 2, 0);
     final store = await _buildStore(now);
@@ -218,10 +215,10 @@ void main() {
     await tester.ensureVisible(webFinder);
     final openRect = tester.getRect(openFinder);
     final webRect = tester.getRect(webFinder);
-    expect(openRect.height, greaterThanOrEqualTo(48.0));
-    expect(webRect.height, greaterThanOrEqualTo(48.0));
+    expect(openRect.height, closeTo(48.0, 0.5));
+    expect(webRect.height, closeTo(48.0, 0.5));
     expect(webRect.width, closeTo(openRect.width, 1.0));
-    expect(webRect.top, greaterThan(openRect.bottom));
+    expect(webRect.top, closeTo(openRect.top, 0.5));
 
     await pumpDetail(const Size(393, 852), 1.3);
     await tester.ensureVisible(webFinder);

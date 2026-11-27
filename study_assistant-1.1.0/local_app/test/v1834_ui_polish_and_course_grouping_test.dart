@@ -1825,7 +1825,7 @@ void main() {
     });
 
     testWidgets(
-        'CourseListScreen search field uses inputBorder and SwitchListTile toggle supports epoch-guarded undo',
+        'CourseListScreen SwitchListTile toggle supports epoch-guarded undo',
         (tester) async {
       final now = DateTime.utc(2026, 11, 20, 4);
       final session = _Session('13800000001');
@@ -1859,18 +1859,6 @@ void main() {
         home: CourseListScreen(store: store, clock: () => now),
       ));
       await tester.pumpAndSettle();
-
-      // Search field uses global inputFill & inputBorder (1.0dp, not BorderSide.none).
-      await tester.tap(find.byKey(const ValueKey('course-list-search-toggle')));
-      await tester.pumpAndSettle();
-      final searchField = tester.widget<TextField>(
-        find.byKey(const ValueKey('course-list-search')),
-      );
-      final deco = searchField.decoration!;
-      expect(deco.fillColor, JournalPalette.light.inputFill);
-      final enabledBorder = deco.enabledBorder! as OutlineInputBorder;
-      expect(enabledBorder.borderSide.color, JournalPalette.light.inputBorder);
-      expect(enabledBorder.borderSide.width, 1.0);
 
       // Toggle follow off -> snackbar shows scope explanation + 撤销.
       expect(store.follows('101:10'), isTrue);
