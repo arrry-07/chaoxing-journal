@@ -1,0 +1,173 @@
+{
+  "schema_version": 1,
+  "kind": "story-choreography",
+  "id": "architecture_tour",
+  "title": "学习通课业手记 · 核心架构与防脏写提醒漫游",
+  "caption": "从前后台同源入口、多源采集与 FB-005 时间信任隔离，到双存储两阶段版本提交、SQLite v10 物理表与原生夜间静音窗二次校验投递。",
+  "locale": "zh-CN",
+  "preset": "classic",
+  "theme": "both",
+  "duration": 39,
+  "loop": true,
+  "stills": [0],
+  "views": [
+    {
+      "id": "arch",
+      "title": "系统架构总览",
+      "type": "architecture",
+      "input": "architecture.json"
+    },
+    {
+      "id": "flow",
+      "title": "课业同步与双端提醒数据流",
+      "type": "dataflow",
+      "input": "sync-reminder.dataflow.json"
+    },
+    {
+      "id": "erd",
+      "title": "原生提醒状态库 SQLite v10",
+      "type": "erd",
+      "input": "reminder-db.erd.json"
+    }
+  ],
+  "steps": [
+    {
+      "at": 0,
+      "duration": 8,
+      "view": "arch",
+      "title": "前后台双 Flutter 入口共享同源业务核",
+      "body": "前台 main 先完成本机会话与快照恢复再挂载界面，防止通知深链读到空白状态；WorkManager 拉起无界面 backgroundMain 复用同一套 AssignmentStore 与解析链路。",
+      "focus": {
+        "nodes": ["ui_shell", "assignment_store", "native_reminder_worker"],
+        "area": "left"
+      },
+      "trace": {
+        "edges": ["ui_to_store", "worker_to_store", "store_to_local"],
+        "action": "parallel"
+      },
+      "detail": {
+        "nodes": ["ui_shell", "assignment_store", "native_reminder_worker"],
+        "title": "main.dart · 会话恢复挂载与 backgroundMain",
+        "note": "前台先 restoreSession() 再 runApp；后台无界面入口复用 AssignmentStore",
+        "path": "study_assistant-1.1.0/local_app/lib/main.dart",
+        "revision": "d8b7f47c4dcb3ef44c7d719d6c76d7bef4fa9a97",
+        "lines": [86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104],
+        "highlight": [86, 98, 99, 102, 103]
+      }
+    },
+    {
+      "at": 8,
+      "duration": 8,
+      "view": "flow",
+      "transition": {
+        "from": "arch",
+        "duration": 0.9,
+        "shared": [
+          { "id": "chaoxing_remote", "targetId": "chaoxing_api" },
+          { "id": "assignment_store", "targetId": "time_trust_query" }
+        ]
+      },
+      "title": "超星多源采集与时间信任 / FB-005 隔离",
+      "body": "多源响应经归一化后进入 CourseworkDeadline 与 AssignmentQuery：展示类考试范围严禁写回可信截止，官方时间一旦到达自动接管，确认逾期在双向时间排序中始终置底。",
+      "focus": {
+        "nodes": ["parsers_merge", "time_trust_query"],
+        "area": "left"
+      },
+      "trace": {
+        "edges": ["raw_coursework", "normalized_items", "merged_snapshot"],
+        "action": "trace"
+      },
+      "detail": {
+        "nodes": ["time_trust_query"],
+        "title": "coursework_deadline.dart · 考试范围隔离与官方优先",
+        "note": "仅展示的时间范围归入 unconfirmed，官方可信截止自动接管",
+        "path": "study_assistant-1.1.0/local_app/lib/src/services/coursework_deadline.dart",
+        "revision": "d8b7f47c4dcb3ef44c7d719d6c76d7bef4fa9a97",
+        "lines": [145, 146, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 157, 158, 159, 160, 161],
+        "highlight": [145, 146, 154, 159, 160]
+      }
+    },
+    {
+      "at": 16,
+      "duration": 8,
+      "view": "flow",
+      "title": "双存储跨引擎租约与 mutationVersion 两阶段防脏写",
+      "body": "写盘前先由原生 Bridge 校对 sessionEpoch 与读写租约并在 SQLite 标挂起，再写 SharedPreferences；提交提醒计划时复核 mutationVersion，失配立即拒绝重排。",
+      "focus": {
+        "nodes": ["session_lease_gate", "prefs_snapshot", "sqlite_reminder_db"],
+        "area": "left"
+      },
+      "trace": {
+        "edges": ["lease_permit", "plan_snapshot", "version_commit"],
+        "action": "trace"
+      },
+      "detail": {
+        "nodes": ["session_lease_gate", "sqlite_reminder_db"],
+        "title": "background_reminder_gateway.dart · 代次与版本契约",
+        "note": "sessionEpoch、pendingUpdate 与 mutationVersion 杜绝前后台互相覆盖",
+        "path": "study_assistant-1.1.0/local_app/lib/src/services/background_reminder_gateway.dart",
+        "revision": "d8b7f47c4dcb3ef44c7d719d6c76d7bef4fa9a97",
+        "lines": [90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104],
+        "highlight": [93, 99, 100]
+      }
+    },
+    {
+      "at": 24,
+      "duration": 7,
+      "view": "erd",
+      "transition": {
+        "from": "flow",
+        "duration": 0.9,
+        "shared": [
+          { "id": "sqlite_reminder_db", "targetId": "accounts" }
+        ]
+      },
+      "title": "SQLite v10 物理表锁定账号代次与 v3 渠道",
+      "body": "accounts 以 account_hash 为主键并持久化 pending_update、mutation_version、夜间紧急穿透开关与 assignment_deadlines_v3 有声渠道，串联快照与事件表。",
+      "focus": {
+        "nodes": ["accounts", "snapshots", "events"],
+        "area": "left"
+      },
+      "detail": {
+        "nodes": ["accounts"],
+        "title": "ReminderDatabase.kt · accounts 表核心门禁列 (SQLite v10)",
+        "note": "pending_update / mutation_version / allow_urgent_night_breakthrough / deadline_channel_id",
+        "path": "study_assistant-1.1.0/local_app/android/app/src/main/kotlin/com/example/studyassistant/ReminderDatabase.kt",
+        "revision": "d8b7f47c4dcb3ef44c7d719d6c76d7bef4fa9a97",
+        "lines": [212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 228, 229],
+        "highlight": [212, 213, 226, 227]
+      }
+    },
+    {
+      "at": 31,
+      "duration": 8,
+      "view": "flow",
+      "transition": {
+        "from": "erd",
+        "duration": 0.9,
+        "shared": [
+          { "id": "events", "targetId": "native_alarm_pub" }
+        ]
+      },
+      "title": "原生闹钟夜间静音窗与二次校验投递",
+      "body": "闹钟唤醒后经 AssignmentNotificationPublisher 复核截止有效性与 DeadlineQuietHoursPolicy：缺时间来源拦截，夜间静音默认顺延或按账号穿透后经 v3 渠道投递。",
+      "focus": {
+        "nodes": ["sqlite_reminder_db", "native_alarm_pub"],
+        "area": "left"
+      },
+      "trace": {
+        "edges": ["due_events"],
+        "action": "trace"
+      },
+      "detail": {
+        "nodes": ["native_alarm_pub"],
+        "title": "AssignmentNotificationPublisher.kt · 到期复核与静音策略",
+        "note": "先校验 deadlineSource 与夜间静音窗，再决定投递、拦截或顺延",
+        "path": "study_assistant-1.1.0/local_app/android/app/src/main/kotlin/com/example/studyassistant/AssignmentNotificationPublisher.kt",
+        "revision": "d8b7f47c4dcb3ef44c7d719d6c76d7bef4fa9a97",
+        "lines": [211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 228],
+        "highlight": [211, 215, 216, 220, 221]
+      }
+    }
+  ]
+}

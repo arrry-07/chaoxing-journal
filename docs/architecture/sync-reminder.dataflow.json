@@ -1,0 +1,250 @@
+{
+  "schema_version": 1,
+  "diagram_type": "dataflow",
+  "meta": {
+    "title": "课业同步、时间信任与双端提醒数据流",
+    "locale": "zh-CN",
+    "output": "docs/architecture/sync-reminder.dataflow.html",
+    "parentHref": "architecture.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/arrry-07/chaoxing-journal.git",
+      "provider": "github",
+      "revision": "6a8af334bb5f5c54ffbf81f15f7065aaf4364b8a"
+    }
+  },
+  "stages": [
+    { "label": "触发与输入源" },
+    { "label": "采集与门禁" },
+    { "label": "时间信任与规划" },
+    { "label": "双存储提交" },
+    { "label": "消费与原生投递" }
+  ],
+  "nodes": [
+    {
+      "id": "chaoxing_api",
+      "type": "external",
+      "label": "学习通多源接口",
+      "sublabel": "课程/作业/考试/课堂",
+      "tag": "HTTPS",
+      "stage": 0,
+      "row": 0,
+      "sources": [
+        { "path": "study_assistant-1.1.0/local_app/lib/src/local" }
+      ]
+    },
+    {
+      "id": "signal_and_manual",
+      "type": "frontend",
+      "label": "通知信号与本机编辑",
+      "sublabel": "系统通知监听 / 手动待办",
+      "tag": "增量触发",
+      "stage": 0,
+      "row": 2,
+      "sources": [
+        {
+          "path": "study_assistant-1.1.0/local_app/android/app/src/main/kotlin/com/example/studyassistant/ChaoxingNotificationListener.kt",
+          "line": 9,
+          "end_line": 50,
+          "label": "学习通通知信号监听"
+        },
+        { "path": "study_assistant-1.1.0/local_app/lib/src/features" }
+      ]
+    },
+    {
+      "id": "parsers_merge",
+      "type": "backend",
+      "emphasis": true,
+      "label": "多源解析与身份归并",
+      "sublabel": "Chaoxing*Parser · Grouping",
+      "tag": "防空覆盖",
+      "stage": 1,
+      "row": 0,
+      "sources": [
+        { "path": "study_assistant-1.1.0/local_app/lib/src/local" },
+        { "path": "study_assistant-1.1.0/local_app/lib/src/services" }
+      ]
+    },
+    {
+      "id": "session_lease_gate",
+      "type": "security",
+      "label": "代次与跨引擎租约",
+      "sublabel": "sessionEpoch + 读写租约",
+      "tag": "并发互斥",
+      "stage": 1,
+      "row": 2,
+      "sources": [
+        {
+          "path": "study_assistant-1.1.0/local_app/lib/src/services/background_reminder_gateway.dart",
+          "line": 62,
+          "end_line": 115,
+          "label": "租约与计划版本契约"
+        },
+        {
+          "path": "study_assistant-1.1.0/local_app/android/app/src/main/kotlin/com/example/studyassistant/BackgroundReminderBridge.kt",
+          "line": 63,
+          "end_line": 139,
+          "label": "账号切换与代次轮转"
+        }
+      ]
+    },
+    {
+      "id": "time_trust_query",
+      "type": "backend",
+      "emphasis": true,
+      "label": "时间信任与排序投影",
+      "sublabel": "CourseworkDeadline · Query",
+      "tag": "FB-005 规则",
+      "stage": 2,
+      "row": 0,
+      "sources": [
+        {
+          "path": "study_assistant-1.1.0/local_app/lib/src/services/coursework_deadline.dart",
+          "line": 9,
+          "end_line": 106,
+          "label": "官方优先与手动截止接管"
+        },
+        {
+          "path": "study_assistant-1.1.0/local_app/lib/src/services/assignment_query.dart",
+          "line": 90,
+          "end_line": 120,
+          "label": "时间轴分层与逾期置底"
+        }
+      ]
+    },
+    {
+      "id": "reminder_planner",
+      "type": "backend",
+      "label": "提醒与静音窗规划",
+      "sublabel": "ReminderPlanner · QuietHours",
+      "tag": "v3 有声策略",
+      "stage": 2,
+      "row": 2,
+      "sources": [
+        { "path": "study_assistant-1.1.0/local_app/lib/src/services" },
+        {
+          "path": "study_assistant-1.1.0/local_app/lib/src/services/local_notification_service.dart",
+          "line": 76,
+          "end_line": 138,
+          "label": "v3 有声渠道定义"
+        }
+      ]
+    },
+    {
+      "id": "prefs_snapshot",
+      "type": "database",
+      "label": "本机课业快照仓",
+      "sublabel": "LocalAssignmentRepository",
+      "tag": "SharedPreferences",
+      "stage": 3,
+      "row": 0,
+      "sources": [
+        {
+          "path": "study_assistant-1.1.0/local_app/lib/src/local/local_assignment_repository.dart",
+          "line": 50,
+          "end_line": 140,
+          "label": "按账号存储与恢复备份"
+        }
+      ]
+    },
+    {
+      "id": "sqlite_reminder_db",
+      "type": "database",
+      "label": "原生提醒状态库",
+      "sublabel": "ReminderDatabase (SQLite)",
+      "tag": "mutationVersion",
+      "stage": 3,
+      "row": 2,
+      "sources": [
+        {
+          "path": "study_assistant-1.1.0/local_app/android/app/src/main/kotlin/com/example/studyassistant/ReminderDatabase.kt",
+          "line": 19,
+          "end_line": 129,
+          "label": "提醒快照与资格核验"
+        }
+      ]
+    },
+    {
+      "id": "home_and_widget",
+      "type": "frontend",
+      "label": "首页视图与小组件",
+      "sublabel": "首页/日历/统计 · AppWidget",
+      "tag": "展示消费",
+      "stage": 4,
+      "row": 0,
+      "sources": [
+        { "path": "study_assistant-1.1.0/local_app/lib/src/features" },
+        {
+          "path": "study_assistant-1.1.0/local_app/lib/src/services/widget_snapshot_service.dart",
+          "line": 55,
+          "end_line": 100,
+          "label": "桌面小组件快照同步"
+        }
+      ]
+    },
+    {
+      "id": "native_alarm_pub",
+      "type": "messagebus",
+      "label": "闹钟与二次校验投递",
+      "sublabel": "AlarmScheduler · Publisher",
+      "tag": "到期复核",
+      "stage": 4,
+      "row": 2,
+      "sources": [
+        {
+          "path": "study_assistant-1.1.0/local_app/android/app/src/main/kotlin/com/example/studyassistant/AssignmentAlarmScheduler.kt",
+          "line": 13,
+          "end_line": 80,
+          "label": "截止与静音窗闹钟"
+        },
+        {
+          "path": "study_assistant-1.1.0/local_app/android/app/src/main/kotlin/com/example/studyassistant/AssignmentNotificationPublisher.kt",
+          "line": 23,
+          "end_line": 119,
+          "label": "原生通知渠道与投递"
+        }
+      ]
+    }
+  ],
+  "flows": [
+    { "id": "raw_coursework", "from": "chaoxing_api", "to": "parsers_merge", "label": "原始课业响应", "variant": "emphasis" },
+    { "id": "signals_edits", "from": "signal_and_manual", "to": "session_lease_gate", "label": "通知信号与编辑", "variant": "security" },
+    { "id": "lease_permit", "from": "session_lease_gate", "to": "parsers_merge", "label": "代次与租约放行", "variant": "security" },
+    { "id": "normalized_items", "from": "parsers_merge", "to": "time_trust_query", "label": "归一化课业集", "variant": "emphasis" },
+    { "id": "trusted_deadlines", "from": "time_trust_query", "to": "reminder_planner", "label": "可信截止时间", "variant": "default" },
+    { "id": "merged_snapshot", "from": "time_trust_query", "to": "prefs_snapshot", "label": "合并课业快照", "variant": "emphasis" },
+    { "id": "plan_snapshot", "from": "reminder_planner", "to": "sqlite_reminder_db", "label": "提醒计划快照", "variant": "security" },
+    { "id": "version_commit", "from": "prefs_snapshot", "to": "sqlite_reminder_db", "label": "版本号提交确认", "variant": "dashed" },
+    { "id": "ui_widget_feed", "from": "prefs_snapshot", "to": "home_and_widget", "label": "已校验展示快照", "variant": "emphasis" },
+    { "id": "due_events", "from": "sqlite_reminder_db", "to": "native_alarm_pub", "label": "到期事件与复核", "variant": "default" }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "时间信任隔离契约",
+      "items": [
+        "考试展示范围文案绝不写回可信截止时间、日历、提醒或备份",
+        "官方可信截止一旦出现即自动接管，防止旧手动截止时间复活",
+        "读取失败与未知时间独立保留，严禁折叠为无截止或零作业"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "两阶段版本化提醒提交",
+      "items": [
+        "写盘前先在 SQLite 标记 pendingUpdate，再写入 SharedPreferences",
+        "随后凭读取时的 mutationVersion 与 sessionEpoch 提交提醒计划",
+        "版本或账号代次失配立即拒绝并重排，杜绝前后台引擎互相覆盖"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "原生投递前二次校验",
+      "items": [
+        "闹钟唤醒后在原生侧复核完成、隐藏、关注、归档与夜间静音窗",
+        "夜间 [23:30, 07:30) 默认静音顺延，支持按账号开启 <=1h 紧急穿透",
+        "个人日程与每日摘要走独立补偿式通知事务，不与作业闹钟混清"
+      ]
+    }
+  ]
+}
