@@ -97,6 +97,8 @@ jobs:
       - name: Install locked dependencies
         run: flutter pub get --enforce-lockfile
       - name: Check release metadata and changed Dart formatting
+        env:
+          PUSH_BEFORE: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.event.before || '' }}
         run: |
           if [[ "$GITHUB_REF_TYPE" == "tag" || "$GITHUB_REF" == refs/tags/* ]]; then
             tag_name="${GITHUB_REF_NAME:-${GITHUB_REF#refs/tags/}}"
@@ -104,7 +106,14 @@ jobs:
           else
             python3 tool/check_release_metadata.py --allow-dev
           fi
-          python3 tool/check_changed_format.py
+          format_base=HEAD^
+          if [[ "$PUSH_BEFORE" =~ ^[0-9a-f]{40}$ && ! "$PUSH_BEFORE" =~ ^0+$ ]]; then
+            format_base="$PUSH_BEFORE"
+            if ! git rev-parse --verify --quiet "$format_base^{commit}" >/dev/null; then
+              git fetch --no-tags --depth=1 origin "$format_base"
+            fi
+          fi
+          python3 tool/check_changed_format.py --base "$format_base"
       - name: Check repo safety, scripts and L0 doc budget
         working-directory: ${{ github.workspace }}
         run: |

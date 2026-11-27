@@ -18,9 +18,10 @@ args = parser.parse_args()
 
 root = Path(__file__).resolve().parents[1]
 repo = root.parents[1]
+pubspec = (root / "pubspec.yaml").read_text(encoding="utf-8")
 version = re.search(
     r"^version: ((?:0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*))\+([1-9]\d*)\r?$",
-    (root / "pubspec.yaml").read_text(encoding="utf-8"),
+    pubspec,
     re.M,
 )
 if version is None:
@@ -39,15 +40,24 @@ if int(minor) > 99:
     )
 
 name = base_name
+formal_marks = [mark.strip() for mark in re.findall(r"^# formal-release:([^\r\n]*)", pubspec, re.M)]
+if formal_marks and formal_marks != [f"{name}+{code}"]:
+    parser.exit(1, "Formal release marker must match the single pubspec version. Use freeze_release.py.\n")
 app = (root / 'lib/src/app/app_version.dart').read_text(encoding='utf-8')
-assert f"name = '{name}'" in app and f'code = {code};' in app, 'AppVersion mismatch'
+if f"name = '{name}'" not in app or f'code = {code};' not in app:
+    parser.exit(1, "AppVersion mismatch\n")
 if args.tag is not None and args.tag != f"v{name}":
     parser.exit(
         1,
         f"Tag mismatch: tag {args.tag!r} does not match pubspec version 'v{name}'\n",
     )
-if not (args.allow_dev and int(patch) > 0):
-    assert f'## {name}（{code}）' in (repo / 'CHANGELOG.md').read_text(encoding='utf-8'), 'Changelog missing'
-    assert f'{name}（{code}）' in (repo / 'README.md').read_text(encoding='utf-8'), 'README mismatch'
-    assert f'{name}+{code}' in (repo / 'docs/guides/安装与使用.md').read_text(encoding='utf-8'), 'Install guide mismatch'
+if formal_marks or not (args.allow_dev and int(patch) > 0):
+    for path, expected, message in (
+        ("CHANGELOG.md", f"## {name}（{code}）", "Changelog missing"),
+        ("README.md", f"{name}（{code}）", "README mismatch"),
+        ("docs/guides/安装与使用.md", f"{name}+{code}", "Install guide mismatch"),
+    ):
+        document = repo / path
+        if not document.is_file() or expected not in document.read_text(encoding="utf-8"):
+            parser.exit(1, f"{message}: {path}\n")
 print(f'Metadata consistent: {name}+{code}')

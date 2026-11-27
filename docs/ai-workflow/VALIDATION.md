@@ -13,7 +13,7 @@
 
 ## 开发阶段按影响选检查（本地秒级快检）
 
-开发期默认按影响选定向门禁。用 `python scripts/verify_local_gate.py --tests` 加本次相关的 `test/*_test.dart` 路径（相对于 `local_app`），或运行等价的相关格式、静态分析和用例检查。含中文路径时本地使用 `dart analyze lib test`。脚本默认注入每个测试 30s 超时（`--test-case-timeout` 可调）和进程树超时（`--flutter-timeout` 默认定向 300s、全量 900s），卡死时终止子进程并报告最后的用例。
+开发期默认按影响选定向门禁。用 `python scripts/verify_local_gate.py --tests` 加本次相关的 `test/*_test.dart` 路径（相对于 `local_app`），或运行等价的相关格式、静态分析和用例检查。含中文路径时本地使用 `dart analyze lib test`。本地格式检查覆盖 `origin/main` 与当前 HEAD 的合并基线以来的改动、最近提交和本地改动；不同目标用 `--format-base <ref>` 指定。CI 的 PR 检查用合并提交的第一父提交作基线，`main` 推送用事件的推送前提交。脚本默认注入每个测试 30s 超时（`--test-case-timeout` 可调）和进程树超时（`--flutter-timeout` 默认定向 300s、全量 900s），卡死时终止子进程并报告最后的用例。
 
 触及主题、全局路由转场、公共组件、共享 Store 契约、更新或提醒策略时，须在 Stage 1 收口前对最终源码重跑本地全量门禁。审查或设备验收后的局部补丁须重跑受影响的测试、必要的设备场景；涉及上述共享契约或影响范围未明时补跑全量。日常集成 PR 和正式冻结 PR 前同样核对各自最终输入的全量结果，正式冻结额外启用 `--release`。三时区套件及完整 Android 矩阵仍由 PR、`main` 与 Tag CI 检查。
 
@@ -75,7 +75,7 @@ python scripts/verify_local_gate.py --mode full --release
 
 | 递增位 | 适用场景与阶段 | 示例 | 同步范围与 Gitee 清单联动 |
 | --- | --- | --- | --- |
-| **修订号 `Z`**（`X.Y.Z → X.Y.(Z+1)`） | **`dev` 阶段自测与日常集成 PR**：较大阶段完成准备打 MuMu 自测包时升 `Z` 和构建号；每累积 1–3 个修订版可开日常集成 PR 合入 `main` 跑全量 CI | `1.92.0+132 → 1.92.1+133 → 1.92.2+134` | 版本字段同步 `pubspec.yaml` 与 `AppVersion`，验收结果写入 dev 状态；`README.md`/`CHANGELOG.md`/安装指南与 Gitee 清单维持当前正式版不变（仅在 Stage 2 更新）。CI 与本地默认传入 `--allow-dev` 对 `Z > 0` 豁免正式文档，而 `Z == 0` 仍强制核对正式文档；Tag CI 一律严格运行 `--tag`。 |
+| **修订号 `Z`**（`X.Y.Z → X.Y.(Z+1)`） | **`dev` 阶段自测与日常集成 PR**：较大阶段完成准备打 MuMu 自测包时升 `Z` 和构建号；每累积 1–3 个修订版可开日常集成 PR 合入 `main` 跑全量 CI | `1.92.0+132 → 1.92.1+133 → 1.92.2+134` | 版本字段同步 `pubspec.yaml` 与 `AppVersion`，验收结果写入 dev 状态；`README.md`/`CHANGELOG.md`/安装指南与 Gitee 清单维持当前正式版不变（仅在 Stage 2 更新）。CI 与本地默认传入 `--allow-dev` 仅对未标记的 `Z > 0` 预览包豁免正式文档；`Z == 0` 与含正式冻结标记的候选均强制核对；Tag CI 一律严格运行 `--tag`。 |
 | **次版本号 `Y`**（由 `1.8.x` 跃迁至 `1.90.0`，此后每次正式版 `Y+1` 并归零 `Z`，**上限 `99`**） | **维护者明确授权正式发布后（Stage 2）**：下一正式版自 `1.90.0` 起步，此后升 `Y+1` 并归零 `Z`，在 `dev` 冻结后合入 `main` | `1.8.28 → 1.90.0 → 1.91.0 … → 1.99.0` | 冻结全套正式文档，自动更新 `update-manual.json`；仅大更新或紧急热修显式开启 `--promote-stable` 推进 `update-stable.json` |
 | **主版本号 `X`**（`X.99.* → (X+1).0.0` 或重大跃迁） | **进位或跨代版本**：当 `Y` 已达 `99` 后下一次正式发版进位升 `X` 归零 `Y/Z`，或发生跨代重构/不兼容跃迁 | `1.99.0 → 2.0.0` | 冻结全套正式文档，自动更新 `update-manual.json`，大更新时显式开启 `--promote-stable` 推进 `update-stable.json` |
 
@@ -86,7 +86,7 @@ python scripts/verify_local_gate.py --mode full --release
 - 进入本轮最终集成验收时，重新读取需求、最终差异、调用方、测试和验收标准，并在集成输入上新跑必要的核心检查。代理报告、历史摘要和总测试数不能代替证据。
 - 正式发布保留完整验收矩阵，包括全量 Flutter、分析、格式、元数据、时区和原生检查，以及 CI 和分发规则要求的检查。PR 前执行[本地 UTC 门禁](#pwsh-utc-gate)。三时区核心套件与 Gradle JVM、仪器测试编译、Lint 由 PR、`main` 和 Tag CI 承接。分发脚本变化运行对应检查。
 - 先检查最终输入已有的原始日志和对应 CI：已覆盖且仍有效的检查不再手工复制一轮。本机与 CI 的平台/工具差异须明确；Linux 结果不能冒称 Windows 专项行为已验证。
-- 必需 PR、main、Tag CI 仍核对各自最终提交的完整结果，不能拿旧提交绿灯替代；CI 因既定触发器运行全套不意味着本地也要再复制一套。完整 CI 由推送 main、正式版本 Tag、目标为 main 的 PR 与手动运行触发；日常 dev 推送不启动全量检查。其中 PR、`main` 与 `workflow_dispatch` 运行 `python study_assistant-1.1.0/local_app/tool/check_release_metadata.py --allow-dev`（仅对 `Z > 0` 豁免正式文档，`Z == 0` 仍强制核对正式文档），Tag CI 一律运行 `python study_assistant-1.1.0/local_app/tool/check_release_metadata.py --tag <tag>` 严格校验 Tag 名与全套正式文档一致。
+- 必需 PR、main、Tag CI 仍核对各自最终提交的完整结果，不能拿旧提交绿灯替代；CI 因既定触发器运行全套不意味着本地也要再复制一套。完整 CI 由推送 main、正式版本 Tag、目标为 main 的 PR 与手动运行触发；日常 dev 推送不启动全量检查。其中 PR、`main` 与 `workflow_dispatch` 运行 `python study_assistant-1.1.0/local_app/tool/check_release_metadata.py --allow-dev`（仅对未标记的 `Z > 0` 预览包豁免正式文档），Tag CI 一律运行 `python study_assistant-1.1.0/local_app/tool/check_release_metadata.py --tag <tag>` 严格校验 Tag 名与全套正式文档一致。
 - 版本在正式发布前统一冻结，按[版本号与迭代分级规则](#版本号与迭代分级规则)确定目标版本，日常小步集成进 `main` 不触发正式发布；测试每跑一轮、补一份文档或跨一个 Git 节点都不构成升版理由。
 - 正式 APK 必须对应最终 main 的干净构建输入、锁定依赖、正常入口和原签名。打包后统一运行 `python scripts/verify_apk_and_report.py <apk> --expected-version <X.Y.Z+CODE>` 一次性核验大小、SHA-256、包名/版本/SDK、非 debuggable、双 ABI、16 KiB 对齐、ZIP CRC 与 v2 原证书指纹并生成标准 Markdown 验收段落（可附 `--write-sha256sums` 同步生成 `SHA256SUMS.txt`）。随后完成 MuMu 同签名覆盖、数据保留和实际改动验收，以及 GitHub 草稿认证下载与公开匿名下载验证。Gitee 小索引在 GitHub 公开后核验，失败须披露且不能声称双渠道完成，但不追溯阻断已满足门禁的 GitHub 发布。CI 的 Debug APK 不能替代正式 Release APK。
 - 优先从最终 main 构建一次正式包；确需合并前候选来暴露风险时才增加候选。候选只有在全部构建输入（含版本、签名配置、参数和任何提交号派生元数据）与最终 main 一致、原始记录完整且文件哈希未变时才能绑定为最终包；否则从最终 main 重建。候选与最终证据分清，不追逐可复现哈希，也不复用旧版本 APK 冒充新正式包。
@@ -94,9 +94,9 @@ python scripts/verify_local_gate.py --mode full --release
 - **两阶段推进顺序**
   - **Stage 1（开发、验收与日常集成）**。默认停在已验证的 `dev`，留下终版差异、审查结论和证据。已获日常集成授权时，对待集成输入执行[本地 UTC 全量门禁](#pwsh-utc-gate)，创建或续用 `dev → main` PR。核对最新 PR HEAD、必需 CI 和适用的独立审查后再合并，并核对 `main` CI `success`。正式下载文档仍指向当前正式版，此阶段禁止冻结正式版本、打正式 Tag、发 Release 或推进线上更新索引。
   - **Stage 2（正式发布）**。仅在维护者明确下达正式发版指令、Stage 1 适用门禁通过后进入。业务源码与测试保持只读，仅允许冻结版本元数据及维护发布文档。发现代码或测试缺陷即停止发布，回 `dev` 修复、重审，并在最终输入上重跑适用检查。
-    1. 在与 `main` 对齐的 `dev` 先新增目标版本的 `CHANGELOG.md` 条目，再运行 `python scripts/freeze_release.py --apply --mode formal --version <X.Y.Z+build>`。脚本默认探测上一正式版，也可用 `--previous` 明确指定。用[正式冻结 UTC 门禁](#pwsh-utc-gate)核对版本、正式文档与全量检查。紧急 Hotfix 从最新正式版 Tag 起步，发布后将修复同步到 `main` 与 `dev`。
+    1. 在与 `main` 对齐的 `dev` 先新增目标版本的 `CHANGELOG.md` 条目，再运行 `python scripts/freeze_release.py --apply --mode formal --version <X.Y.Z+build>`。脚本默认探测上一正式版，也可用 `--previous` 明确指定。正式冻结将当前版本和构建号写入 `pubspec.yaml` 的 `# formal-release:` 标记，紧急热修同样适用。下一次用 `--apply --mode dev` 升预览版时自动移除标记。用[正式冻结 UTC 门禁](#pwsh-utc-gate)核对版本、正式文档与全量检查。紧急 Hotfix 从最新正式版 Tag 起步，发布后将修复同步到 `main` 与 `dev`。
     2. 冻结 PR 经审查及 CI 后合入 `main`。核对最终 `main` CI 后构建原签名双 ABI 正式包，完成 MuMu 保数据验收。
-    3. 推 Tag 触发严格 Tag CI。等待期间可上传 Draft Release 资产并验证认证下载，Tag CI 成功后才可公开 GitHub Release 并设为 `latest`。公开后验证匿名下载、Gitee 索引和官网分发。已有 PR 优先续用，外部写入后读回真实对象。
+    3. 推 Tag 触发严格 Tag CI。等待期间可上传 Draft Release 资产并验证认证下载，Tag CI 成功后才可公开 GitHub Release 并设为 `latest`。公开后验证匿名下载、Gitee 索引和官网分发。正式官网派发缺少 Token 时明确失败，仓库 Release 与官网同步结果分别核对。已有 PR 优先续用，外部写入后读回真实对象。
 
 - 正式冻结时在 `dev` 将目标版本设为下一正式版（自 `1.8.x` 跃迁为 `1.90.0+build`，此后按 `X.(Y+1).0+build` 递增，`Y` 已满 `99` 时设为 `(X+1).0.0+build`），同步 `pubspec.yaml`、`AppVersion`、`CHANGELOG.md`、`README.md` 与安装指南，构建号高于此前全部测试包。正式版发布后，下一轮 `dev` 自测包从该正式版的第三位 `+1`（如 `1.90.1+build`）起递增。
 - PR、合并及 Tag／上传／公开前分别给出检查结论和证据位置。正式关闭时更新工程状态、反馈与验收证据，并按[发布收口与归档](../README.md#发布收口与归档)滚动维护。验证规则仅在门禁变化时更新。

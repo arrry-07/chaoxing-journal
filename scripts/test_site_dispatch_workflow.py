@@ -56,12 +56,6 @@ class SiteDispatchWorkflowTests(unittest.TestCase):
         self.assertNotIn("print(token", self.text)
         self.assertNotIn("--token", self.text)
 
-    def test_missing_token_skips_successfully(self) -> None:
-        skip_index = self.text.index('if not token:')
-        exit_index = self.text.index("sys.exit(0)", skip_index)
-        self.assertLess(skip_index, exit_index)
-        self.assertIn("is not configured", self.text)
-
     def test_formal_tag_regex_and_dispatch_contract(self) -> None:
         self.assertIn(
             r're.fullmatch(r"v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)"',
@@ -113,19 +107,19 @@ class SiteDispatchWorkflowTests(unittest.TestCase):
         handle.__enter__.return_value = response
         return handle
 
-    def test_inline_script_skips_without_token(self) -> None:
+    def test_inline_script_fails_without_token_for_formal_release(self) -> None:
         urlopen = mock.Mock()
         code, output = self._run_inline(
             {"RELEASE_TAG": "v1.9.0", "RELEASE_DRAFT": "false"},
             urlopen,
         )
-        self.assertEqual(0, code)
+        self.assertEqual(1, code)
         self.assertIn("is not configured", output)
         urlopen.assert_not_called()
 
     def test_inline_script_skips_draft_and_prerelease(self) -> None:
         for env in (
-            {"SITE_DISPATCH_TOKEN": "t", "RELEASE_TAG": "v1.9.0", "RELEASE_DRAFT": "true"},
+            {"RELEASE_TAG": "v1.9.0", "RELEASE_DRAFT": "true"},
             {
                 "SITE_DISPATCH_TOKEN": "t",
                 "RELEASE_TAG": "v1.9.0",

@@ -19,6 +19,37 @@ import verify_local_gate as mod  # noqa: E402
 
 
 class VerifyLocalGateTests(unittest.TestCase):
+    def test_format_uses_origin_merge_base_even_when_last_commit_is_docs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            app = repo / "app"
+            app.mkdir()
+
+            def git(*args: str) -> bytes:
+                return subprocess.check_output(["git", "-c", "commit.gpgsign=false", *args], cwd=repo)
+
+            git("init", "-b", "main", "--template=")
+            git("config", "user.email", "test@example.com")
+            git("config", "user.name", "Test")
+            git("commit", "--allow-empty", "-m", "old local main")
+            (app / "already_integrated.dart").write_text("void main() {}\n", encoding="utf-8")
+            git("add", "app")
+            git("commit", "-m", "integrated in remote main")
+            git("update-ref", "refs/remotes/origin/main", "HEAD")
+            git("switch", "-c", "dev")
+            git("branch", "-f", "main", "HEAD^")
+            (app / "earlier.dart").write_text("void main() {}\n", encoding="utf-8")
+            git("add", "app")
+            git("commit", "-m", "Dart change")
+            (repo / "state.md").write_text("development state", encoding="utf-8")
+            git("add", "state.md")
+            git("commit", "-m", "docs")
+
+            self.assertEqual(mod._changed_dart_files(repo, app), ["earlier.dart"])
+            self.assertEqual(mod._changed_dart_files(repo, app, "HEAD^"), [])
+            with self.assertRaisesRegex(RuntimeError, "Invalid Dart format baseline"):
+                mod._changed_dart_files(repo, app, "nonexistent")
+
     def test_changed_dart_files_includes_untracked_new_dart_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)

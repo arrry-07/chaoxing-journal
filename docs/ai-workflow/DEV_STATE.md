@@ -16,6 +16,12 @@
 - 当前 commit 与状态：基线 `2aed324`，`dev` 应用版本 `1.92.3+134`。正式基线仍为 `1.92.0+132`。验证覆盖仓库安全、元数据、L0 行数、文档链接、PowerShell UTC 命令和归档搜索边界。
 - 下一步待办：在接下来的真实任务中按上面的口径记录成效。沿用已有 dev 开发、验收与正式发布权限。
 
+**2026-11-27 · v1.92.3+134 工作流门禁修复**
+
+- 已完成改动：本地与 CI 按集成范围检查 Dart 格式，正式冻结标记让补丁候选也接受完整文档检查，官网正式派发缺 Token 时明确失败。收口直接使用仓内验证入口。
+- 当前 commit 与状态：基于 `9aae005`，应用版本仍为 `1.92.3+134`。验证覆盖多提交格式范围、正式补丁缺文档和官网派发失败路径。
+- 下一步待办：下一次实际 PR／正式发布按对应入口核对云端运行结果；后续业务任务沿用上方现有的成效观察口径。
+
 ## 2026-11-27 · v1.92.3 (1.92.3+134) UI 回退至 v1.92.1、保留 4 项非 UI 修复、双机实测 PASS 及日常集成 PR #71 合入收口
 
 - 已完成改动：承接归档的 [v1.92.2 方案](../archive/plans/2026-11-27-v1.92.2-全站视觉底座首页筛选详情与快速录入精修方案.md) 与 [v1.92.3 方案](../archive/plans/2026-11-27-v1.92.3-我的日历统计课程管理精修与全站验收方案.md) 递增版本至 `1.92.3+134`（`4f4e5a3`），随后按维护者实机反馈将全部 UI 改动完整回退至 `v1.92.1` 基线（`864fa86`，本地 `TZ=UTC verify_local_gate.py --mode full` `+2177 ~1` / 132 项 Python 全绿），保留 4 项非 UI 功能修复（北京时间自然日差、`showFullDeadline` 完整日期、日历说明第 3 条文案修正、课程关注 `accountEpoch` 守卫撤销）；自干净 ASCII 目录 `D:\campus-tools\build-work\cx1923-134-r2-20261127` 构建双架构原签名包 `D:\campus-tools\artifacts\cx1923-134\chaoxing-journal-1.92.3-r2.apk`（`64,607,886` B，SHA-256 `f61cf7c0bd6642097d4ab768511bf19aae98c7aaad029bc17e5118c5a6905f10`，v2 证书 `d36a5715...` / 16 KiB 对齐 / ZIP 473 条目全过），于 MuMu「学习通」（`emulator-5558`，API 35，`firstInstallTime=2026-11-04 19:05:10`）与华为真机（`MKB4C20605047402`，`HUAWEI CDY-AN00`，Android 10，`firstInstallTime=2026-11-11 22:53:16`）保数据覆盖均核对 `base.apk` 一致且 23/23 截屏（`D:\campus-tools\artifacts\cx1923-134\screenshots_r2`）经只读子代理审图 **`OVERALL: PASS`**（双机 `logcat` 0 崩溃/0 溢出）；随后按 PR `#71` 审查意见追加 `DisplayPreferences.beijingDayDiff` UTC 跨夏令时口径与 `CourseListScreen` 改检 `store.operationError`（`dba9d0c`，定向门禁 `+73` 全绿），日常集成 PR `#71`（云端 CI Run `45976367229` 全绿）已合入 `main`（`0087205`，触发 `main` CI Run `45978296798`），同步 `dev` 并归档两份方案。

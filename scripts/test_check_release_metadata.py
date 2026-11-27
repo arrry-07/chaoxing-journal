@@ -130,6 +130,32 @@ class ReleaseMetadataTests(unittest.TestCase):
         result = _run(self._repo("1.90.0+123", newline="\r\n"))
         self.assertEqual(0, result.returncode, result.stderr)
 
+    def test_marked_patch_requires_every_formal_document_even_with_allow_dev(self) -> None:
+        for path, expected in (
+            ("CHANGELOG.md", "Changelog missing"),
+            ("README.md", "README mismatch"),
+            ("docs/guides/安装与使用.md", "Install guide mismatch"),
+        ):
+            with self.subTest(path=path):
+                repo, script = _make_repo("1.92.4+135", newline="\r\n")
+                self.temp_dirs.append(repo)
+                pubspec = script.parents[1] / "pubspec.yaml"
+                with pubspec.open("a", encoding="utf-8", newline="") as stream:
+                    stream.write("# formal-release: 1.92.4+135\r\n")
+                self.assertEqual(0, _run(script, "--allow-dev").returncode)
+                (repo / path).unlink()
+                result = _run(script, "--allow-dev")
+                self.assertEqual(1, result.returncode)
+                self.assertIn(expected, result.stderr)
+
+    def test_mismatched_explicit_marker_is_rejected(self) -> None:
+        script = self._repo("1.92.4+135")
+        with (script.parents[1] / "pubspec.yaml").open("a", encoding="utf-8") as stream:
+            stream.write("# formal-release: 1.92.5+136\n")
+        result = _run(script, "--allow-dev")
+        self.assertEqual(1, result.returncode)
+        self.assertIn("Formal release marker", result.stderr)
+
     def test_dev_version_with_allow_dev_passes_when_formal_docs_stay_on_last_release(self) -> None:
         script = self._repo("1.92.1+133", formal_version="1.92.0+132")
         allowed = _run(script, "--allow-dev")
@@ -174,6 +200,8 @@ class ReleaseMetadataTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn("python3 tool/check_release_metadata.py --tag", workflow)
         self.assertIn("python3 tool/check_release_metadata.py --allow-dev", workflow)
+        self.assertIn("github.event.before", workflow)
+        self.assertIn('tool/check_changed_format.py --base "$format_base"', workflow)
         self.assertNotIn(
             'GITHUB_EVENT_NAME" == workflow_dispatch && "$GITHUB_REF" == refs/heads/dev',
             workflow,

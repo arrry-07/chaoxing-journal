@@ -169,6 +169,15 @@ def _read_version_from_pubspec(text: str) -> str:
     return match.group(1)
 
 
+def _release_mode(pubspec: str, version: ReleaseVersion, requested: str | None) -> str:
+    marks = [mark.strip() for mark in re.findall(r"^# formal-release:([^\r\n]*)", pubspec, re.M)]
+    if marks and marks != [version.raw]:
+        raise FreezeError("Formal release marker does not match pubspec version.")
+    if marks and requested == "dev":
+        raise FreezeError("Marked formal candidate cannot be checked as a dev package.")
+    return requested or ("formal" if marks or version.patch == 0 else "dev")
+
+
 def _read_app_version(text: str) -> tuple[str, int]:
     name = re.search(r"static const name = '([^']+)';", text)
     code = re.search(r"static const code = (\d+);", text)
@@ -236,11 +245,10 @@ def check_release(
     for key in ("pubspec", "app_version"):
         if not paths[key].is_file():
             raise FreezeError(f"Missing required file: {paths[key]}")
-    current = parse_version(
-        _read_version_from_pubspec(_read_text(paths["pubspec"]))
-    )
+    pubspec = _read_text(paths["pubspec"])
+    current = parse_version(_read_version_from_pubspec(pubspec))
     _check_identity(paths, current)
-    effective_mode = mode or ("formal" if current.patch == 0 else "dev")
+    effective_mode = _release_mode(pubspec, current, mode)
     _validate_mode(current, effective_mode)
     level: str | None = None
     if previous:
@@ -368,10 +376,15 @@ def apply_release(
         level = classify_update(previous_version, new)
 
     app_version_text = _read_text(paths["app_version"])
+    newline = "\r\n" if "\r\n" in current_text else "\n"
+    unmarked_pubspec = re.sub(r"^# formal-release:[^\r\n]*(?:\r?\n|$)", "", current_text, flags=re.M)
+    new_version_line = f"version: {new.raw}"
+    if mode == "formal":
+        new_version_line += f"{newline}# formal-release: {new.raw}"
     updated_pubspec, count = re.subn(
         r"^version:[^\r\n]*",
-        f"version: {new.raw}",
-        current_text,
+        new_version_line,
+        unmarked_pubspec,
         count=1,
         flags=re.M,
     )
@@ -415,7 +428,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.check:
             current, level = check_release(args.root, args.mode, args.previous)
-            effective_mode = args.mode or ("formal" if current.patch == 0 else "dev")
+            effective_mode = _release_mode(_read_text(_paths(args.root)["pubspec"]), current, args.mode)
             kind = "formal release" if effective_mode == "formal" else "dev test package"
             print(f"[PASS] Current {kind}: {current.raw}")
             if level:
