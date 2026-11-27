@@ -1806,5 +1806,94 @@ void main() {
       expect(find.text('保态子内容'), findsOneWidget);
       expect(find.text('临时子内容'), findsNothing);
     });
+
+    testWidgets(
+        'CourseListScreen search field uses inputBorder and SwitchListTile toggle supports epoch-guarded undo',
+        (tester) async {
+      final now = DateTime.utc(2026, 11, 20, 4);
+      final session = _Session('13800000001');
+      SharedPreferences.setMockInitialValues({
+        'auto_sync_interval_minutes': 0,
+      });
+      FlutterSecureStorage.setMockInitialValues({});
+      const course = CourseRef(
+        courseId: '101',
+        clazzId: '10',
+        name: '数据结构与算法',
+        folderName: '2026年秋',
+      );
+      final repo = LocalAssignmentRepository();
+      await repo.activateAccount('13800000001');
+      await repo.saveCourses(const [course], account: '13800000001');
+      await repo.activateAccount('13800000002');
+      await repo.saveCourses(const [course], account: '13800000002');
+      await repo.activateAccount('13800000001');
+      final store = _FakeStore(
+        session: session,
+        repository: repo,
+        chaoxingClient: _SwitchableClient(),
+        clock: () => now,
+      );
+      await store.restoreSession();
+      addTearDown(store.dispose);
+
+      await tester.pumpWidget(MaterialApp(
+        theme: StudyAssistantTheme.light,
+        home: CourseListScreen(store: store, clock: () => now),
+      ));
+      await tester.pumpAndSettle();
+
+      // Search field uses global inputFill & inputBorder (1.0dp, not BorderSide.none).
+      await tester.tap(find.byKey(const ValueKey('course-list-search-toggle')));
+      await tester.pumpAndSettle();
+      final searchField = tester.widget<TextField>(
+        find.byKey(const ValueKey('course-list-search')),
+      );
+      final deco = searchField.decoration!;
+      expect(deco.fillColor, JournalPalette.light.inputFill);
+      final enabledBorder = deco.enabledBorder! as OutlineInputBorder;
+      expect(enabledBorder.borderSide.color, JournalPalette.light.inputBorder);
+      expect(enabledBorder.borderSide.width, 1.0);
+
+      // Toggle follow off -> snackbar shows scope explanation + 撤销.
+      expect(store.follows('101:10'), isTrue);
+      await tester.tap(find.byType(SwitchListTile));
+      await tester.pumpAndSettle();
+      expect(store.follows('101:10'), isFalse);
+      expect(
+        find.text('已取消关注《数据结构与算法》，将从首页、日历、提醒、小组件与统计中隐藏'),
+        findsOneWidget,
+      );
+      final undoBtn = find.descendant(
+        of: find.byType(SnackBar),
+        matching: find.text('撤销'),
+      );
+      expect(undoBtn, findsOneWidget);
+
+      await tester.tap(undoBtn);
+      await tester.pumpAndSettle();
+      expect(store.follows('101:10'), isTrue);
+
+      // Toggle off again, verify re-follow copy after manual follow, then verify account switch dismisses stale undo.
+      await tester.tap(find.byType(SwitchListTile));
+      await tester.pumpAndSettle();
+      expect(store.follows('101:10'), isFalse);
+      await tester.tap(find.byType(SwitchListTile));
+      await tester.pumpAndSettle();
+      expect(store.follows('101:10'), isTrue);
+      expect(
+        find.text('已关注《数据结构与算法》，将恢复纳入首页、日历、提醒与统计'),
+        findsOneWidget,
+      );
+
+      // Account switch while snackbar is visible dismisses stale undo bar cleanly.
+      await store.loginChaoxing(
+        account: '13800000002',
+        password: 'pw',
+        agreementAccepted: true,
+      );
+      await tester.pumpAndSettle();
+      expect(find.byType(SnackBar), findsNothing);
+    });
   });
 }

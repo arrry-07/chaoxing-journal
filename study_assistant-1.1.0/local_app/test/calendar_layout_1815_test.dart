@@ -197,7 +197,11 @@ void main() {
   testWidgets('calendar supports horizontal month swipe and week collapse',
       (tester) async {
     final now = DateTime.utc(2026, 11, 18, 2);
-    final store = _Store();
+    final store = _Store()
+      ..replaceAssignmentsForTest([
+        _work('oct-item',
+            title: '十月旧课业', deadlineAt: DateTime.utc(2026, 10, 15, 2)),
+      ]);
     addTearDown(store.dispose);
     await _pump(tester, store, now: now, size: const Size(390, 840));
 
@@ -205,18 +209,37 @@ void main() {
     final viewport = find.byKey(const ValueKey('calendar-grid-viewport'));
     final fullGridSize = tester.getSize(viewport);
 
-    // Toggle week collapse: grid shrinks to a single row height.
-    await tester.tap(find.byKey(const ValueKey('calendar-week-toggle')));
+    // Toggle week collapse: grid shrinks to a single row height, visible >=48dp toggle updates copy.
+    final toggleFinder = find.byKey(const ValueKey('calendar-week-toggle'));
+    expect(find.text('收起为周视图'), findsOneWidget);
+    expect(tester.getSize(toggleFinder).height, greaterThanOrEqualTo(48));
+    await tester.tap(toggleFinder);
     await tester.pumpAndSettle();
+    expect(find.text('展开月视图'), findsOneWidget);
     final collapsedSize = tester.getSize(viewport);
     expect(collapsedSize.height, lessThan(fullGridSize.height * 0.4));
 
     // Expand back to month view and swipe left to December 2026.
-    await tester.tap(find.byKey(const ValueKey('calendar-week-toggle')));
+    await tester.tap(toggleFinder);
     await tester.pumpAndSettle();
+    expect(find.text('收起为周视图'), findsOneWidget);
     await tester.drag(find.byType(PageView), const Offset(-300, 0));
     await tester.pumpAndSettle();
     expect(find.text('2026年12月'), findsOneWidget);
+
+    // Info dialog reflects current selected-day ring copy and visible toggle.
+    await tester.tap(find.byTooltip('查看说明'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('带圆圈的是所选日期'), findsOneWidget);
+    expect(find.textContaining('鼠尾草绿'), findsNothing);
+    expect(find.textContaining('周视图/月视图切换按钮'), findsOneWidget);
+    await tester.tap(find.text('知道了'));
+    await tester.pumpAndSettle();
+
+    // Switching to month view with empty month shows '本月暂无已知日期的课业'.
+    await tester.tap(find.text('本月'));
+    await tester.pumpAndSettle();
+    expect(find.text('本月暂无已知日期的课业'), findsOneWidget);
   });
 
   testWidgets('compact and countdown preferences reach calendar cards',
@@ -394,19 +417,17 @@ void main() {
       final nextMonth = find.byTooltip('下个月');
       await tester.scrollUntilVisible(
         nextMonth,
-        -200,
+        -350,
         scrollable: find.byType(Scrollable).first,
       );
       await tester.pumpAndSettle();
       await tester.tap(nextMonth);
       await tester.pumpAndSettle();
       expect(find.text('2027年1月'), findsOneWidget);
+      await tester.dragFrom(const Offset(160, 120), const Offset(0, 350));
+      await tester.pumpAndSettle();
       final backToday = find.text('回今天');
-      await tester.scrollUntilVisible(
-        backToday,
-        -200,
-        scrollable: find.byType(Scrollable).first,
-      );
+      await tester.ensureVisible(backToday);
       await tester.pumpAndSettle();
       await tester.tap(backToday);
       await tester.pumpAndSettle();

@@ -363,7 +363,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('12月2日 · 议程'), findsOneWidget);
-    expect(find.text('所选范围没有已知日期的课业'), findsOneWidget);
+    expect(find.text('当天暂无课业'), findsOneWidget);
     expect(find.text('十二月作业'), findsNothing);
     expect(firstManual, findsNothing);
 
@@ -374,6 +374,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('本月议程'), findsOneWidget);
+    expect(find.textContaining('12月1日'), findsWidgets);
     final firstAssignment = find.text('十二月作业');
     final laterAssignment = find.text('十二月后续作业');
     await tester.scrollUntilVisible(laterAssignment, 180,
@@ -1167,7 +1168,7 @@ void main() {
     await tester.tap(jan2);
     await tester.pumpAndSettle();
     expect(find.text('1月2日 · 议程'), findsOneWidget);
-    expect(find.text('所选范围没有已知日期的课业'), findsOneWidget);
+    expect(find.text('当天暂无课业'), findsOneWidget);
 
     // Open + 记一条 and immediately cancel without saving: writes nothing.
     final quickAdd = find.byKey(const ValueKey('calendar-quick-add-entry'));

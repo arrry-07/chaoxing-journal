@@ -542,7 +542,7 @@ class _StatsScreenState extends State<StatsScreen> with WidgetsBindingObserver {
                                 if (_range != StatsTimeRange.all) ...[
                                   const SizedBox(height: 4),
                                   Text(
-                                    '${_range.label}内暂无带确定时间的课业记录，可切回“全部”查看。',
+                                    '${_range.label}内暂无带确定时间的课业记录，可切回“不限时间”查看。',
                                     style: journal.metadata,
                                   ),
                                 ],
@@ -622,6 +622,10 @@ class _StatsScreenState extends State<StatsScreen> with WidgetsBindingObserver {
                                     counts: stats.counts,
                                     colors: barColors,
                                     trackColor: journal.parchment,
+                                    overdueStripeColor: journal.isDark
+                                        ? const Color(0xFF191816)
+                                            .withValues(alpha: 0.36)
+                                        : Colors.white.withValues(alpha: 0.45),
                                     animateDuration: JournalMotion.duration(
                                       context,
                                       const Duration(milliseconds: 340),
@@ -735,6 +739,18 @@ class _StatsScreenState extends State<StatsScreen> with WidgetsBindingObserver {
         );
 
     final largeText = JournalLayout.isLargeText(context);
+    final dot = _StatusIndicatorDot(
+      color: dotColor,
+      striped: index == 2,
+      stripeColor: journal.isDark
+          ? const Color(0xFF191816).withValues(alpha: 0.42)
+          : Colors.white.withValues(alpha: 0.55),
+      borderColor: index == 2
+          ? journal.ink.withValues(alpha: 0.35)
+          : index == 3 && !journal.isDark
+              ? journal.ruleStrong
+              : null,
+    );
     final content = ConstrainedBox(
       constraints: const BoxConstraints(minHeight: 48),
       child: Padding(
@@ -744,15 +760,8 @@ class _StatsScreenState extends State<StatsScreen> with WidgetsBindingObserver {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Padding(
-                    padding: const EdgeInsets.only(top: 10),
-                    child: Container(
-                      width: 8,
-                      height: 8,
-                      decoration: BoxDecoration(
-                        color: dotColor,
-                        shape: BoxShape.circle,
-                      ),
-                    ),
+                    padding: const EdgeInsets.only(top: 9),
+                    child: dot,
                   ),
                   const SizedBox(width: 10),
                   Expanded(
@@ -786,14 +795,7 @@ class _StatsScreenState extends State<StatsScreen> with WidgetsBindingObserver {
               )
             : Row(
                 children: [
-                  Container(
-                    width: 8,
-                    height: 8,
-                    decoration: BoxDecoration(
-                      color: dotColor,
-                      shape: BoxShape.circle,
-                    ),
-                  ),
+                  dot,
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(
@@ -1118,7 +1120,7 @@ class _StatsTermScopeBarState extends State<_StatsTermScopeBar>
         CourseTermScope.currentTerm => '本学期',
         CourseTermScope.currentAcademicYear => '本学年',
         CourseTermScope.pastTerms => '往期',
-        CourseTermScope.allTerms => '全部',
+        CourseTermScope.allTerms => '全部学期',
       };
 
   @override
@@ -1304,7 +1306,8 @@ class _StatsRangeSegmentedBar extends StatelessWidget {
                     const Duration(milliseconds: 180),
                   ),
                   curve: JournalMotion.easeOut,
-                  padding: const EdgeInsets.symmetric(vertical: 6.5),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 4, vertical: 6.5),
                   decoration: BoxDecoration(
                     color: selected == range
                         ? journal.segmentThumb
@@ -1323,16 +1326,23 @@ class _StatsRangeSegmentedBar extends StatelessWidget {
                           ]
                         : null,
                   ),
-                  child: Text(
-                    range.label,
-                    textAlign: TextAlign.center,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: journal.pillLabel.copyWith(
-                      fontSize: 12.5,
-                      fontWeight:
-                          selected == range ? FontWeight.w600 : FontWeight.w500,
-                      color: selected == range ? journal.ink : journal.muted,
+                  child: Center(
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        range.label,
+                        textAlign: TextAlign.center,
+                        maxLines: 1,
+                        softWrap: false,
+                        style: journal.pillLabel.copyWith(
+                          fontSize: 12.5,
+                          fontWeight: selected == range
+                              ? FontWeight.w600
+                              : FontWeight.w500,
+                          color:
+                              selected == range ? journal.ink : journal.muted,
+                        ),
+                      ),
                     ),
                   ),
                 ),
@@ -1370,13 +1380,20 @@ class _AnimatedRatioHero extends StatelessWidget {
         return Text.rich(
           TextSpan(
             children: [
+              TextSpan(
+                text: '已完成 ',
+                style: journal.metadata.copyWith(
+                  fontSize: 13.5,
+                  color: journal.muted,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
               TextSpan(text: '$doneVal', style: journal.statHero),
               TextSpan(
                 text: ' / $total',
-                style: journal.entryTitle.copyWith(
+                style: journal.time.copyWith(
                   fontSize: 17,
                   color: journal.muted,
-                  fontFeatures: const [FontFeature.tabularFigures()],
                 ),
               ),
             ],
@@ -1392,12 +1409,14 @@ class _MultiSegmentStatsBar extends StatelessWidget {
     required this.counts,
     required this.colors,
     required this.trackColor,
+    required this.overdueStripeColor,
     required this.animateDuration,
   });
 
   final List<int> counts;
   final List<Color> colors;
   final Color trackColor;
+  final Color overdueStripeColor;
   final Duration animateDuration;
 
   @override
@@ -1429,7 +1448,7 @@ class _MultiSegmentStatsBar extends StatelessWidget {
               child: Row(
                 children: [
                   for (var i = 0; i < active.length; i++) ...[
-                    if (i > 0) const SizedBox(width: 2),
+                    if (i > 0) const SizedBox(width: 2.5),
                     Expanded(
                       flex: math.max(1, active[i].count),
                       child: TweenAnimationBuilder<double>(
@@ -1443,6 +1462,15 @@ class _MultiSegmentStatsBar extends StatelessWidget {
                             key: ValueKey('stats-bar-seg-${active[i].index}'),
                             height: 10,
                             color: colors[active[i].index],
+                            child: active[i].index == 2
+                                ? CustomPaint(
+                                    key: const ValueKey(
+                                        'stats-bar-overdue-stripes'),
+                                    painter: _DiagonalStripePainter(
+                                      stripeColor: overdueStripeColor,
+                                    ),
+                                  )
+                                : null,
                           ),
                         ),
                       ),
@@ -1456,4 +1484,79 @@ class _MultiSegmentStatsBar extends StatelessWidget {
       },
     );
   }
+}
+
+class _StatusIndicatorDot extends StatelessWidget {
+  const _StatusIndicatorDot({
+    required this.color,
+    required this.striped,
+    required this.stripeColor,
+    this.borderColor,
+  });
+
+  final Color color;
+  final bool striped;
+  final Color stripeColor;
+  final Color? borderColor;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 10,
+      height: 10,
+      decoration: BoxDecoration(
+        color: color,
+        shape: BoxShape.circle,
+        border: borderColor == null
+            ? null
+            : Border.all(color: borderColor!, width: 0.8),
+      ),
+      child: striped
+          ? ClipOval(
+              child: CustomPaint(
+                key: const ValueKey('stats-dot-overdue-stripes'),
+                painter: _DiagonalStripePainter(
+                  stripeColor: stripeColor,
+                  spacing: 4.0,
+                  strokeWidth: 1.4,
+                ),
+              ),
+            )
+          : null,
+    );
+  }
+}
+
+class _DiagonalStripePainter extends CustomPainter {
+  const _DiagonalStripePainter({
+    required this.stripeColor,
+    this.spacing = 6.0,
+    this.strokeWidth = 1.6,
+  });
+
+  final Color stripeColor;
+  final double spacing;
+  final double strokeWidth;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = stripeColor
+      ..strokeWidth = strokeWidth
+      ..style = PaintingStyle.stroke;
+    final maxExtent = size.width + size.height;
+    for (var x = -size.height; x < maxExtent; x += spacing) {
+      canvas.drawLine(
+        Offset(x, size.height),
+        Offset(x + size.height, 0),
+        paint,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(_DiagonalStripePainter oldDelegate) =>
+      oldDelegate.stripeColor != stripeColor ||
+      oldDelegate.spacing != spacing ||
+      oldDelegate.strokeWidth != strokeWidth;
 }

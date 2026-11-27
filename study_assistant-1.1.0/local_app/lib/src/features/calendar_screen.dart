@@ -731,8 +731,8 @@ class _CalendarScreenState extends State<CalendarScreen>
                             items: [
                               '蓝点表示作业或课堂任务，橙点表示考试或考试通知，绿点表示个人待办；超过 3 项时显示“+”。',
                               '考试按开考日展示，作业与课堂任务按截止日展示，均使用北京时间。',
-                              '今天使用蓝色加粗数字标记，选中日期显示鼠尾草绿浅底圆圈。',
-                              '左右滑动可切换月份；上滑或轻点底部横条可收拢为单周视图。',
+                              '今天使用蓝色加粗数字标记，带圆圈的是所选日期。',
+                              '左右滑动可切换月份；可轻点底部周视图/月视图切换按钮或上下滑动切换。',
                             ],
                           );
 
@@ -934,7 +934,7 @@ class _CalendarScreenState extends State<CalendarScreen>
                       ),
                       Semantics(
                         button: true,
-                        label: _weekCollapsed ? '展开月视图' : '收拢为周视图',
+                        label: _weekCollapsed ? '展开月视图' : '收起为周视图',
                         onTap: () => _toggleWeekCollapse(),
                         excludeSemantics: true,
                         child: GestureDetector(
@@ -950,16 +950,39 @@ class _CalendarScreenState extends State<CalendarScreen>
                             key: const ValueKey('calendar-week-toggle'),
                             borderRadius: BorderRadius.circular(12),
                             onTap: () => _toggleWeekCollapse(),
-                            child: SizedBox(
-                              height: 28,
-                              width: double.infinity,
-                              child: Center(
-                                child: Container(
-                                  width: 28,
-                                  height: 3.5,
-                                  decoration: BoxDecoration(
-                                    color: journal.ruleStrong,
-                                    borderRadius: BorderRadius.circular(2),
+                            child: ConstrainedBox(
+                              constraints: const BoxConstraints(minHeight: 48),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 8,
+                                ),
+                                child: Center(
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Icon(
+                                        _weekCollapsed
+                                            ? Icons.keyboard_arrow_down_rounded
+                                            : Icons.keyboard_arrow_up_rounded,
+                                        size: 18,
+                                        color: journal.muted,
+                                      ),
+                                      const SizedBox(width: 4),
+                                      Flexible(
+                                        child: Text(
+                                          _weekCollapsed ? '展开月视图' : '收起为周视图',
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: journal.metadata.copyWith(
+                                            fontSize: 12.5,
+                                            color: journal.muted,
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ),
                               ),
@@ -1045,7 +1068,9 @@ class _CalendarScreenState extends State<CalendarScreen>
                           ? '本次读取失败，请到同步详情重试'
                           : widget.store.lastSyncAt == null && all.isEmpty
                               ? '尚未获取作业，请先同步'
-                              : '所选范围没有已知日期的课业',
+                              : selected != null
+                                  ? '当天暂无课业'
+                                  : '本月暂无已知日期的课业',
                       style: journal.metadata.copyWith(fontSize: 13.5),
                     ),
                   ],
@@ -1063,7 +1088,7 @@ class _CalendarScreenState extends State<CalendarScreen>
                         now: now,
                         compact: widget.store.display.compact,
                         countdown: widget.store.display.countdown,
-                        showFullDeadline: false,
+                        showFullDeadline: selected == null,
                         showDivider: false,
                         contentPadding:
                             const EdgeInsets.symmetric(horizontal: 14),
