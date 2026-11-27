@@ -16,55 +16,6 @@ import 'home_manual_sections.dart';
 import 'journal_grouped_card.dart';
 import 'journal_pixel_buddy.dart';
 
-class HomeAmbientGlowPainter extends CustomPainter {
-  const HomeAmbientGlowPainter({
-    required this.primaryGlow,
-    required this.warmGlow,
-    required this.fade,
-  });
-
-  final Color primaryGlow;
-  final Color warmGlow;
-  final double fade;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    if (size.isEmpty || fade <= 0.01) return;
-
-    final primaryCenter = Offset(size.width * 0.16, -24);
-    final primaryRadius = size.width * 0.72;
-    final primaryPaint = Paint()
-      ..shader = RadialGradient(
-        colors: [
-          primaryGlow.withValues(alpha: primaryGlow.a * fade),
-          primaryGlow.withValues(alpha: 0),
-        ],
-      ).createShader(
-        Rect.fromCircle(center: primaryCenter, radius: primaryRadius),
-      );
-    canvas.drawCircle(primaryCenter, primaryRadius, primaryPaint);
-
-    final warmCenter = Offset(size.width * 0.88, 12);
-    final warmRadius = size.width * 0.56;
-    final warmPaint = Paint()
-      ..shader = RadialGradient(
-        colors: [
-          warmGlow.withValues(alpha: warmGlow.a * fade),
-          warmGlow.withValues(alpha: 0),
-        ],
-      ).createShader(
-        Rect.fromCircle(center: warmCenter, radius: warmRadius),
-      );
-    canvas.drawCircle(warmCenter, warmRadius, warmPaint);
-  }
-
-  @override
-  bool shouldRepaint(covariant HomeAmbientGlowPainter oldDelegate) =>
-      oldDelegate.primaryGlow != primaryGlow ||
-      oldDelegate.warmGlow != warmGlow ||
-      oldDelegate.fade != fade;
-}
-
 class HomeDayHeading extends StatelessWidget {
   const HomeDayHeading({
     super.key,
@@ -372,13 +323,10 @@ class HomeTitleHeaderRow extends StatelessWidget {
     required this.reduceMotion,
     required this.recoveryActive,
     required this.syncErrorOrPending,
-    required this.themeMode,
     required this.buddyMood,
     required this.homeSnapshot,
     required this.stageAnchor,
-    required this.onOpenAgenda,
     required this.onRefresh,
-    required this.onCycleTheme,
     required this.onOpenMoreMenu,
   });
 
@@ -388,13 +336,10 @@ class HomeTitleHeaderRow extends StatelessWidget {
   final bool reduceMotion;
   final bool recoveryActive;
   final bool syncErrorOrPending;
-  final JournalThemeMode themeMode;
   final JournalPixelBuddyMood buddyMood;
   final ClawdPageContextSnapshot homeSnapshot;
   final ValueNotifier<ClawdStageAnchor> stageAnchor;
-  final VoidCallback onOpenAgenda;
   final VoidCallback onRefresh;
-  final VoidCallback onCycleTheme;
   final void Function(BuildContext anchorContext) onOpenMoreMenu;
 
   @override
@@ -423,19 +368,6 @@ class HomeTitleHeaderRow extends StatelessWidget {
         );
 
     final actionsRow = Row(mainAxisSize: MainAxisSize.min, children: [
-      if (!recoveryActive)
-        action(
-          '待办',
-          IconButton(
-            key: const ValueKey('home-agenda-entry'),
-            tooltip: '个人待办与考试',
-            padding: const EdgeInsets.only(bottom: 12),
-            iconSize: 21,
-            constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
-            onPressed: onOpenAgenda,
-            icon: const Icon(Icons.checklist_rounded),
-          ),
-        ),
       action(
         '刷新',
         IconButton(
@@ -459,24 +391,6 @@ class HomeTitleHeaderRow extends StatelessWidget {
               : const Icon(Icons.sync_rounded),
         ),
       ),
-      if (!recoveryActive)
-        action(
-          '主题',
-          IconButton(
-            key: const ValueKey('home-theme-toggle'),
-            enableFeedback: false,
-            padding: const EdgeInsets.only(bottom: 12),
-            iconSize: 21,
-            constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
-            tooltip: '切换主题（当前：${themeMode.label}）',
-            icon: Icon(switch (themeMode) {
-              JournalThemeMode.system => Icons.brightness_auto_outlined,
-              JournalThemeMode.light => Icons.light_mode_outlined,
-              JournalThemeMode.dark => Icons.dark_mode_outlined,
-            }),
-            onPressed: onCycleTheme,
-          ),
-        ),
       action(
         '更多',
         Builder(
@@ -597,12 +511,16 @@ class HomeSyncStatusRow extends StatelessWidget {
                     ? Icons.info_outline_rounded
                     : Icons.schedule_rounded;
         final statusColor = sync.gentle
-            ? journal.muted
+            ? journal.subtle
             : syncPhase == SyncPhase.failed
                 ? journal.berry
                 : syncPhase == SyncPhase.partial
                     ? journal.ochre
-                    : journal.muted;
+                    : journal.subtle;
+        final statusTextStyle = journal.metadata.copyWith(
+          fontSize: 12,
+          color: statusColor,
+        );
         final VoidCallback? onSyncTap =
             sync.gentle && sync.action == HomeSyncAction.retry
                 ? (busy ? null : onRetrySync)
@@ -628,21 +546,64 @@ class HomeSyncStatusRow extends StatelessWidget {
           return width;
         }
 
-        final summaryStyle = journal.metadata.copyWith(
-          color: nearDueActive || dueSummary.dueToday > 0
-              ? journal.accent
-              : journal.muted,
-          fontWeight: nearDueActive || dueSummary.dueToday > 0
-              ? FontWeight.w600
-              : FontWeight.w400,
+        double measureSpanWidth(InlineSpan span) {
+          final painter = TextPainter(
+            text: span,
+            textScaler: scaler,
+            textDirection: direction,
+          )..layout();
+          final width = painter.width.ceilToDouble();
+          painter.dispose();
+          return width;
+        }
+
+        final summaryHighlighted = nearDueActive || dueSummary.dueToday > 0;
+        final summaryTextStyle = journal.metadata.copyWith(
+          fontSize: 13,
+          color: summaryHighlighted ? journal.accent : journal.ink,
+          fontWeight: summaryHighlighted ? FontWeight.w600 : FontWeight.w500,
         );
-        final leftWidth = 14.5 +
+        final summaryNumberStyle = summaryTextStyle.copyWith(
+          fontFamily: Journal.uiFamily,
+          fontWeight: FontWeight.w600,
+          fontFeatures: const [FontFeature.tabularFigures()],
+        );
+
+        InlineSpan buildSummarySpan(String text) {
+          final matches = RegExp(r'\d+').allMatches(text);
+          if (matches.isEmpty) {
+            return TextSpan(text: text, style: summaryTextStyle);
+          }
+          final children = <InlineSpan>[];
+          var cursor = 0;
+          for (final match in matches) {
+            if (match.start > cursor) {
+              children.add(TextSpan(
+                text: text.substring(cursor, match.start),
+                style: summaryTextStyle,
+              ));
+            }
+            children.add(
+              TextSpan(text: match.group(0), style: summaryNumberStyle),
+            );
+            cursor = match.end;
+          }
+          if (cursor < text.length) {
+            children.add(
+              TextSpan(text: text.substring(cursor), style: summaryTextStyle),
+            );
+          }
+          return TextSpan(children: children, style: summaryTextStyle);
+        }
+
+        final summarySpan = buildSummarySpan(summaryLabel);
+        final leftWidth = 13.0 +
             5.0 +
-            measureWidth(effectiveStatusText, journal.metadata) +
-            (showChevron ? 18.0 : 0.0) +
+            measureWidth(effectiveStatusText, statusTextStyle) +
+            (showChevron ? 16.0 : 0.0) +
             4.0;
         final rightWidth = showDueSummary
-            ? measureWidth(summaryLabel, summaryStyle) + 4.0
+            ? measureSpanWidth(summarySpan) + (summaryHighlighted ? 18.0 : 8.0)
             : 0.0;
         final fitsSingleRow = !showDueSummary ||
             (leftWidth + rightWidth + 6.0 <= constraints.maxWidth);
@@ -668,8 +629,8 @@ class HomeSyncStatusRow extends StatelessWidget {
                 if (showChevron)
                   Icon(
                     Icons.chevron_right_rounded,
-                    size: 18,
-                    color: journal.muted,
+                    size: 16,
+                    color: journal.subtle,
                   ),
               ],
             ),
@@ -700,12 +661,12 @@ class HomeSyncStatusRow extends StatelessWidget {
                               journalBuddySyncPhrase(syncStage, tick);
                           return buildStatusContent(
                             leading: SizedBox(
-                              width: 14.5,
+                              width: 13.0,
                               child: Center(
                                 child: ExcludeSemantics(
                                   child: Text(
                                     glyph,
-                                    style: journal.metadata.copyWith(
+                                    style: statusTextStyle.copyWith(
                                       color: journal.accent,
                                       fontWeight: FontWeight.w600,
                                       height: 1.0,
@@ -715,15 +676,15 @@ class HomeSyncStatusRow extends StatelessWidget {
                               ),
                             ),
                             text: phrase,
-                            style: journal.metadata,
+                            style: statusTextStyle,
                           );
                         },
                       )
                     : buildStatusContent(
                         leading:
-                            Icon(statusIcon, size: 14.5, color: statusColor),
+                            Icon(statusIcon, size: 13.0, color: statusColor),
                         text: statusText,
-                        style: journal.metadata,
+                        style: statusTextStyle,
                       ),
               ),
             ),
@@ -737,7 +698,7 @@ class HomeSyncStatusRow extends StatelessWidget {
                 child: InkWell(
                   key: const ValueKey('home-due-summary'),
                   onTap: onToggleNearDueFilter,
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(12),
                   child: ConstrainedBox(
                     constraints: const BoxConstraints(minHeight: 40),
                     child: Padding(
@@ -748,7 +709,28 @@ class HomeSyncStatusRow extends StatelessWidget {
                         child: ExcludeSemantics(
                           child: Center(
                             widthFactor: 1,
-                            child: Text(summaryLabel, style: summaryStyle),
+                            child: Container(
+                              padding: summaryHighlighted
+                                  ? const EdgeInsets.symmetric(
+                                      horizontal: 7,
+                                      vertical: 2,
+                                    )
+                                  : const EdgeInsets.symmetric(
+                                      horizontal: 2,
+                                      vertical: 2,
+                                    ),
+                              decoration: summaryHighlighted
+                                  ? BoxDecoration(
+                                      color: journal.sage,
+                                      borderRadius: BorderRadius.circular(12),
+                                      border: Border.all(
+                                        color: journal.sageBorder,
+                                        width: 0.6,
+                                      ),
+                                    )
+                                  : null,
+                              child: Text.rich(summarySpan),
+                            ),
                           ),
                         ),
                       ),
@@ -947,13 +929,11 @@ class HomeSliverSyncStatus extends StatelessWidget {
 
 List<Widget> buildHomeSliverActions(
   BuildContext context, {
-  required JournalThemeMode themeMode,
   required bool recoveryActive,
   required bool busy,
   required VoidCallback onAddManual,
-  required VoidCallback onOpenAgenda,
   required VoidCallback onRefresh,
-  required VoidCallback onCycleTheme,
+  required void Function(BuildContext anchorContext) onOpenMoreMenu,
 }) {
   final journal = Journal.of(context);
   return [
@@ -964,14 +944,6 @@ List<Widget> buildHomeSliverActions(
         iconSize: 20,
         onPressed: onAddManual,
         icon: const Icon(Icons.add_rounded),
-      ),
-    if (!recoveryActive)
-      IconButton(
-        key: const ValueKey('home-sliver-agenda-entry'),
-        tooltip: '个人待办与考试',
-        iconSize: 20,
-        onPressed: onOpenAgenda,
-        icon: const Icon(Icons.checklist_rounded),
       ),
     IconButton(
       tooltip: '刷新作业',
@@ -988,18 +960,15 @@ List<Widget> buildHomeSliverActions(
             )
           : const Icon(Icons.sync_rounded),
     ),
-    if (!recoveryActive)
-      IconButton(
-        enableFeedback: false,
-        tooltip: '切换主题',
+    Builder(
+      builder: (moreContext) => IconButton(
+        key: const ValueKey('home-sliver-more-menu'),
+        tooltip: '更多',
         iconSize: 20,
-        onPressed: onCycleTheme,
-        icon: Icon(switch (themeMode) {
-          JournalThemeMode.system => Icons.brightness_auto_outlined,
-          JournalThemeMode.light => Icons.light_mode_outlined,
-          JournalThemeMode.dark => Icons.dark_mode_outlined,
-        }),
+        onPressed: () => onOpenMoreMenu(moreContext),
+        icon: const Icon(Icons.more_horiz_rounded),
       ),
+    ),
   ];
 }
 
@@ -1014,8 +983,6 @@ class HomeHeaderSection extends StatelessWidget {
     required this.recoveryItemCount,
     required this.syncErrorOrPending,
     required this.displayPrefs,
-    required this.accountEpoch,
-    required this.account,
     required this.buddyMood,
     required this.homeSnapshot,
     required this.stageAnchor,
@@ -1038,23 +1005,21 @@ class HomeHeaderSection extends StatelessWidget {
     required this.courseOptions,
     required this.syncProgressLabel,
     required this.hasTimelineItems,
-    required this.onOpenAgenda,
     required this.onRefresh,
     required this.onRetrySync,
     required this.onOpenSyncIssues,
     required this.onToggleNearDueFilter,
-    required this.onCycleTheme,
     required this.onOpenMoreMenu,
     required this.onExitRecoveryScope,
     required this.onOpenPlan,
     required this.onToggleUpcomingExam,
     required this.onOpenFilters,
-    required this.onSelectSortOrder,
     required this.onAddManual,
     required this.onClearQuery,
     required this.onClearType,
     required this.onClearDeadline,
     required this.onClearCourse,
+    required this.onResetSortOrder,
     required this.onResetAllFilters,
   });
 
@@ -1066,8 +1031,6 @@ class HomeHeaderSection extends StatelessWidget {
   final int recoveryItemCount;
   final bool syncErrorOrPending;
   final DisplayPreferences displayPrefs;
-  final int accountEpoch;
-  final String? account;
   final JournalPixelBuddyMood buddyMood;
   final ClawdPageContextSnapshot homeSnapshot;
   final ValueNotifier<ClawdStageAnchor> stageAnchor;
@@ -1090,32 +1053,32 @@ class HomeHeaderSection extends StatelessWidget {
   final List<HomeCourseFilterOption> courseOptions;
   final String syncProgressLabel;
   final bool hasTimelineItems;
-  final VoidCallback onOpenAgenda;
   final VoidCallback onRefresh;
   final VoidCallback onRetrySync;
   final VoidCallback onOpenSyncIssues;
   final VoidCallback onToggleNearDueFilter;
-  final VoidCallback onCycleTheme;
   final void Function(BuildContext anchorContext) onOpenMoreMenu;
   final VoidCallback onExitRecoveryScope;
   final VoidCallback onOpenPlan;
   final VoidCallback onToggleUpcomingExam;
   final VoidCallback onOpenFilters;
-  final Future<void> Function(
-    HomeSortOrder order,
-    int openingEpoch,
-    String? openingAccount,
-  ) onSelectSortOrder;
   final VoidCallback onAddManual;
   final VoidCallback onClearQuery;
   final VoidCallback onClearType;
   final VoidCallback onClearDeadline;
   final VoidCallback onClearCourse;
+  final VoidCallback onResetSortOrder;
   final VoidCallback onResetAllFilters;
 
   @override
   Widget build(BuildContext context) {
     final recoveryActive = recoveryLabel != null;
+    final activeFilterCount = (query.trim().isNotEmpty ? 1 : 0) +
+        (typeFilter != AssignmentTypeFilter.all ? 1 : 0) +
+        (deadlineFilter != AssignmentDeadlineFilter.all ? 1 : 0) +
+        (courseKey != null ? 1 : 0);
+    final showSummaryBar =
+        filtersActive || sortOrder != HomeSortOrder.deadlineAsc;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -1126,13 +1089,10 @@ class HomeHeaderSection extends StatelessWidget {
           reduceMotion: reduceMotion,
           recoveryActive: recoveryActive,
           syncErrorOrPending: syncErrorOrPending,
-          themeMode: displayPrefs.themeMode,
           buddyMood: buddyMood,
           homeSnapshot: homeSnapshot,
           stageAnchor: stageAnchor,
-          onOpenAgenda: onOpenAgenda,
           onRefresh: onRefresh,
-          onCycleTheme: onCycleTheme,
           onOpenMoreMenu: onOpenMoreMenu,
         ),
         const SizedBox(height: 2),
@@ -1181,31 +1141,29 @@ class HomeHeaderSection extends StatelessWidget {
           const SizedBox(height: 6),
           HomeActionBar(
             filtersActive: filtersActive,
-            sortOrder: sortOrder,
-            displayPrefs: displayPrefs,
-            accountEpoch: accountEpoch,
-            account: account,
+            activeFilterCount: activeFilterCount,
             onOpenFilters: onOpenFilters,
-            onSelectSortOrder: onSelectSortOrder,
             onAddManual: onAddManual,
           ),
           AnimatedSize(
             duration: JournalLayout.motionDuration(context),
             curve: Curves.easeOutCubic,
             alignment: Alignment.topCenter,
-            child: filtersActive
+            child: showSummaryBar
                 ? Padding(
-                    padding: const EdgeInsets.only(top: 8),
+                    padding: const EdgeInsets.only(top: 4),
                     child: ActiveFilterSummaryBar(
                       query: query,
                       typeFilter: typeFilter,
                       deadlineFilter: deadlineFilter,
                       courseKey: courseKey,
+                      sortOrder: sortOrder,
                       options: courseOptions,
                       onClearQuery: onClearQuery,
                       onClearType: onClearType,
                       onClearDeadline: onClearDeadline,
                       onClearCourse: onClearCourse,
+                      onResetSort: onResetSortOrder,
                       onResetAll: onResetAllFilters,
                     ),
                   )

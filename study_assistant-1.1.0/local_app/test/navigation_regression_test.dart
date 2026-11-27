@@ -95,20 +95,26 @@ void main() {
 
     Color? homeHeadingColor() =>
         tester.widget<Text>(find.text('课业手记')).style?.color;
-    final toggle = find.byKey(const ValueKey('home-theme-toggle'));
-    await tester.tap(toggle);
+    final moreMenu = find.byKey(const ValueKey('home-more-menu'));
+    Future<void> cycleThemeFromMenu() async {
+      await tester.tap(moreMenu);
+      await tester.pumpAndSettle();
+      await tester.tap(find.textContaining('切换主题（当前：'));
+    }
+
+    await cycleThemeFromMenu();
     await tester.pump();
     // Mid-transition lerp must interpolate cleanly without TextStyle assertions.
     await tester.pump(const Duration(milliseconds: 80));
     expect(tester.takeException(), isNull);
     await tester.pumpAndSettle();
     expect(homeHeadingColor(), JournalPalette.dark.ink);
-    expect(Theme.of(tester.element(toggle)).scaffoldBackgroundColor,
+    expect(Theme.of(tester.element(moreMenu)).scaffoldBackgroundColor,
         JournalPalette.dark.paper);
-    await tester.tap(toggle);
+    await cycleThemeFromMenu();
     await tester.pumpAndSettle();
     expect(homeHeadingColor(), Journal.ink);
-    await tester.tap(toggle);
+    await cycleThemeFromMenu();
     await tester.pumpAndSettle();
     expect(store.display.themeMode, JournalThemeMode.system);
     expect(homeHeadingColor(), Journal.ink);

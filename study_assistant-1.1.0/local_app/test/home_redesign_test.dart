@@ -75,10 +75,6 @@ Assignment work(int i,
 Future<void> tapSheetOption(WidgetTester tester, String label,
     {Key? key}) async {
   final target = key == null ? find.text(label) : find.byKey(key);
-  if (label == '应用') {
-    await tester.testTextInput.receiveAction(TextInputAction.done);
-    await tester.pumpAndSettle();
-  }
   await tester.ensureVisible(target);
   await tester.pumpAndSettle();
   await tester.tap(target);
@@ -159,14 +155,14 @@ void main() {
     expect(find.text('English Essay'), findsOneWidget);
     expect(find.text('高等数学练习'), findsNothing);
 
-    await t.tap(find.text('已筛选'));
+    await t.tap(find.text('搜索与筛选 (1)'));
     await t.pumpAndSettle();
     await tapSheetOption(t, '已逾期', key: const ValueKey('deadline-overdue'));
     await tapSheetOption(t, '应用');
     expect(find.text('没有符合搜索、类型或期限条件的记录'), findsOneWidget);
     expect(find.text('English Essay'), findsNothing);
 
-    await t.tap(find.text('已筛选'));
+    await t.tap(find.text('搜索与筛选 (2)'));
     await t.pumpAndSettle();
     await t.enterText(find.byType(TextField), '');
     await tapSheetOption(t, '应用');
@@ -174,7 +170,7 @@ void main() {
     expect(find.text('逾期的实验报告'), findsOneWidget);
     expect(find.text('待确认作业'), findsNothing);
 
-    await t.tap(find.text('已筛选'));
+    await t.tap(find.text('搜索与筛选 (1)'));
     await t.pumpAndSettle();
     await tapSheetOption(t, '未逾期', key: const ValueKey('deadline-notExpired'));
     await tapSheetOption(t, '应用');
@@ -183,7 +179,7 @@ void main() {
     expect(find.text('逾期的实验报告'), findsNothing);
     expect(find.text('待确认作业'), findsNothing);
 
-    await t.tap(find.text('已筛选'));
+    await t.tap(find.text('搜索与筛选 (1)'));
     await t.pumpAndSettle();
     await tapSheetOption(t, '全部', key: const ValueKey('deadline-all'));
     await tapSheetOption(t, '应用');
@@ -195,7 +191,8 @@ void main() {
     expect(find.text('待确认作业'), findsOneWidget);
     expect(find.text('提交状态未知'), findsWidgets);
     expect(find.text('需要确认'), findsNothing);
-    await t.scrollUntilVisible(find.byTooltip('个人待办与考试'), -180);
+    await t.scrollUntilVisible(
+        find.byKey(const ValueKey('home-more-menu')), -180);
 
     s.testEpoch++;
     s.homeFilters = const HomeFilters();
@@ -228,21 +225,22 @@ void main() {
 
     await t.tap(find.text('搜索与筛选'));
     await t.pumpAndSettle();
-    expect(find.text('搜索、筛选与排序'), findsOneWidget);
+    expect(
+        find.byKey(const ValueKey('home-filter-drag-handle')), findsOneWidget);
+    expect(find.text('作业按截止、考试按开考，逾期始终置底'), findsOneWidget);
     for (final label in [
-      '时间：近到远（考试按开考）',
-      '时间：远到近（考试按开考）',
+      '时间近到远',
+      '时间远到近',
       '按课程',
     ]) {
       expect(find.text(label), findsOneWidget);
     }
-    await tapSheetOption(t, '时间：远到近（考试按开考）');
+    await tapSheetOption(t, '时间远到近');
     await tapSheetOption(t, '应用');
 
     expect(s.homeFilters.sortOrder, HomeSortOrder.deadlineDesc);
-    expect(find.byKey(const ValueKey('current-home-sort')), findsOneWidget);
-    expect(find.text('时间远到近'), findsOneWidget);
-    expect(find.text('已筛选'), findsNothing);
+    expect(find.byKey(const ValueKey('current-home-sort')), findsNothing);
+    expect(find.text('排序：时间远到近'), findsOneWidget);
     expect(find.text('搜索与筛选'), findsOneWidget);
     expect(
         t
@@ -269,10 +267,10 @@ void main() {
     await t.pumpAndSettle();
     await t.enterText(find.byType(TextField), '不存在');
     await tapSheetOption(t, '应用');
-    expect(find.text('已筛选'), findsOneWidget);
+    expect(find.text('搜索与筛选 (1)'), findsOneWidget);
     expect(find.text('没有符合搜索、类型或期限条件的记录'), findsOneWidget);
 
-    await t.tap(find.text('清除搜索与筛选条件'));
+    await t.tap(find.widgetWithText(FilledButton, '清空条件'));
     await t.pumpAndSettle();
     expect(s.homeFilters.query, '');
     expect(s.homeFilters.sortOrder, HomeSortOrder.deadlineDesc);

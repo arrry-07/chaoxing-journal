@@ -286,6 +286,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         final showTabBar = AppShell.primaryTabPaths.contains(location);
         final canPopRoute = router.canPop();
         final updates = AppUpdateScope.maybeOf(context);
+        final journal = Journal.of(context);
 
         return ClawdCompanionScope(
           controller: _clawdController,
@@ -295,66 +296,72 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
               if (didPop) return;
               unawaited(_handleRootBack(router));
             },
-            child: Scaffold(
-              extendBody: showTabBar,
-              body: SafeArea(bottom: !showTabBar, child: widget.child),
-              bottomNavigationBar: SafeArea(
-                top: false,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    AnimatedBuilder(
-                      animation: widget.assignmentStore,
-                      builder: (context, _) {
-                        final message =
-                            widget.assignmentStore.returnCheckMessage;
-                        if (message == null) return const SizedBox.shrink();
-                        final epoch = widget.assignmentStore.accountEpoch;
-                        return TimedReturnCheck(
-                          key: ValueKey((epoch, message)),
-                          message: message,
-                          onDismiss: () {
-                            if (widget.assignmentStore.accountEpoch == epoch &&
-                                widget.assignmentStore.returnCheckMessage ==
-                                    message) {
-                              widget.assignmentStore.dismissReturnCheck();
-                            }
-                          },
-                        );
-                      },
-                    ),
-                    if (updates != null)
-                      UpdateDownloadBanner(controller: updates),
-                    AnimatedSwitcher(
-                      duration: JournalMotion.duration(
-                        context,
-                        const Duration(milliseconds: 200),
+            child: AnnotatedRegion<SystemUiOverlayStyle>(
+              value: StudyAssistantTheme.systemOverlayStyle(journal),
+              child: Scaffold(
+                extendBody: showTabBar,
+                body: SafeArea(bottom: !showTabBar, child: widget.child),
+                bottomNavigationBar: SafeArea(
+                  top: false,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      AnimatedBuilder(
+                        animation: widget.assignmentStore,
+                        builder: (context, _) {
+                          final message =
+                              widget.assignmentStore.returnCheckMessage;
+                          if (message == null) return const SizedBox.shrink();
+                          final epoch = widget.assignmentStore.accountEpoch;
+                          return TimedReturnCheck(
+                            key: ValueKey((epoch, message)),
+                            message: message,
+                            onDismiss: () {
+                              if (widget.assignmentStore.accountEpoch ==
+                                      epoch &&
+                                  widget.assignmentStore.returnCheckMessage ==
+                                      message) {
+                                widget.assignmentStore.dismissReturnCheck();
+                              }
+                            },
+                          );
+                        },
                       ),
-                      // Leaving a primary tab removes the bar at once: an outgoing
-                      // bar would keep reserving layout height for 200ms and then
-                      // make the pushed page jump when it finally disappeared.
-                      reverseDuration: Duration.zero,
-                      switchInCurve: JournalMotion.easeOut,
-                      switchOutCurve: JournalMotion.easeOut,
-                      transitionBuilder: (child, animation) => SlideTransition(
-                        position: Tween<Offset>(
-                          begin: const Offset(0, 0.35),
-                          end: Offset.zero,
-                        ).animate(animation),
-                        child: FadeTransition(opacity: animation, child: child),
+                      if (updates != null)
+                        UpdateDownloadBanner(controller: updates),
+                      AnimatedSwitcher(
+                        duration: JournalMotion.duration(
+                          context,
+                          const Duration(milliseconds: 200),
+                        ),
+                        // Leaving a primary tab removes the bar at once: an outgoing
+                        // bar would keep reserving layout height for 200ms and then
+                        // make the pushed page jump when it finally disappeared.
+                        reverseDuration: Duration.zero,
+                        switchInCurve: JournalMotion.easeOut,
+                        switchOutCurve: JournalMotion.easeOut,
+                        transitionBuilder: (child, animation) =>
+                            SlideTransition(
+                          position: Tween<Offset>(
+                            begin: const Offset(0, 0.35),
+                            end: Offset.zero,
+                          ).animate(animation),
+                          child:
+                              FadeTransition(opacity: animation, child: child),
+                        ),
+                        child: showTabBar
+                            ? JournalFloatingNavBar(
+                                key: const ValueKey('journal-floating-nav'),
+                                selectedIndex: _indexFor(location),
+                                onSelected: (index) =>
+                                    unawaited(_selectDestination(index)),
+                              )
+                            : const SizedBox.shrink(
+                                key: ValueKey('journal-floating-nav-hidden'),
+                              ),
                       ),
-                      child: showTabBar
-                          ? JournalFloatingNavBar(
-                              key: const ValueKey('journal-floating-nav'),
-                              selectedIndex: _indexFor(location),
-                              onSelected: (index) =>
-                                  unawaited(_selectDestination(index)),
-                            )
-                          : const SizedBox.shrink(
-                              key: ValueKey('journal-floating-nav-hidden'),
-                            ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -469,6 +476,19 @@ class StudyAssistantTheme {
   static final light = _build(JournalPalette.light, Brightness.light);
   static final dark = _build(JournalPalette.dark, Brightness.dark);
 
+  static SystemUiOverlayStyle systemOverlayStyle(JournalPalette journal) =>
+      SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness:
+            journal.isDark ? Brightness.light : Brightness.dark,
+        statusBarBrightness:
+            journal.isDark ? Brightness.dark : Brightness.light,
+        systemNavigationBarColor: journal.paper,
+        systemNavigationBarIconBrightness:
+            journal.isDark ? Brightness.light : Brightness.dark,
+        systemNavigationBarContrastEnforced: false,
+      );
+
   static ThemeData _build(JournalPalette journal, Brightness brightness) {
     final baseScheme = ColorScheme.fromSeed(
       seedColor: journal.accent,
@@ -540,6 +560,7 @@ class StudyAssistantTheme {
         backgroundColor: journal.paper,
         foregroundColor: journal.ink,
         titleTextStyle: journal.pageTitle,
+        systemOverlayStyle: systemOverlayStyle(journal),
       ),
       cardTheme: CardThemeData(
         color: journal.sheet,
@@ -614,18 +635,40 @@ class StudyAssistantTheme {
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: journal.sheet,
+        fillColor: journal.inputFill,
+        hintStyle: journal.metadata.copyWith(color: journal.subtle),
+        labelStyle: journal.metadata.copyWith(color: journal.muted),
+        floatingLabelStyle: journal.metadata.copyWith(color: journal.accent),
+        errorStyle: journal.metadata.copyWith(
+          color: journal.berry,
+          fontSize: 12,
+        ),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
-          borderSide: BorderSide(color: journal.cardBorder, width: 0.8),
+          borderSide: BorderSide(color: journal.inputBorder, width: 1.0),
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
-          borderSide: BorderSide(color: journal.cardBorder, width: 0.8),
+          borderSide: BorderSide(color: journal.inputBorder, width: 1.0),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
-          borderSide: BorderSide(color: journal.accent, width: 1.2),
+          borderSide: BorderSide(color: journal.accent, width: 1.5),
+        ),
+        errorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide(color: journal.berry, width: 1.2),
+        ),
+        focusedErrorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide(color: journal.berry, width: 1.5),
+        ),
+        disabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide(
+            color: journal.inputBorderDisabled,
+            width: 1.0,
+          ),
         ),
       ),
       bottomSheetTheme: BottomSheetThemeData(

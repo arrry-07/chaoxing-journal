@@ -1,5 +1,3 @@
-import 'dart:ui' show Tristate;
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -847,19 +845,21 @@ void main() {
 
       await tester.tap(find.text('搜索与筛选'));
       await tester.pumpAndSettle();
-      expect(find.text('搜索、筛选与排序'), findsOneWidget);
+      expect(find.byKey(const ValueKey('home-filter-drag-handle')),
+          findsOneWidget);
+      expect(find.text('作业按截止、考试按开考，逾期始终置底'), findsOneWidget);
       expect(
           tester
-              .widget<RadioGroup<HomeSortOrder>>(
-                  find.byType(RadioGroup<HomeSortOrder>))
-              .groupValue,
-          HomeSortOrder.deadlineAsc);
+              .widget<ChoiceChip>(
+                  find.byKey(const ValueKey('sort-deadlineAsc')))
+              .selected,
+          isTrue);
       await tester.tap(find.byKey(const ValueKey('sort-deadlineDesc')));
       await tester.pumpAndSettle();
       await tester.tap(find.text('取消'));
       await tester.pumpAndSettle();
       expect(store.homeFilters.sortOrder, HomeSortOrder.deadlineAsc);
-      expect(find.text('时间近到远'), findsOneWidget);
+      expect(find.text('排序：时间远到近'), findsNothing);
 
       await tester.tap(find.text('搜索与筛选'));
       await tester.pumpAndSettle();
@@ -868,74 +868,51 @@ void main() {
       await tester.tap(find.text('应用'));
       await tester.pumpAndSettle();
       expect(store.homeFilters.sortOrder, HomeSortOrder.deadlineDesc);
-      expect(find.text('时间远到近'), findsOneWidget);
+      expect(find.text('排序：时间远到近'), findsOneWidget);
       expect(store.syncCalls, 0);
     });
 
     testWidgets(
-        'sort pill opens inline context menu with selected state and switches in one tap',
+        'non-default sort chip resets to deadlineAsc while preserving other filters',
         (tester) async {
-      final semantics = tester.ensureSemantics();
-      try {
-        final store = _ScreenStore()
-          ..homeFilters = const HomeFilters(
-            query: '数学',
-            type: AssignmentTypeFilter.homework,
-            deadline: AssignmentDeadlineFilter.notExpired,
-          )
-          ..replaceAssignmentsForTest([
-            _work('w',
-                course: '课程',
-                title: '数学作业',
-                due: DateTime.now().add(const Duration(days: 1))),
-          ]);
-        addTearDown(store.dispose);
-        await _pumpScreen(tester, store);
+      final store = _ScreenStore()
+        ..homeFilters = const HomeFilters(
+          query: '数学',
+          type: AssignmentTypeFilter.homework,
+          deadline: AssignmentDeadlineFilter.notExpired,
+          sortOrder: HomeSortOrder.deadlineDesc,
+        )
+        ..replaceAssignmentsForTest([
+          _work('w',
+              course: '课程',
+              title: '数学作业',
+              due: DateTime.now().add(const Duration(days: 1))),
+        ]);
+      addTearDown(store.dispose);
+      await _pumpScreen(tester, store);
 
-        await tester.tap(find.byKey(const ValueKey('current-home-sort')));
-        await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('current-home-sort')), findsNothing);
+      expect(find.text('搜索与筛选 (3)'), findsOneWidget);
+      expect(find.text('排序：时间远到近'), findsOneWidget);
 
-        expect(find.text('搜索、筛选与排序'), findsNothing);
-        expect(find.text('时间：近到远'), findsOneWidget);
-        expect(find.text('时间：远到近'), findsOneWidget);
-        expect(find.text('按课程'), findsOneWidget);
+      await tester.tap(find.text('排序：时间远到近'));
+      await tester.pumpAndSettle();
+      expect(store.homeFilters.sortOrder, HomeSortOrder.deadlineAsc);
+      expect(store.homeFilters.query, '数学');
+      expect(store.homeFilters.type, AssignmentTypeFilter.homework);
+      expect(store.homeFilters.deadline, AssignmentDeadlineFilter.notExpired);
+      expect(find.text('排序：时间远到近'), findsNothing);
+      expect(store.syncCalls, 0);
 
-        final light = StudyAssistantTheme.light.extension<JournalPalette>()!;
-        final activeText = tester.widget<Text>(find.text('时间：近到远'));
-        expect(activeText.style?.color, light.accent);
-        expect(find.byIcon(Icons.check_rounded), findsOneWidget);
-        expect(
-          tester
-              .getSemantics(find.text('时间：近到远'))
-              .getSemanticsData()
-              .flagsCollection
-              .isSelected,
-          Tristate.isTrue,
-        );
-
-        await tester.tap(find.text('时间：远到近'));
-        await tester.pumpAndSettle();
-        expect(store.homeFilters.sortOrder, HomeSortOrder.deadlineDesc);
-        expect(store.homeFilters.query, '数学');
-        expect(store.homeFilters.type, AssignmentTypeFilter.homework);
-        expect(store.homeFilters.deadline, AssignmentDeadlineFilter.notExpired);
-        expect(find.text('时间远到近'), findsOneWidget);
-        expect(store.syncCalls, 0);
-
-        await tester.tap(find.byKey(const ValueKey('current-home-sort')));
-        await tester.pumpAndSettle();
-        expect(
-          tester.widget<Text>(find.text('时间：远到近')).style?.color,
-          light.accent,
-        );
-        await tester.tap(find.text('按课程'));
-        await tester.pumpAndSettle();
-        expect(store.homeFilters.sortOrder, HomeSortOrder.courseName);
-        expect(find.text('按课程'), findsOneWidget);
-        expect(store.syncCalls, 0);
-      } finally {
-        semantics.dispose();
-      }
+      await tester.tap(find.text('搜索与筛选 (3)'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('sort-courseName')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('应用'));
+      await tester.pumpAndSettle();
+      expect(store.homeFilters.sortOrder, HomeSortOrder.courseName);
+      expect(find.text('排序：按课程'), findsOneWidget);
+      expect(store.syncCalls, 0);
     });
 
     testWidgets('status owns its row and actions keep 48dp targets',
@@ -966,25 +943,13 @@ void main() {
       final filterInk = find
           .ancestor(of: find.text('搜索与筛选'), matching: find.byType(InkWell))
           .first;
-      final sortInk = find
-          .ancestor(
-              of: find.byKey(const ValueKey('current-home-sort')),
-              matching: find.byType(InkWell))
-          .first;
+      final addInk = find.byKey(const ValueKey('home-add-manual'));
       expect(tester.getSize(filterInk).height, greaterThanOrEqualTo(48));
-      expect(tester.getSize(sortInk).height, greaterThanOrEqualTo(48));
+      expect(tester.getSize(addInk).height, greaterThanOrEqualTo(48));
       final filterTop = tester.getTopLeft(filterInk).dy;
-      final sortTop = tester.getTopLeft(sortInk).dy;
-      expect((filterTop - sortTop).abs(), lessThan(1));
+      final addTop = tester.getTopLeft(addInk).dy;
+      expect((filterTop - addTop).abs(), lessThan(1));
       expect(tester.getTopLeft(find.text(statusText)).dy, lessThan(filterTop));
-      expect(
-          tester
-              .widget<Semantics>(find.byWidgetPredicate((widget) =>
-                  widget is Semantics &&
-                  widget.properties.label == '当前排序：时间近到远，切换排序方式'))
-              .properties
-              .button,
-          isTrue);
       expect(tester.takeException(), isNull);
     });
 
@@ -1013,13 +978,13 @@ void main() {
         final statusWidget = tester.widget<Text>(find.text(statusText));
         expect(statusWidget.overflow, isNot(TextOverflow.ellipsis));
         expect(statusWidget.softWrap, isNot(false));
-        final filterLeft = tester.getTopLeft(find.text('搜索与筛选'));
-        final sortLeft =
-            tester.getTopLeft(find.byKey(const ValueKey('current-home-sort')));
-        final sideBySide = (filterLeft.dy - sortLeft.dy).abs() < 1;
+        final filterLeft =
+            tester.getTopLeft(find.byKey(const ValueKey('home-filter-action')));
+        final addLeft =
+            tester.getTopLeft(find.byKey(const ValueKey('home-add-manual')));
+        final sideBySide = (filterLeft.dy - addLeft.dy).abs() < 1;
         if (!sideBySide) {
-          expect(filterLeft.dy, lessThan(sortLeft.dy));
-          expect(filterLeft.dx, sortLeft.dx);
+          expect(filterLeft.dy, lessThan(addLeft.dy));
         }
         expect(tester.takeException(), isNull,
             reason: '${scenario.$1} @${scenario.$2}');
@@ -1130,7 +1095,7 @@ void main() {
       addTearDown(store.dispose);
       await _pumpScreen(tester, store, theme: ThemeData.dark());
       expect(find.text('搜索与筛选'), findsOneWidget);
-      expect(find.byKey(const ValueKey('current-home-sort')), findsOneWidget);
+      expect(find.byKey(const ValueKey('home-add-manual')), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
 

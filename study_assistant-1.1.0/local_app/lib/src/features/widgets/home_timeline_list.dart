@@ -439,6 +439,7 @@ class HomeTimelineList extends StatelessWidget {
     required this.manualActions,
     required this.courseKey,
     required this.typeFilter,
+    this.sortOrder = HomeSortOrder.deadlineAsc,
     required this.filtersActive,
     required this.selectedCourseIdle,
     required this.busy,
@@ -470,6 +471,7 @@ class HomeTimelineList extends StatelessWidget {
   final HomeManualActions manualActions;
   final String? courseKey;
   final AssignmentTypeFilter typeFilter;
+  final HomeSortOrder sortOrder;
   final bool filtersActive;
   final bool selectedCourseIdle;
   final bool busy;
@@ -508,7 +510,8 @@ class HomeTimelineList extends StatelessWidget {
           displayIndex: displayIndex,
           courseworkEntry: store.courseworkEntryFor(a),
           now: now,
-          showFullDeadline: false,
+          showFullDeadline:
+              pinned || isRecovery || sortOrder == HomeSortOrder.courseName,
           showDivider: false,
           enableTapFeedback: false,
           inPinnedSection: pinned,
@@ -679,7 +682,7 @@ class HomeTimelineList extends StatelessWidget {
           actions: [
             JournalPrimaryButton(
               expanded: false,
-              label: '清除搜索与筛选条件',
+              label: '清空条件',
               onPressed: onClearAllFilters,
             ),
           ],

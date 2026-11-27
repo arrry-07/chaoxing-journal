@@ -387,7 +387,7 @@ void main() {
   });
 
   testWidgets(
-      'JournalSliverHeader uses borderless gradient, 5-stop IgnorePointer feather, and skips BackdropFilter in reduced motion',
+      'JournalSliverHeader drops blur and feather skirt in favor of near-solid paper + 0.8dp divider',
       (t) async {
     Future<void> pumpHeader(ThemeData theme, {bool disableAnimations = false}) {
       return t.pumpWidget(
@@ -408,95 +408,40 @@ void main() {
       );
     }
 
-    for (final entry in <({
-      ThemeData theme,
-      double topAlpha,
-      double midAlpha,
-      double baseAlpha,
-    })>[
-      (
-        theme: StudyAssistantTheme.light,
-        topAlpha: 0.95,
-        midAlpha: 0.90,
-        baseAlpha: 0.84,
-      ),
-      (
-        theme: StudyAssistantTheme.dark,
-        topAlpha: 0.95,
-        midAlpha: 0.91,
-        baseAlpha: 0.86,
-      ),
+    for (final theme in [
+      StudyAssistantTheme.light,
+      StudyAssistantTheme.dark,
     ]) {
-      await pumpHeader(entry.theme);
+      await pumpHeader(theme);
       await t.pumpAndSettle();
 
-      final expectedPaper = entry.theme.extension<JournalPalette>()!.paper;
-      final backdropFinder = find.byType(BackdropFilter);
-      expect(backdropFinder, findsOneWidget);
-      final backdrop = t.widget<BackdropFilter>(backdropFinder);
-      expect(
-        backdrop.filter,
-        ui.ImageFilter.blur(sigmaX: 10.0, sigmaY: 10.0),
-      );
+      final palette = theme.extension<JournalPalette>()!;
+      expect(find.byType(BackdropFilter), findsNothing);
+      expect(find.byKey(const ValueKey('journal-sliver-header-feather')),
+          findsNothing);
 
-      final featherFinder =
-          find.byKey(const ValueKey('journal-sliver-header-feather'));
-      expect(featherFinder, findsOneWidget);
-      expect(t.getSize(featherFinder).height, 18.0);
+      final dividerFinder =
+          find.byKey(const ValueKey('journal-sliver-header-divider'));
+      expect(dividerFinder, findsOneWidget);
+      final divider = t.widget<Divider>(dividerFinder);
+      expect(divider.height, 0.8);
+      expect(divider.thickness, 0.8);
+      expect(divider.color, palette.divider);
 
-      final ignoreAncestor = t.widget<IgnorePointer>(
-        find
-            .ancestor(
-              of: featherFinder,
-              matching: find.byType(IgnorePointer),
-            )
-            .first,
-      );
-      expect(ignoreAncestor.ignoring, isTrue);
-
-      final featherBox = t.widget<DecoratedBox>(featherFinder);
-      final featherGradient =
-          (featherBox.decoration as BoxDecoration).gradient! as LinearGradient;
-      expect(featherGradient.stops, [0.0, 0.22, 0.50, 0.78, 1.0]);
-      final expectedFeatherAlphas = [
-        entry.baseAlpha,
-        entry.baseAlpha * 0.78,
-        entry.baseAlpha * 0.42,
-        entry.baseAlpha * 0.14,
-        0.0,
-      ];
-      expect(featherGradient.colors.length, 5);
-      for (var i = 0; i < 5; i++) {
-        expect(featherGradient.colors[i].a,
-            closeTo(expectedFeatherAlphas[i], 1e-3),
-            reason: 'feather stop[$i] alpha mismatch');
-        expect(
-          featherGradient.colors[i].toARGB32() & 0x00FFFFFF,
-          expectedPaper.toARGB32() & 0x00FFFFFF,
-        );
-      }
-
-      final bodyContainers = t
+      final bodyContainer = t
           .widgetList<Container>(
             find.descendant(
               of: find.byType(JournalSliverHeader),
               matching: find.byType(Container),
             ),
           )
-          .where((c) => c.decoration is BoxDecoration)
-          .toList();
-      expect(bodyContainers.length, 1);
-      final bodyDec = bodyContainers.single.decoration! as BoxDecoration;
-      expect(bodyDec.border, isNull);
-      final bodyGradient = bodyDec.gradient! as LinearGradient;
-      expect(bodyGradient.stops, [0.0, 0.68, 1.0]);
-      expect(bodyGradient.colors.length, 3);
-      expect(bodyGradient.colors[0].a, closeTo(entry.topAlpha, 1e-3));
-      expect(bodyGradient.colors[1].a, closeTo(entry.midAlpha, 1e-3));
-      expect(bodyGradient.colors[2].a, closeTo(entry.baseAlpha, 1e-3));
+          .where((c) => c.color != null)
+          .single;
+      expect(bodyContainer.color, palette.paper.withValues(alpha: 0.98));
+      expect(bodyContainer.decoration, isNull);
     }
 
-    // Reduced motion skips BackdropFilter, uses 0.97/0.93/0.90 body alphas, and keeps 5-stop feather skirt.
+    // Reduced motion keeps solid paper surface without BackdropFilter.
     await pumpHeader(StudyAssistantTheme.light, disableAnimations: true);
     await t.pumpAndSettle();
     expect(find.byType(BackdropFilter), findsNothing);
@@ -507,35 +452,11 @@ void main() {
             matching: find.byType(Container),
           ),
         )
-        .where((c) => c.decoration is BoxDecoration)
+        .where((c) => c.color != null)
         .single;
-    final reducedBodyGradient =
-        (reducedBodyContainer.decoration! as BoxDecoration).gradient!
-            as LinearGradient;
-    expect(reducedBodyGradient.stops, [0.0, 0.68, 1.0]);
-    expect(reducedBodyGradient.colors[0].a, closeTo(0.97, 1e-3));
-    expect(reducedBodyGradient.colors[1].a, closeTo(0.93, 1e-3));
-    expect(reducedBodyGradient.colors[2].a, closeTo(0.90, 1e-3));
+    expect(reducedBodyContainer.color, JournalPalette.light.paper);
 
-    final reducedFeather = t.widget<DecoratedBox>(
-      find.byKey(const ValueKey('journal-sliver-header-feather')),
-    );
-    final reducedGradient = (reducedFeather.decoration as BoxDecoration)
-        .gradient! as LinearGradient;
-    expect(reducedGradient.stops, [0.0, 0.22, 0.50, 0.78, 1.0]);
-    final expectedReducedAlphas = [
-      0.90,
-      0.90 * 0.78,
-      0.90 * 0.42,
-      0.90 * 0.14,
-      0.0,
-    ];
-    for (var i = 0; i < 5; i++) {
-      expect(
-          reducedGradient.colors[i].a, closeTo(expectedReducedAlphas[i], 1e-3));
-    }
-
-    // Real Stack hit-test: tapping button directly under 18dp feather skirt passes through.
+    // Hit-test below header passes through cleanly.
     var buttonTapped = false;
     await t.pumpWidget(
       MaterialApp(
@@ -544,14 +465,14 @@ void main() {
           body: Stack(
             children: [
               Positioned(
-                top: 52.0,
+                top: 56.0,
                 left: 0,
                 right: 0,
                 height: 24.0,
                 child: TextButton(
-                  key: const ValueKey('under-feather-button'),
+                  key: const ValueKey('under-header-button'),
                   onPressed: () => buttonTapped = true,
-                  child: const Text('under-feather'),
+                  child: const Text('under-header'),
                 ),
               ),
               const Positioned(
@@ -570,12 +491,7 @@ void main() {
       ),
     );
     await t.pumpAndSettle();
-    final featherRect =
-        t.getRect(find.byKey(const ValueKey('journal-sliver-header-feather')));
-    final buttonRect =
-        t.getRect(find.byKey(const ValueKey('under-feather-button')));
-    expect(featherRect.overlaps(buttonRect), isTrue);
-    await t.tapAt(featherRect.center);
+    await t.tap(find.byKey(const ValueKey('under-header-button')));
     await t.pump();
     expect(buttonTapped, isTrue);
   });

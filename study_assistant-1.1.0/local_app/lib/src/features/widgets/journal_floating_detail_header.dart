@@ -1,5 +1,3 @@
-import 'dart:ui';
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
@@ -290,37 +288,20 @@ class JournalFloatingDetailHeader extends StatelessWidget {
       ),
     );
 
-    final backdropColor = journal.paper.withValues(alpha: 0.88 * p);
+    final surfaceAlpha = (reduced ? 1.0 : 0.98) * p;
+    final backdropColor = journal.paper.withValues(alpha: surfaceAlpha);
     final borderColor = journal.divider.withValues(alpha: p);
 
     final Widget backdropLayer = IgnorePointer(
-      child: p <= 0.01 || reduced
-          ? DecoratedBox(
-              decoration: BoxDecoration(
-                color: backdropColor,
-                border: Border(
-                  bottom: BorderSide(color: borderColor, width: 0.6),
-                ),
-              ),
-              child: const SizedBox.expand(),
-            )
-          : ClipRect(
-              child: BackdropFilter(
-                filter: ImageFilter.blur(
-                  sigmaX: 14.0 * p,
-                  sigmaY: 14.0 * p,
-                ),
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: backdropColor,
-                    border: Border(
-                      bottom: BorderSide(color: borderColor, width: 0.6),
-                    ),
-                  ),
-                  child: const SizedBox.expand(),
-                ),
-              ),
-            ),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: backdropColor,
+          border: Border(
+            bottom: BorderSide(color: borderColor, width: 0.6),
+          ),
+        ),
+        child: const SizedBox.expand(),
+      ),
     );
 
     return Stack(

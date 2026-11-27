@@ -25,6 +25,7 @@ class ManualHomeCard extends StatelessWidget {
     this.onLongPress,
     this.dragHandle,
     this.inPinnedSection = false,
+    this.showFullDeadline = false,
     this.compact = false,
     this.countdown = false,
     this.allowUrgentNightBreakthrough = false,
@@ -39,6 +40,7 @@ class ManualHomeCard extends StatelessWidget {
   final VoidCallback? onLongPress;
   final Widget? dragHandle;
   final bool inPinnedSection;
+  final bool showFullDeadline;
   final bool compact;
   final bool countdown;
   final bool allowUrgentNightBreakthrough;
@@ -101,7 +103,10 @@ class ManualHomeCard extends StatelessWidget {
         );
       }
       if (!inPinnedSection) {
-        if (countdown && !overdue) {
+        final within24h = !overdue &&
+            at.isAfter(now) &&
+            at.difference(now) < const Duration(hours: 24);
+        if (!showFullDeadline && countdown && within24h) {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
@@ -203,7 +208,18 @@ class ManualHomeCard extends StatelessWidget {
             : quietHoursSkipped
                 ? '夜间静音时段未排期'
                 : null;
+    final fullDeadlineLine = showFullDeadline && !inPinnedSection && at != null
+        ? (() {
+            final beijingAt = AssignmentQuery.beijing(at);
+            final crossYear =
+                beijingAt.year != AssignmentQuery.beijing(now).year;
+            return DateFormat(
+              crossYear ? 'yyyy年M月d日 HH:mm' : 'M月d日 HH:mm',
+            ).format(beijingAt);
+          })()
+        : null;
     final auxiliary = <String>[
+      if (fullDeadlineLine != null) fullDeadlineLine,
       if (entry.location.trim().isNotEmpty) '地点 ${entry.location.trim()}',
       if (reminderLabel != null) reminderLabel,
       if (entry.attachments.isNotEmpty) '附件 ${entry.attachments.length}',

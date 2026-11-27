@@ -285,7 +285,7 @@ void main() {
       addTearDown(store.dispose);
       await _home(tester, store, scale: 2);
       expect(find.text('今日计划 · 已完成$completed/2'), findsOneWidget);
-      expect(find.byKey(const ValueKey('home-agenda-entry')), findsOneWidget);
+      expect(find.byKey(const ValueKey('home-more-menu')), findsOneWidget);
       expect(find.byKey(const ValueKey('home-plan-entry')), findsNothing);
       expect(find.textContaining('预计'), findsNothing);
       expect(find.textContaining('选两三份'), findsNothing);
@@ -294,8 +294,7 @@ void main() {
     });
   }
 
-  testWidgets(
-      'empty plan has a 48dp toolbar agenda entry and more menu opens plan',
+  testWidgets('empty plan keeps 48dp more menu entry opening agenda and plan',
       (tester) async {
     final store = _Store([]);
     addTearDown(store.dispose);
@@ -316,11 +315,13 @@ void main() {
     addTearDown(router.dispose);
     await tester.pumpWidget(MaterialApp.router(routerConfig: router));
     await tester.pumpAndSettle();
-    final entry = find.byKey(const ValueKey('home-agenda-entry'));
-    expect(tester.getSize(entry).width, greaterThanOrEqualTo(48));
-    expect(tester.getSize(entry).height, greaterThanOrEqualTo(48));
+    final moreMenu = find.byKey(const ValueKey('home-more-menu'));
+    expect(tester.getSize(moreMenu).width, greaterThanOrEqualTo(48));
+    expect(tester.getSize(moreMenu).height, greaterThanOrEqualTo(48));
     expect(find.byKey(const ValueKey('home-plan-summary')), findsNothing);
-    await tester.tap(entry);
+    await tester.tap(moreMenu);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('个人待办与考试'));
     await tester.pumpAndSettle();
     expect(find.text('agenda-page'), findsOneWidget);
     await tester.pageBack();
@@ -334,7 +335,7 @@ void main() {
   });
 
   testWidgets(
-      'scrolled home sliver header opens agenda and hides in recovery scope',
+      'scrolled home sliver header keeps 3-button layout and hides add in recovery scope',
       (tester) async {
     final now = DateTime.now();
     final store = _Store([
@@ -363,9 +364,13 @@ void main() {
     await tester.drag(find.byType(Scrollable).first, const Offset(0, -180));
     await tester.pumpAndSettle();
 
-    final sliverAgenda = find.byKey(const ValueKey('home-sliver-agenda-entry'));
-    expect(sliverAgenda, findsOneWidget);
-    await tester.tap(sliverAgenda);
+    expect(
+        find.byKey(const ValueKey('home-sliver-add-manual')), findsOneWidget);
+    final sliverMore = find.byKey(const ValueKey('home-sliver-more-menu'));
+    expect(sliverMore, findsOneWidget);
+    await tester.tap(sliverMore);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('个人待办与考试'));
     await tester.pumpAndSettle();
     expect(find.text('agenda-sliver-page'), findsOneWidget);
 
@@ -391,8 +396,12 @@ void main() {
     await tester.drag(find.byType(Scrollable).first, const Offset(0, -180));
     await tester.pumpAndSettle();
     expect(
-      find.byKey(const ValueKey('home-sliver-agenda-entry')),
+      find.byKey(const ValueKey('home-sliver-add-manual')),
       findsNothing,
+    );
+    expect(
+      find.byKey(const ValueKey('home-sliver-more-menu')),
+      findsOneWidget,
     );
     await tester.pumpWidget(const SizedBox.shrink());
   });

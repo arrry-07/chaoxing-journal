@@ -723,9 +723,11 @@ void main() {
     expect(store.homeFilters.courseKey, '1:2');
     expect(store.homeFilters.query, '高数');
 
-    await tester.tap(find.byKey(const ValueKey('current-home-sort')));
+    await tester.tap(find.text('搜索与筛选 (3)'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('时间：远到近'));
+    await tester.tap(find.byKey(const ValueKey('sort-deadlineDesc')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('应用'));
     await tester.pumpAndSettle();
     expect(store.homeFilters.sortOrder, HomeSortOrder.deadlineDesc);
 
@@ -736,7 +738,7 @@ void main() {
     expect(store.homeFilters.courseKey, '1:2');
     expect(store.homeFilters.deadline, AssignmentDeadlineFilter.notExpired);
     expect(store.homeFilters.sortOrder, HomeSortOrder.deadlineDesc);
-    expect(find.text('时间远到近'), findsOneWidget);
+    expect(find.text('排序：时间远到近'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -789,7 +791,7 @@ void main() {
         courseKey: '1:2',
         deadline: AssignmentDeadlineFilter.notExpired,
         type: AssignmentTypeFilter.all,
-        sortOrder: HomeSortOrder.deadlineAsc,
+        sortOrder: HomeSortOrder.deadlineDesc,
       );
 
     await _mountRoutedHomeWithClock(tester, store, () => now);
@@ -804,13 +806,11 @@ void main() {
     // Block subsequent saveHomeFilters writes with Completer gates.
     store.gateWrites = true;
 
-    // Pick new sort order while write stays suspended.
-    await tester.tap(find.byKey(const ValueKey('current-home-sort')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('时间：远到近'));
+    // Reset sort order via summary chip while write stays suspended.
+    await tester.tap(find.text('排序：时间远到近'));
     await tester.pumpAndSettle();
     expect(store.gates, hasLength(1));
-    expect(store.homeFilters.sortOrder, HomeSortOrder.deadlineAsc);
+    expect(store.homeFilters.sortOrder, HomeSortOrder.deadlineDesc);
 
     // Immediately tap upcoming exam strip to exit before sort write settles.
     await tester.tap(find.byKey(const ValueKey('home-upcoming-exam-strip')));
@@ -823,13 +823,48 @@ void main() {
     store.gates[1].complete();
     await tester.pumpAndSettle();
 
-    expect(store.homeFilters.sortOrder, HomeSortOrder.deadlineDesc);
+    expect(store.homeFilters.sortOrder, HomeSortOrder.deadlineAsc);
     expect(store.homeFilters.type, AssignmentTypeFilter.all);
     expect(store.homeFilters.query, '高数');
     expect(store.homeFilters.courseKey, '1:2');
     expect(store.homeFilters.deadline, AssignmentDeadlineFilter.notExpired);
-    expect(find.text('时间远到近'), findsOneWidget);
+    expect(find.text('排序：时间远到近'), findsNothing);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+      'HomeSortOrder.courseName passes showFullDeadline and renders full date + time on cards',
+      (tester) async {
+    final now = DateTime.utc(2026, 11, 20, 4, 0); // Beijing 12:00
+    final store = _Store()
+      ..replaceAssignmentsForTest([
+        _work(
+          'same-year',
+          title: '本年按课程作业',
+          course: '高等数学',
+          due: DateTime.utc(2026, 11, 21, 14, 50), // 22:50 Beijing tomorrow
+        ),
+        _work(
+          'next-year',
+          title: '跨年按课程作业',
+          course: '大学物理',
+          due: DateTime.utc(2027, 1, 5, 10, 0), // 18:00 Beijing
+        ),
+      ])
+      ..homeFilters = const HomeFilters(sortOrder: HomeSortOrder.courseName);
+    addTearDown(store.dispose);
+
+    await _mountRoutedHomeWithClock(tester, store, () => now);
+    expect(
+      tester
+          .widgetList<AssignmentCard>(find.byType(AssignmentCard))
+          .every((card) => card.showFullDeadline),
+      isTrue,
+    );
+    expect(find.text('截止 11月21日 22:50'), findsOneWidget);
+    expect(find.text('截止 2027年1月5日 18:00'), findsOneWidget);
+    expect(find.textContaining('剩2天'), findsNothing);
+    expect(find.textContaining('剩余2天'), findsNothing);
   });
 }
 
