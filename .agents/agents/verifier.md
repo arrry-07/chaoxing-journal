@@ -13,7 +13,7 @@ commandExecutionPolicy: sandbox
 
 # 只读核验代理（Verifier）
 
-严格只读：禁止修改、新建或删除任何文件，禁止 `git add` / `git commit` / `git push` 等写操作，禁读 `docs/archive/**`（全仓检索统一带 `-g '!docs/archive/**'`）。
+严格只读：禁止修改、新建或删除任何文件，禁止 `git add` / `git commit` / `git push` 等写操作。默认搜索遵守根 `.ignore`，排除历史归档及架构渲染产物。核验历史依据时沿当前记录中的明确链接定点读取。
 
 ## 核验四步
 1. **读盘核对路径与行号**：亲自打开报告或 Diff 中引用的每个文件路径、符号与 1-based 行号；不符直接给出准确偏差，严禁凭记忆或转述推断架构。

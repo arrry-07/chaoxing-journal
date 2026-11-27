@@ -16,4 +16,4 @@
 
 - 隔离 API 26/30/31/32/33/34/35 已覆盖 4 批 22 类 `androidTest` 0 失败；物理 OEM 真机复测 `v3` 有声渠道锁屏外放/通知音量归零/Doze/120Hz 高刷/8-bit 外放与移除动画联动、多校 `backclazzdata` 与 `clazzId` 分布、官方活动课精度、自然 `9010` 及真实改期/`completeTime` 样本仍待按样本补证。
 - `FB-002`、30 天发布时间核实及云端同步/反馈（`FB-015` / `FB-017`）规划见[反馈台账](../待处理体验反馈.md) 与 [路线图](../ROADMAP.md)；`v1.92.1` 架构导航图已同步至 `a33f066`（见[架构导航](../architecture/ARCHITECTURE.md)）。
-- [仓库规则](../../AGENTS.md) · [文档路由](../README.md) · [验证范围](VALIDATION.md) · [历史工程状态](../archive/PROJECT_STATE_HISTORY.md)（仅按用户点名的版本追溯）
+- [仓库规则](../../AGENTS.md) · [文档路由](../README.md) · [验证范围](VALIDATION.md) · [历史工程状态](../archive/PROJECT_STATE_HISTORY.md)（按当前证据指针或用户点名定点追溯）
