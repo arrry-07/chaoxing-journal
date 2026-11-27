@@ -614,11 +614,7 @@ class AssignmentStore extends ChangeNotifier {
       );
 
   bool get hasNonQuietServiceWarning =>
-      _warningBuckets.hasNonQuietServiceWarning(
-        hasRecoveryWarnings: _recoveryWarnings.isNotEmpty,
-        hasOperationError: _error != null,
-        hasRepositoryRecoveryWarning: repository.recoveryWarning != null,
-      );
+      _warningBuckets.isNotEmpty && !hasWidgetWarningOnly;
   bool _authenticated = false;
   bool _loading = false;
   bool _agreementAccepted = false;
