@@ -10,7 +10,7 @@
     "repository": {
       "url": "https://github.com/arrry-07/chaoxing-journal.git",
       "provider": "github",
-      "revision": "6a8af334bb5f5c54ffbf81f15f7065aaf4364b8a"
+      "revision": "a33f066cc5e82e07050e15c6844172b68bd787e0"
     }
   },
   "stages": [
@@ -56,13 +56,24 @@
       "type": "backend",
       "emphasis": true,
       "label": "多源解析与身份归并",
-      "sublabel": "Chaoxing*Parser · Grouping",
+      "sublabel": "同步编排 · Parser / Grouping",
       "tag": "防空覆盖",
       "stage": 1,
       "row": 0,
       "sources": [
-        { "path": "study_assistant-1.1.0/local_app/lib/src/local" },
-        { "path": "study_assistant-1.1.0/local_app/lib/src/services" }
+        {
+          "path": "study_assistant-1.1.0/local_app/lib/src/local"
+        },
+        {
+          "path": "study_assistant-1.1.0/local_app/lib/src/services/assignment_store_sync.dart",
+          "line": 1037,
+          "label": "课业同步与多源合并编排"
+        },
+        {
+          "path": "study_assistant-1.1.0/local_app/lib/src/services/assignment_sync_coordinator.dart",
+          "line": 12,
+          "label": "同步选课、补扫与报告策略"
+        }
       ]
     },
     {
@@ -74,6 +85,11 @@
       "stage": 1,
       "row": 2,
       "sources": [
+        {
+          "path": "study_assistant-1.1.0/local_app/lib/src/services/assignment_store_sync.dart",
+          "line": 449,
+          "label": "同步触发与租约获取"
+        },
         {
           "path": "study_assistant-1.1.0/local_app/lib/src/services/background_reminder_gateway.dart",
           "line": 62,
@@ -116,12 +132,21 @@
       "id": "reminder_planner",
       "type": "backend",
       "label": "提醒与静音窗规划",
-      "sublabel": "ReminderPlanner · QuietHours",
+      "sublabel": "提醒编排 · Planner / QuietHours",
       "tag": "v3 有声策略",
       "stage": 2,
       "row": 2,
       "sources": [
-        { "path": "study_assistant-1.1.0/local_app/lib/src/services" },
+        {
+          "path": "study_assistant-1.1.0/local_app/lib/src/services/assignment_store_reminders.dart",
+          "line": 446,
+          "label": "提醒计划刷新与投递编排"
+        },
+        {
+          "path": "study_assistant-1.1.0/local_app/lib/src/services/assignment_reminder_coordinator.dart",
+          "line": 124,
+          "label": "提醒判断、取消结果与解释"
+        },
         {
           "path": "study_assistant-1.1.0/local_app/lib/src/services/local_notification_service.dart",
           "line": 76,

@@ -362,13 +362,13 @@ svg[data-theme="light"] { --bg: #f4f5f7; --grid: #e9edf2; --canvas-dot: #e2e7ec;
         <text x="960" y="68" class="t-dim" font-size="9" font-weight="600" text-anchor="middle">05 / 消费与原生投递</text>
 
         <!-- Flow paths -->
-        <path data-edge-from="chaoxing_api" data-edge-to="parsers_merge" data-edge-label="原始课业响应" data-edge-key="0" data-edge-id="raw_coursework" data-composition-points="156,157;256,157" d="M 156 157 L 256 157" class="a-emphasis" data-animate="edge" style="--step:0" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <path data-edge-from="chaoxing_api" data-edge-to="parsers_merge" data-edge-label="原始课业响应" data-edge-key="0" data-edge-id="raw_coursework" data-composition-points="156,157;252,157" d="M 156 157 L 252 157" class="a-emphasis" data-animate="edge" style="--step:0" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
         <path data-edge-from="signal_and_manual" data-edge-to="session_lease_gate" data-edge-label="通知信号与编辑" data-edge-key="1" data-edge-id="signals_edits" data-composition-points="156,385;259,385" d="M 156 385 L 259 385" class="a-security" data-animate="edge" style="--step:1" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
         <path data-edge-from="session_lease_gate" data-edge-to="parsers_merge" data-edge-label="代次与租约放行" data-edge-key="2" data-edge-id="lease_permit" data-composition-points="315,356;315,186" d="M 315 356 L 315 186" class="a-security" data-animate="edge" style="--step:2" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
-        <path data-edge-from="parsers_merge" data-edge-to="time_trust_query" data-edge-label="归一化课业集" data-edge-key="3" data-edge-id="normalized_items" data-composition-points="374,157;471,157" d="M 374 157 L 471 157" class="a-emphasis" data-animate="edge" style="--step:3" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <path data-edge-from="parsers_merge" data-edge-to="time_trust_query" data-edge-label="归一化课业集" data-edge-key="3" data-edge-id="normalized_items" data-composition-points="378,157;471,157" d="M 378 157 L 471 157" class="a-emphasis" data-animate="edge" style="--step:3" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
         <path data-edge-from="time_trust_query" data-edge-to="reminder_planner" data-edge-label="可信截止时间" data-edge-key="4" data-edge-id="trusted_deadlines" data-composition-points="530,186;530,356" d="M 530 186 L 530 356" class="a-default" data-animate="edge" style="--step:4" stroke-width="1.4" marker-end="url(#arrowhead)"/>
         <path data-edge-from="time_trust_query" data-edge-to="prefs_snapshot" data-edge-label="合并课业快照" data-edge-key="5" data-edge-id="merged_snapshot" data-composition-points="589,157;688.5,157" d="M 589 157 L 688.5 157" class="a-emphasis" data-animate="edge" style="--step:5" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
-        <path data-edge-from="reminder_planner" data-edge-to="sqlite_reminder_db" data-edge-label="提醒计划快照" data-edge-key="6" data-edge-id="plan_snapshot" data-composition-points="593,385;688.5,385" d="M 593 385 L 688.5 385" class="a-security" data-animate="edge" style="--step:6" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
+        <path data-edge-from="reminder_planner" data-edge-to="sqlite_reminder_db" data-edge-label="提醒计划快照" data-edge-key="6" data-edge-id="plan_snapshot" data-composition-points="599.5,385;688.5,385" d="M 599.5 385 L 688.5 385" class="a-security" data-animate="edge" style="--step:6" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
         <path data-edge-from="prefs_snapshot" data-edge-to="sqlite_reminder_db" data-edge-label="版本号提交确认" data-edge-key="7" data-edge-id="version_commit" data-composition-points="745,186;745,356" d="M 745 186 L 745 356" class="a-dashed" data-animate="edge" style="--step:7" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
         <path data-edge-from="prefs_snapshot" data-edge-to="home_and_widget" data-edge-label="已校验展示快照" data-edge-key="8" data-edge-id="ui_widget_feed" data-composition-points="801.5,157;901,157" d="M 801.5 157 L 901 157" class="a-emphasis" data-animate="edge" style="--step:8" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
         <path data-edge-from="sqlite_reminder_db" data-edge-to="native_alarm_pub" data-edge-label="到期事件与复核" data-edge-key="9" data-edge-id="due_events" data-composition-points="801.5,385;901,385" d="M 801.5 385 L 901 385" class="a-default" data-animate="edge" style="--step:9" stroke-width="1.4" marker-end="url(#arrowhead)"/>
@@ -402,15 +402,15 @@ svg[data-theme="light"] { --bg: #f4f5f7; --grid: #e9edf2; --canvas-dot: #e2e7ec;
         <text data-detail="fine" x="100" y="407.6" class="t-frontend" font-size="7" text-anchor="middle">增量触发</text>
         </g>
 
-        <g id="node-parsers_merge" data-node-id="parsers_merge" data-node-label="多源解析与身份归并" tabindex="0" role="button" aria-label="聚焦多源解析与身份归并，Chaoxing*Parser · Grouping, 02 / 采集与门禁" aria-pressed="false" data-node-kind="backend" data-node-sublabel="Chaoxing*Parser · Grouping" data-node-tag="防空覆盖" data-node-context="02 / 采集与门禁" data-emphasis="">
-          <title>多源解析与身份归并 · Chaoxing*Parser · Grouping · 02 / 采集与门禁 · 防空覆盖</title>
-          <rect x="256" y="128" width="118" height="58" rx="6" class="c-mask"/>
-          <rect x="256" y="128" width="118" height="58" rx="6" class="c-backend" data-animate="node" style="--step:1" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(262 134) scale(0.6875)">
+        <g id="node-parsers_merge" data-node-id="parsers_merge" data-node-label="多源解析与身份归并" tabindex="0" role="button" aria-label="聚焦多源解析与身份归并，同步编排 · Parser / Grouping, 02 / 采集与门禁" aria-pressed="false" data-node-kind="backend" data-node-sublabel="同步编排 · Parser / Grouping" data-node-tag="防空覆盖" data-node-context="02 / 采集与门禁" data-emphasis="">
+          <title>多源解析与身份归并 · 同步编排 · Parser / Grouping · 02 / 采集与门禁 · 防空覆盖</title>
+          <rect x="252" y="128" width="126" height="58" rx="6" class="c-mask"/>
+          <rect x="252" y="128" width="126" height="58" rx="6" class="c-backend" data-animate="node" style="--step:1" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(258 134) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
           <text data-node-label="" data-detail-anchor="" x="315" y="159" class="t-primary" font-size="10" font-weight="600" text-anchor="middle">多源解析与身份归并</text>
-          <text data-detail="context" x="315" y="170" class="t-muted" font-size="7" text-anchor="middle">Chaoxing*Parser · Grouping</text>
+          <text data-detail="context" x="315" y="170" class="t-muted" font-size="7" text-anchor="middle">同步编排 · Parser / Grouping</text>
         <text data-detail="fine" x="315" y="180.1" class="t-backend" font-size="7" text-anchor="middle">防空覆盖</text>
         </g>
 
@@ -439,15 +439,15 @@ svg[data-theme="light"] { --bg: #f4f5f7; --grid: #e9edf2; --canvas-dot: #e2e7ec;
         <text data-detail="fine" x="530" y="180.1" class="t-backend" font-size="7" text-anchor="middle">FB-005 规则</text>
         </g>
 
-        <g id="node-reminder_planner" data-node-id="reminder_planner" data-node-label="提醒与静音窗规划" tabindex="0" role="button" aria-label="聚焦提醒与静音窗规划，ReminderPlanner · QuietHours, 03 / 时间信任与规划" aria-pressed="false" data-node-kind="backend" data-node-sublabel="ReminderPlanner · QuietHours" data-node-tag="v3 有声策略" data-node-context="03 / 时间信任与规划">
-          <title>提醒与静音窗规划 · ReminderPlanner · QuietHours · 03 / 时间信任与规划 · v3 有声策略</title>
-          <rect x="467" y="356" width="126" height="58" rx="6" class="c-mask"/>
-          <rect x="467" y="356" width="126" height="58" rx="6" class="c-backend" data-animate="node" style="--step:5" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(473 362) scale(0.6875)">
+        <g id="node-reminder_planner" data-node-id="reminder_planner" data-node-label="提醒与静音窗规划" tabindex="0" role="button" aria-label="聚焦提醒与静音窗规划，提醒编排 · Planner / QuietHours, 03 / 时间信任与规划" aria-pressed="false" data-node-kind="backend" data-node-sublabel="提醒编排 · Planner / QuietHours" data-node-tag="v3 有声策略" data-node-context="03 / 时间信任与规划">
+          <title>提醒与静音窗规划 · 提醒编排 · Planner / QuietHours · 03 / 时间信任与规划 · v3 有声策略</title>
+          <rect x="460.5" y="356" width="139" height="58" rx="6" class="c-mask"/>
+          <rect x="460.5" y="356" width="139" height="58" rx="6" class="c-backend" data-animate="node" style="--step:5" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(466.5 362) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
           <text data-node-label="" data-detail-anchor="" x="530" y="387" class="t-primary" font-size="10" font-weight="600" text-anchor="middle">提醒与静音窗规划</text>
-          <text data-detail="context" x="530" y="398" class="t-muted" font-size="7" text-anchor="middle">ReminderPlanner · QuietHours</text>
+          <text data-detail="context" x="530" y="398" class="t-muted" font-size="7" text-anchor="middle">提醒编排 · Planner / QuietHours</text>
         <text data-detail="fine" x="530" y="408.1" class="t-backend" font-size="7" text-anchor="middle">v3 有声策略</text>
         </g>
 
@@ -509,8 +509,8 @@ svg[data-theme="light"] { --bg: #f4f5f7; --grid: #e9edf2; --canvas-dot: #e2e7ec;
 
         <!-- Flow labels -->
         <g data-detail="context" data-edge-from="chaoxing_api" data-edge-to="parsers_merge" data-edge-label="原始课业响应" data-edge-key="0" data-edge-id="raw_coursework">
-          <rect x="170.6" y="136" width="70.8" height="16" rx="4" class="c-mask"/>
-          <text x="206" y="147" class="t-edge-emphasis" font-size="8" text-anchor="middle">原始课业响应</text>
+          <rect x="168.6" y="136" width="70.8" height="16" rx="4" class="c-mask"/>
+          <text x="204" y="147" class="t-edge-emphasis" font-size="8" text-anchor="middle">原始课业响应</text>
         </g>
         <g data-detail="context" data-edge-from="signal_and_manual" data-edge-to="session_lease_gate" data-edge-label="通知信号与编辑" data-edge-key="1" data-edge-id="signals_edits">
           <rect x="167.2" y="364" width="80.6" height="16" rx="4" class="c-mask"/>
@@ -521,8 +521,8 @@ svg[data-theme="light"] { --bg: #f4f5f7; --grid: #e9edf2; --canvas-dot: #e2e7ec;
           <text x="315" y="261" class="t-edge-security" font-size="8" text-anchor="middle">代次与租约放行</text>
         </g>
         <g data-detail="context" data-edge-from="parsers_merge" data-edge-to="time_trust_query" data-edge-label="归一化课业集" data-edge-key="3" data-edge-id="normalized_items">
-          <rect x="387.1" y="136" width="70.8" height="16" rx="4" class="c-mask"/>
-          <text x="422.5" y="147" class="t-edge-emphasis" font-size="8" text-anchor="middle">归一化课业集</text>
+          <rect x="389.1" y="136" width="70.8" height="16" rx="4" class="c-mask"/>
+          <text x="424.5" y="147" class="t-edge-emphasis" font-size="8" text-anchor="middle">归一化课业集</text>
         </g>
         <g data-detail="context" data-edge-from="time_trust_query" data-edge-to="reminder_planner" data-edge-label="可信截止时间" data-edge-key="4" data-edge-id="trusted_deadlines">
           <rect x="494.6" y="250" width="70.8" height="16" rx="4" class="c-mask"/>
@@ -533,8 +533,8 @@ svg[data-theme="light"] { --bg: #f4f5f7; --grid: #e9edf2; --canvas-dot: #e2e7ec;
           <text x="638.75" y="147" class="t-edge-emphasis" font-size="8" text-anchor="middle">合并课业快照</text>
         </g>
         <g data-detail="context" data-edge-from="reminder_planner" data-edge-to="sqlite_reminder_db" data-edge-label="提醒计划快照" data-edge-key="6" data-edge-id="plan_snapshot">
-          <rect x="605.35" y="364" width="70.8" height="16" rx="4" class="c-mask"/>
-          <text x="640.75" y="375" class="t-edge-security" font-size="8" text-anchor="middle">提醒计划快照</text>
+          <rect x="608.6" y="364" width="70.8" height="16" rx="4" class="c-mask"/>
+          <text x="644" y="375" class="t-edge-security" font-size="8" text-anchor="middle">提醒计划快照</text>
         </g>
         <g data-detail="context" data-edge-from="prefs_snapshot" data-edge-to="sqlite_reminder_db" data-edge-label="版本号提交确认" data-edge-key="7" data-edge-id="version_commit">
           <rect x="704.7" y="250" width="80.6" height="16" rx="4" class="c-mask"/>

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg viewBox="0 0 1704 640" role="img" lang="zh-CN" aria-labelledby="archify-diagram-title archify-diagram-description" data-preset="classic" data-quality-profile="showcase" data-node-ui="" data-reader-fit="intrinsic-height" data-reader-min-text="7.5" data-reader-primary-text="14" xmlns="http://www.w3.org/2000/svg" width="1704" height="640" data-theme="light" data-archify-bake="static">
+<svg viewBox="0 0 1684 1086" role="img" lang="zh-CN" aria-labelledby="archify-diagram-title archify-diagram-description" data-preset="classic" data-quality-profile="showcase" data-node-ui="" data-reader-fit="intrinsic-height" data-reader-min-text="7.5" data-reader-primary-text="14" xmlns="http://www.w3.org/2000/svg" width="1684" height="1086" data-theme="light" data-archify-bake="static">
         <title id="archify-diagram-title">学习通课业手记 · 系统架构与模块边界</title>
-        <desc id="archify-diagram-description">由 Archify 生成的架构图。</desc>
+        <desc id="archify-diagram-description">更新于 2026-11-27</desc>
         <style><![CDATA[
 /*
 JetBrains Mono variable WOFF2 subsets from Google Fonts service revision v24.
@@ -323,7 +323,7 @@ svg[data-preset="blueprint"][data-relationship-preview-active] [data-relationshi
 .c-region { fill: rgba(251, 191, 36, 0.05); stroke: #d97706; stroke-dasharray: 8,4; }
 .c-lane { fill: rgba(248, 250, 252, 0.65); stroke: #cbd5e1; stroke-dasharray: 6,6; }
 svg[data-theme="light"] { --bg: #f4f5f7; --grid: #e9edf2; --canvas-dot: #e2e7ec; --text: #111827; --text-muted: #5b6474; --text-dim: #9aa3b2; --text-faint: #6b7280; --panel: #ffffff; --panel-border: #e5e7eb; --lane-fill: rgba(248, 250, 252, 0.65); --lane-stroke: #cbd5e1; --arrow: #64748b; --arrow-emphasis: #059669; --arrow-security: #b43b57; --arrow-dashed: #6d4fc2; --edge-label: #5b6474; --mask: #ffffff; --frontend-fill: rgba(34, 211, 238, 0.15); --frontend-stroke: #0891b2; --backend-fill: rgba(52, 211, 153, 0.18); --backend-stroke: #059669; --database-fill: rgba(167, 139, 250, 0.2); --database-stroke: #7c3aed; --cloud-fill: rgba(251, 191, 36, 0.18); --cloud-stroke: #d97706; --security-fill: rgba(251, 113, 133, 0.15); --security-stroke: #e11d48; --messagebus-fill: rgba(251, 146, 60, 0.15); --messagebus-stroke: #ea580c; --external-fill: rgba(148, 163, 184, 0.18); --external-stroke: #64748b; --toolbar-bg: rgba(255, 255, 255, 0.92); --toolbar-border: #cbd5e1; --toolbar-text: #334155; --toolbar-hover: #ffffff; --toolbar-menu-bg: #ffffff; --reader-accent: #077f9c; }
-]]></style><rect class="archify-bake-background" x="0" y="0" width="1704" height="640" fill="#f4f5f7"/><!-- Definitions -->
+]]></style><rect class="archify-bake-background" x="0" y="0" width="1684" height="1086" fill="#f4f5f7"/><!-- Definitions -->
         <defs>
           <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
             <polygon points="0 0, 10 3.5, 0 7" class="m-default" />
@@ -365,282 +365,402 @@ svg[data-node-ui][data-preset="editorial"] :is([data-graph-role="structural-fram
         <rect width="100%" height="100%" fill="url(#grid)" />
 
         <!-- Boundaries (behind everything) -->
-        <rect data-graph-role="structural-frame" data-composition-frame-kind="region" data-composition-frame-id="0" data-composition-frame-label="Flutter 业务与状态层 (Dart)" x="704.8999999999999" y="48" width="946.4000000000001" height="290" rx="12" class="c-region" stroke-width="1"/>
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="region" data-composition-frame-id="0" data-composition-frame-label="Flutter 业务与状态层 (Dart)" x="689.8999999999999" y="40" width="953.4000000000001" height="758" rx="12" class="c-region" stroke-width="1"/>
 
-        <rect data-graph-role="structural-frame" data-composition-frame-kind="security-group" data-composition-frame-id="1" data-composition-frame-label="Android 原生宿主与后台层 (Kotlin / Java)" x="48" y="436" width="970.6" height="122" rx="8" class="c-security-group" stroke-width="1"/>
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="security-group" data-composition-frame-id="1" data-composition-frame-label="Android 原生宿主与后台层 (Kotlin / Java)" x="32" y="896" width="987.1" height="122" rx="8" class="c-security-group" stroke-width="1"/>
 
         <!-- Connection paths (before components for correct z-order) -->
         <g data-graph-role="automatic-crossover" style="--step:0">
-          <path data-graph-role="automatic-crossover-underlay" d="M 944.8999999999999 105.95 L 1066.1 105.95" fill="none" stroke="#ffffff" stroke-width="5.8" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="ui_shell" data-edge-to="assignment_store" data-edge-label="状态订阅与交互" data-edge-key="0" data-edge-id="ui_to_store" data-composition-points="944.8999999999999,105.95;1066.1,105.95" data-composition-crossover="halo" data-composition-independent="true" d="M 944.8999999999999 105.95 L 1066.1 105.95" class="a-emphasis" data-animate="edge" style="--step:0" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+          <path data-graph-role="automatic-crossover-underlay" d="M 719.8999999999999 554 L 711.8999999999999 554 Q 703.8999999999999 554 703.8999999999999 546 L 703.8999999999999 278 Q 703.8999999999999 270 711.8999999999999 270 L 1051.1 270" fill="none" stroke="#ffffff" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="ui_shell" data-edge-to="home_interactions" data-edge-label="首页入口" data-edge-key="0" data-edge-id="shell_to_home_interactions" data-composition-points="719.8999999999999,554;703.8999999999999,554;703.8999999999999,270;1051.1,270" data-composition-crossover="halo" data-composition-independent="true" d="M 719.8999999999999 554 L 711.8999999999999 554 Q 703.8999999999999 554 703.8999999999999 546 L 703.8999999999999 278 Q 703.8999999999999 270 711.8999999999999 270 L 1051.1 270" class="a-dashed" data-animate="edge" style="--step:0" stroke-width="1.5" marker-end="url(#arrowhead-dashed)"/>
         </g>
         <g data-graph-role="automatic-crossover" style="--step:1">
-          <path data-graph-role="automatic-crossover-underlay" d="M 928.8999999999999 150 L 928.8999999999999 254 Q 928.8999999999999 262 936.8999999999999 262 L 1050.1 262" fill="none" stroke="#ffffff" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="ui_shell" data-edge-to="update_backup" data-edge-label="更新检查与备份" data-edge-key="1" data-edge-id="ui_to_update" data-composition-points="928.8999999999999,150;928.8999999999999,262;1050.1,262" data-composition-crossover="halo" data-composition-independent="true" d="M 928.8999999999999 150 L 928.8999999999999 254 Q 928.8999999999999 262 936.8999999999999 262 L 1050.1 262" class="a-default" data-animate="edge" style="--step:1" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+          <path data-graph-role="automatic-crossover-underlay" d="M 820.8999999999999 538 L 820.8999999999999 442" fill="none" stroke="#ffffff" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="ui_shell" data-edge-to="home_timeline" data-edge-label="首页展示组件" data-edge-key="1" data-edge-id="shell_to_home_timeline" data-composition-points="820.8999999999999,538;820.8999999999999,442" data-composition-crossover="halo" data-composition-independent="true" d="M 820.8999999999999 538 L 820.8999999999999 442" class="a-dashed" data-animate="edge" style="--step:1" stroke-width="1.5" marker-end="url(#arrowhead-dashed)"/>
         </g>
         <g data-graph-role="automatic-crossover" style="--step:2">
-          <path data-graph-role="automatic-crossover-underlay" d="M 1244.1 105.95 L 1385.3 105.95" fill="none" stroke="#ffffff" stroke-width="5.8" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="assignment_store" data-edge-to="chaoxing_client" data-edge-label="拉取与取消同步" data-edge-key="2" data-edge-id="store_to_client" data-composition-points="1244.1,105.95;1385.3,105.95" data-composition-crossover="halo" data-composition-independent="true" d="M 1244.1 105.95 L 1385.3 105.95" class="a-emphasis" data-animate="edge" style="--step:2" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+          <path data-graph-role="automatic-crossover-underlay" d="M 1136.1 538 L 1136.1 490" fill="none" stroke="#ffffff" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="assignment_store" data-edge-to="assignment_personal" data-edge-label="个人状态" data-edge-key="2" data-edge-id="store_to_personal_part" data-composition-points="1136.1,538;1136.1,490" data-composition-crossover="halo" data-composition-independent="true" d="M 1136.1 538 L 1136.1 490" class="a-dashed" data-animate="edge" style="--step:2" stroke-width="1.5" marker-end="url(#arrowhead-dashed)"/>
         </g>
         <g data-graph-role="automatic-crossover" style="--step:3">
-          <path data-graph-role="automatic-crossover-underlay" d="M 1601.3 114 L 1617.3 114 Q 1625.3 114 1625.3 122 L 1625.3 564 Q 1625.3 572 1617.3 572 L 1186.1 572 Q 1178.1 572 1178.1 564 L 1178.1 548" fill="none" stroke="#ffffff" stroke-width="5.8" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="chaoxing_client" data-edge-to="chaoxing_remote" data-edge-label="HTTPS 会话采集" data-edge-key="3" data-edge-id="client_to_chaoxing" data-composition-points="1601.3,114;1625.3,114;1625.3,572;1178.1,572;1178.1,548" data-composition-crossover="halo" data-composition-independent="true" d="M 1601.3 114 L 1617.3 114 Q 1625.3 114 1625.3 122 L 1625.3 564 Q 1625.3 572 1617.3 572 L 1186.1 572 Q 1178.1 572 1178.1 564 L 1178.1 548" class="a-emphasis" data-animate="edge" style="--step:3" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+          <path data-graph-role="automatic-crossover-underlay" d="M 1154.1 538 L 1154.1 522 Q 1154.1 514 1162.1 514 L 1403.8 514 Q 1411.8 514 1411.8 506 L 1411.8 162 Q 1411.8 154 1419.8 154 L 1477.3 154 Q 1485.3 154 1485.3 146 L 1485.3 130" fill="none" stroke="#ffffff" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="assignment_store" data-edge-to="assignment_reminders" data-edge-label="提醒" data-edge-key="3" data-edge-id="store_to_reminders_part" data-composition-points="1154.1,538;1154.1,514;1411.8,514;1411.8,154;1485.3,154;1485.3,130" data-composition-crossover="halo" data-composition-independent="true" d="M 1154.1 538 L 1154.1 522 Q 1154.1 514 1162.1 514 L 1403.8 514 Q 1411.8 514 1411.8 506 L 1411.8 162 Q 1411.8 154 1419.8 154 L 1477.3 154 Q 1485.3 154 1485.3 146 L 1485.3 130" class="a-dashed" data-animate="edge" style="--step:3" stroke-width="1.5" marker-end="url(#arrowhead-dashed)"/>
         </g>
         <g data-graph-role="automatic-crossover" style="--step:4">
-          <path data-graph-role="automatic-crossover-underlay" d="M 1244.1 127.95 L 1373.3 127.95 Q 1381.3 127.95 1381.3 135.95 L 1381.3 246" fill="none" stroke="#ffffff" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="assignment_store" data-edge-to="local_storage" data-edge-label="读写快照与凭据" data-edge-key="4" data-edge-id="store_to_local" data-composition-points="1244.1,127.95;1381.3,127.95;1381.3,246" data-composition-crossover="halo" data-composition-independent="true" d="M 1244.1 127.95 L 1373.3 127.95 Q 1381.3 127.95 1381.3 135.95 L 1381.3 246" class="a-default" data-animate="edge" style="--step:4" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+          <path data-graph-role="automatic-crossover-underlay" d="M 1239.1 554 L 1255.1 554 Q 1263.1 554 1263.1 546 L 1263.1 264 Q 1263.1 256 1271.1 256 L 1417.3 256" fill="none" stroke="#ffffff" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="assignment_store" data-edge-to="assignment_sync" data-edge-label="同步" data-edge-key="4" data-edge-id="store_to_sync_part" data-composition-points="1239.1,554;1263.1,554;1263.1,256;1417.3,256" data-composition-crossover="halo" data-composition-independent="true" d="M 1239.1 554 L 1255.1 554 Q 1263.1 554 1263.1 546 L 1263.1 264 Q 1263.1 256 1271.1 256 L 1417.3 256" class="a-dashed" data-animate="edge" style="--step:4" stroke-width="1.5" marker-end="url(#arrowhead-dashed)"/>
         </g>
         <g data-graph-role="automatic-crossover" style="--step:5">
-          <path data-graph-role="automatic-crossover-underlay" d="M 1169.1 150 L 1169.1 235 Q 1169.1 243 1161.1 243 L 885.1 243 Q 877.1 243 877.1 251 L 877.1 466" fill="none" stroke="#ffffff" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="assignment_store" data-edge-to="native_host" data-edge-label="提醒桥接与租约" data-edge-key="5" data-edge-id="store_to_host" data-composition-points="1169.1,150;1169.1,243;877.1,243;877.1,466" data-composition-crossover="halo" data-composition-independent="true" d="M 1169.1 150 L 1169.1 235 Q 1169.1 243 1161.1 243 L 885.1 243 Q 877.1 243 877.1 251 L 877.1 466" class="a-security" data-animate="edge" style="--step:5" stroke-width="1.5" marker-end="url(#arrowhead-security)"/>
+          <path data-graph-role="automatic-crossover-underlay" d="M 1239.1 568 L 1320.1999999999998 568 Q 1328.1999999999998 568 1328.1999999999998 560 L 1328.1999999999998 420 Q 1328.1999999999998 412 1336.1999999999998 412 L 1417.3 412" fill="none" stroke="#ffffff" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="assignment_store" data-edge-to="assignment_session" data-edge-label="会话" data-edge-key="5" data-edge-id="store_to_session_part" data-composition-points="1239.1,568;1328.1999999999998,568;1328.1999999999998,412;1417.3,412" data-composition-crossover="halo" data-composition-independent="true" d="M 1239.1 568 L 1320.1999999999998 568 Q 1328.1999999999998 568 1328.1999999999998 560 L 1328.1999999999998 420 Q 1328.1999999999998 412 1336.1999999999998 412 L 1417.3 412" class="a-dashed" data-animate="edge" style="--step:5" stroke-width="1.5" marker-end="url(#arrowhead-dashed)"/>
         </g>
         <g data-graph-role="automatic-crossover" style="--step:6">
-          <path data-graph-role="automatic-crossover-underlay" d="M 1050.1 302 L 980.6 302 Q 972.6 302 972.6 310 L 972.6 466" fill="none" stroke="#ffffff" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="update_backup" data-edge-to="native_host" data-edge-label="APK 校验与加解密" data-edge-key="6" data-edge-id="update_to_host" data-composition-points="1050.1,302;972.6,302;972.6,466" data-composition-crossover="halo" data-composition-independent="true" d="M 1050.1 302 L 980.6 302 Q 972.6 302 972.6 310 L 972.6 466" class="a-security" data-animate="edge" style="--step:6" stroke-width="1.5" marker-end="url(#arrowhead-security)"/>
+          <path data-graph-role="automatic-crossover-underlay" d="M 943.8999999999999 565.95 L 1055.1 565.95" fill="none" stroke="#ffffff" stroke-width="5.8" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="ui_shell" data-edge-to="assignment_store" data-edge-label="状态订阅与交互" data-edge-key="6" data-edge-id="ui_to_store" data-composition-points="943.8999999999999,565.95;1055.1,565.95" data-composition-crossover="halo" data-composition-independent="true" d="M 943.8999999999999 565.95 L 1055.1 565.95" class="a-emphasis" data-animate="edge" style="--step:6" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
         </g>
         <g data-graph-role="automatic-crossover" style="--step:7">
-          <path data-graph-role="automatic-crossover-underlay" d="M 1260.1 302 L 1345.6 302 Q 1353.6 302 1353.6 310 L 1353.6 476" fill="none" stroke="#ffffff" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="update_backup" data-edge-to="release_channels" data-edge-label="拉取清单与安装包" data-edge-key="7" data-edge-id="update_to_channels" data-composition-points="1260.1,302;1353.6,302;1353.6,476" data-composition-crossover="halo" data-composition-independent="true" d="M 1260.1 302 L 1345.6 302 Q 1353.6 302 1353.6 310 L 1353.6 476" class="a-dashed" data-animate="edge" style="--step:7" stroke-width="1.5" marker-end="url(#arrowhead-dashed)"/>
+          <path data-graph-role="automatic-crossover-underlay" d="M 927.8999999999999 610 L 927.8999999999999 714 Q 927.8999999999999 722 935.8999999999999 722 L 1042.1 722" fill="none" stroke="#ffffff" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="ui_shell" data-edge-to="update_backup" data-edge-label="更新检查与备份" data-edge-key="7" data-edge-id="ui_to_update" data-composition-points="927.8999999999999,610;927.8999999999999,722;1042.1,722" data-composition-crossover="halo" data-composition-independent="true" d="M 927.8999999999999 610 L 927.8999999999999 714 Q 927.8999999999999 722 935.8999999999999 722 L 1042.1 722" class="a-default" data-animate="edge" style="--step:7" stroke-width="1.5" marker-end="url(#arrowhead)"/>
         </g>
         <g data-graph-role="automatic-crossover" style="--step:8">
-          <path data-graph-role="automatic-crossover-underlay" d="M 765.6 506 L 641.2 506" fill="none" stroke="#ffffff" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="native_host" data-edge-to="native_reminder_worker" data-edge-label="调度 Worker 与闹钟" data-edge-key="8" data-edge-id="host_to_worker" data-composition-points="765.6,506;641.2,506" data-composition-crossover="halo" data-composition-independent="true" d="M 765.6 506 L 641.2 506" class="a-default" data-animate="edge" style="--step:8" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+          <path data-graph-role="automatic-crossover-underlay" d="M 1223.1 610 L 1223.1 618 Q 1223.1 626 1231.1 626 L 1385.3 626 Q 1393.3 626 1393.3 618 L 1393.3 610" fill="none" stroke="#ffffff" stroke-width="5.8" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="assignment_store" data-edge-to="chaoxing_client" data-edge-label="拉取与取消同步" data-edge-key="8" data-edge-id="store_to_client" data-composition-points="1223.1,610;1223.1,626;1393.3,626;1393.3,610" data-composition-crossover="halo" data-composition-independent="true" d="M 1223.1 610 L 1223.1 618 Q 1223.1 626 1231.1 626 L 1385.3 626 Q 1393.3 626 1393.3 618 L 1393.3 610" class="a-emphasis" data-animate="edge" style="--step:8" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
         </g>
         <g data-graph-role="automatic-crossover" style="--step:9">
-          <path data-graph-role="automatic-crossover-underlay" d="M 625.2 466 L 625.2 70 Q 625.2 62 633.2 62 L 1074.1 62 Q 1082.1 62 1082.1 70 L 1082.1 78" fill="none" stroke="#ffffff" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="native_reminder_worker" data-edge-to="assignment_store" data-edge-label="拉起 backgroundMain" data-edge-key="9" data-edge-id="worker_to_store" data-composition-points="625.2,466;625.2,62;1082.1,62;1082.1,78" data-composition-crossover="halo" data-composition-independent="true" d="M 625.2 466 L 625.2 70 Q 625.2 62 633.2 62 L 1074.1 62 Q 1082.1 62 1082.1 70 L 1082.1 78" class="a-dashed" data-animate="edge" style="--step:9" stroke-width="1.5" marker-end="url(#arrowhead-dashed)"/>
+          <path data-graph-role="automatic-crossover-underlay" d="M 1593.3 594 L 1609.3 594 Q 1617.3 594 1617.3 602 L 1617.3 984 Q 1617.3 992 1609.3 992 L 1274.1 992" fill="none" stroke="#ffffff" stroke-width="5.8" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="chaoxing_client" data-edge-to="chaoxing_remote" data-edge-label="HTTPS 会话采集" data-edge-key="9" data-edge-id="client_to_chaoxing" data-composition-points="1593.3,594;1617.3,594;1617.3,992;1274.1,992" data-composition-crossover="halo" data-composition-independent="true" d="M 1593.3 594 L 1609.3 594 Q 1617.3 594 1617.3 602 L 1617.3 984 Q 1617.3 992 1609.3 992 L 1274.1 992" class="a-emphasis" data-animate="edge" style="--step:9" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
         </g>
         <g data-graph-role="automatic-crossover" style="--step:10">
-          <path data-graph-role="automatic-crossover-underlay" d="M 399.20000000000005 502 L 294 502" fill="none" stroke="#ffffff" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="native_reminder_worker" data-edge-to="reminder_sqlite_widget" data-edge-label="二次校验与记录" data-edge-key="10" data-edge-id="worker_to_sqlite" data-composition-points="399.20000000000005,502;294,502" data-composition-crossover="halo" data-composition-independent="true" d="M 399.20000000000005 502 L 294 502" class="a-default" data-animate="edge" style="--step:10" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+          <path data-graph-role="automatic-crossover-underlay" d="M 1239.1 594 L 1365.3 594 Q 1373.3 594 1373.3 602 L 1373.3 706" fill="none" stroke="#ffffff" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="assignment_store" data-edge-to="local_storage" data-edge-label="读写快照与凭据" data-edge-key="10" data-edge-id="store_to_local" data-composition-points="1239.1,594;1373.3,594;1373.3,706" data-composition-crossover="halo" data-composition-independent="true" d="M 1239.1 594 L 1365.3 594 Q 1373.3 594 1373.3 602 L 1373.3 706" class="a-default" data-animate="edge" style="--step:10" stroke-width="1.5" marker-end="url(#arrowhead)"/>
         </g>
         <g data-graph-role="automatic-crossover" style="--step:11">
-          <path data-graph-role="automatic-crossover-underlay" d="M 1169.1 78 L 1169.1 44 Q 1169.1 36 1161.1 36 L 286 36 Q 278 36 278 44 L 278 466" fill="none" stroke="#ffffff" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="assignment_store" data-edge-to="reminder_sqlite_widget" data-edge-label="刷新小组件快照" data-edge-key="11" data-edge-id="store_to_widget" data-composition-points="1169.1,78;1169.1,36;278,36;278,466" data-composition-crossover="halo" data-composition-independent="true" d="M 1169.1 78 L 1169.1 44 Q 1169.1 36 1161.1 36 L 286 36 Q 278 36 278 44 L 278 466" class="a-dashed" data-animate="edge" style="--step:11" stroke-width="1.5" marker-end="url(#arrowhead-dashed)"/>
+          <path data-graph-role="automatic-crossover-underlay" d="M 1165.1 610 L 1165.1 695 Q 1165.1 703 1157.1 703 L 877.1 703 Q 869.1 703 869.1 711 L 869.1 926" fill="none" stroke="#ffffff" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="assignment_store" data-edge-to="native_host" data-edge-label="提醒桥接与租约" data-edge-key="11" data-edge-id="store_to_host" data-composition-points="1165.1,610;1165.1,703;869.1,703;869.1,926" data-composition-crossover="halo" data-composition-independent="true" d="M 1165.1 610 L 1165.1 695 Q 1165.1 703 1157.1 703 L 877.1 703 Q 869.1 703 869.1 711 L 869.1 926" class="a-security" data-animate="edge" style="--step:11" stroke-width="1.5" marker-end="url(#arrowhead-security)"/>
+        </g>
+        <g data-graph-role="automatic-crossover" style="--step:12">
+          <path data-graph-role="automatic-crossover-underlay" d="M 1042.1 762 L 981.1 762 Q 973.1 762 973.1 770 L 973.1 926" fill="none" stroke="#ffffff" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="update_backup" data-edge-to="native_host" data-edge-label="APK 校验与加解密" data-edge-key="12" data-edge-id="update_to_host" data-composition-points="1042.1,762;973.1,762;973.1,926" data-composition-crossover="halo" data-composition-independent="true" d="M 1042.1 762 L 981.1 762 Q 973.1 762 973.1 770 L 973.1 926" class="a-security" data-animate="edge" style="--step:12" stroke-width="1.5" marker-end="url(#arrowhead-security)"/>
+        </g>
+        <g data-graph-role="automatic-crossover" style="--step:13">
+          <path data-graph-role="automatic-crossover-underlay" d="M 1252.1 762 L 1333.6 762 Q 1341.6 762 1341.6 770 L 1341.6 842" fill="none" stroke="#ffffff" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="update_backup" data-edge-to="release_channels" data-edge-label="拉取清单与安装包" data-edge-key="13" data-edge-id="update_to_channels" data-composition-points="1252.1,762;1341.6,762;1341.6,842" data-composition-crossover="halo" data-composition-independent="true" d="M 1252.1 762 L 1333.6 762 Q 1341.6 762 1341.6 770 L 1341.6 842" class="a-dashed" data-animate="edge" style="--step:12" stroke-width="1.5" marker-end="url(#arrowhead-dashed)"/>
+        </g>
+        <g data-graph-role="automatic-crossover" style="--step:14">
+          <path data-graph-role="automatic-crossover-underlay" d="M 749.1 962 L 640.2 962" fill="none" stroke="#ffffff" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="native_host" data-edge-to="native_reminder_worker" data-edge-label="调度 Worker 与闹钟" data-edge-key="14" data-edge-id="host_to_worker" data-composition-points="749.1,962;640.2,962" data-composition-crossover="halo" data-composition-independent="true" d="M 749.1 962 L 640.2 962" class="a-default" data-animate="edge" style="--step:12" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        </g>
+        <g data-graph-role="automatic-crossover" style="--step:15">
+          <path data-graph-role="automatic-crossover-underlay" d="M 512.2 926 L 512.2 667.75 Q 512.2 659.75 520.2 659.75 L 1139.1 659.75 Q 1147.1 659.75 1147.1 651.75 L 1147.1 610" fill="none" stroke="#ffffff" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="native_reminder_worker" data-edge-to="assignment_store" data-edge-label="拉起 backgroundMain" data-edge-key="15" data-edge-id="worker_to_store" data-composition-points="512.2,926;512.2,659.75;1147.1,659.75;1147.1,610" data-composition-crossover="halo" data-composition-independent="true" d="M 512.2 926 L 512.2 667.75 Q 512.2 659.75 520.2 659.75 L 1139.1 659.75 Q 1147.1 659.75 1147.1 651.75 L 1147.1 610" class="a-dashed" data-animate="edge" style="--step:12" stroke-width="1.5" marker-end="url(#arrowhead-dashed)"/>
+        </g>
+        <g data-graph-role="automatic-crossover" style="--step:16">
+          <path data-graph-role="automatic-crossover-underlay" d="M 384.20000000000005 962 L 294 962" fill="none" stroke="#ffffff" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="native_reminder_worker" data-edge-to="reminder_sqlite_widget" data-edge-label="二次校验与记录" data-edge-key="16" data-edge-id="worker_to_sqlite" data-composition-points="384.20000000000005,962;294,962" data-composition-crossover="halo" data-composition-independent="true" d="M 384.20000000000005 962 L 294 962" class="a-default" data-animate="edge" style="--step:12" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        </g>
+        <g data-graph-role="automatic-crossover" style="--step:17">
+          <path data-graph-role="automatic-crossover-underlay" d="M 1071.1 610 L 1071.1 633.75 Q 1071.1 641.75 1063.1 641.75 L 286 641.75 Q 278 641.75 278 649.75 L 278 926" fill="none" stroke="#ffffff" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="assignment_store" data-edge-to="reminder_sqlite_widget" data-edge-label="刷新小组件快照" data-edge-key="17" data-edge-id="store_to_widget" data-composition-points="1071.1,610;1071.1,641.75;278,641.75;278,926" data-composition-crossover="halo" data-composition-independent="true" d="M 1071.1 610 L 1071.1 633.75 Q 1071.1 641.75 1063.1 641.75 L 286 641.75 Q 278 641.75 278 649.75 L 278 926" class="a-dashed" data-animate="edge" style="--step:12" stroke-width="1.5" marker-end="url(#arrowhead-dashed)"/>
         </g>
 
         <!-- Components -->
         <g id="node-ui_shell" data-node-id="ui_shell" data-node-label="Flutter 界面与路由壳" tabindex="0" role="button" aria-label="聚焦Flutter 界面与路由壳，lib/main.dart · app/ · features/, Flutter 业务与状态层 (Dart)" aria-pressed="false" data-node-kind="frontend" data-node-sublabel="lib/main.dart · app/ · features/" data-node-tag="GoRouter + 4 Tab" data-node-context="Flutter 业务与状态层 (Dart)" data-emphasis="">
           <title>Flutter 界面与路由壳 · lib/main.dart · app/ · features/ · Flutter 业务与状态层 (Dart) · GoRouter + 4 Tab</title>
-          <rect x="734.8999999999999" y="78" width="210" height="72" rx="8" class="c-mask"/>
-          <rect x="734.8999999999999" y="78" width="210" height="72" rx="8" class="c-frontend" data-animate="node" style="--step:0" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="frontend" class="semantic-sigil s-frontend" transform="translate(740.8999999999999 84) scale(0.6875)">
+          <rect x="719.8999999999999" y="538" width="224" height="72" rx="8" class="c-mask"/>
+          <rect x="719.8999999999999" y="538" width="224" height="72" rx="8" class="c-frontend" data-animate="node" style="--step:0" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="frontend" class="semantic-sigil s-frontend" transform="translate(725.8999999999999 544) scale(0.6875)">
             <rect x="2" y="3" width="12" height="10" rx="2"/>
             <path d="M2 6.5h12"/>
             <circle cx="4.1" cy="4.8" r=".7" class="sigil-fill"/>
             <circle cx="6.3" cy="4.8" r=".7" class="sigil-fill"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="839.8999999999999" y="112" class="t-primary" font-size="13.5" font-weight="600" text-anchor="middle">Flutter 界面与路由壳</text>
-        <text data-detail="context" x="839.8999999999999" y="128" class="t-muted" font-size="10.5" text-anchor="middle">lib/main.dart · app/ · features/</text>
-        <text data-detail="fine" x="839.8999999999999" y="142" class="t-frontend" font-size="7" text-anchor="middle">GoRouter + 4 Tab</text>
+          <text data-node-label="" data-detail-anchor="" x="831.8999999999999" y="572" class="t-primary" font-size="14" font-weight="600" text-anchor="middle">Flutter 界面与路由壳</text>
+        <text data-detail="context" x="831.8999999999999" y="588" class="t-muted" font-size="10.5" text-anchor="middle">lib/main.dart · app/ · features/</text>
+        <text data-detail="fine" x="831.8999999999999" y="602" class="t-frontend" font-size="7" text-anchor="middle">GoRouter + 4 Tab</text>
         </g>
 
-        <g id="node-assignment_store" data-node-id="assignment_store" data-node-label="课业状态与协调中枢" tabindex="0" role="button" aria-label="聚焦课业状态与协调中枢，services/ · models/, Flutter 业务与状态层 (Dart)" aria-pressed="false" data-node-kind="backend" data-node-sublabel="services/ · models/" data-node-tag="AssignmentStore" data-node-context="Flutter 业务与状态层 (Dart)" data-emphasis="">
-          <title>课业状态与协调中枢 · services/ · models/ · Flutter 业务与状态层 (Dart) · AssignmentStore</title>
-          <rect x="1066.1" y="78" width="178" height="72" rx="8" class="c-mask"/>
-          <rect x="1066.1" y="78" width="178" height="72" rx="8" class="c-backend" data-animate="node" style="--step:1" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(1072.1 84) scale(0.6875)">
+        <g id="node-home_interactions" data-node-id="home_interactions" data-node-label="首页搜索、筛选与排序" tabindex="0" role="button" aria-label="聚焦首页搜索、筛选与排序，AssignmentListScreen · Sheet, Flutter 业务与状态层 (Dart)" aria-pressed="false" data-node-kind="frontend" data-node-sublabel="AssignmentListScreen · Sheet" data-node-context="Flutter 业务与状态层 (Dart)">
+          <title>首页搜索、筛选与排序 · AssignmentListScreen · Sheet · Flutter 业务与状态层 (Dart)</title>
+          <rect x="1051.1" y="226" width="192" height="60" rx="8" class="c-mask"/>
+          <rect x="1051.1" y="226" width="192" height="60" rx="8" class="c-frontend" data-animate="node" style="--step:1" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="frontend" class="semantic-sigil s-frontend" transform="translate(1057.1 232) scale(0.6875)">
+            <rect x="2" y="3" width="12" height="10" rx="2"/>
+            <path d="M2 6.5h12"/>
+            <circle cx="4.1" cy="4.8" r=".7" class="sigil-fill"/>
+            <circle cx="6.3" cy="4.8" r=".7" class="sigil-fill"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="1147.1" y="254" class="t-primary" font-size="12" font-weight="600" text-anchor="middle">首页搜索、筛选与排序</text>
+        <text data-detail="context" x="1147.1" y="270" class="t-muted" font-size="10.5" text-anchor="middle">AssignmentListScreen · Sheet</text>
+        </g>
+
+        <g id="node-home_timeline" data-node-id="home_timeline" data-node-label="首页分区、时间线与弹窗" tabindex="0" role="button" aria-label="聚焦首页分区、时间线与弹窗，列表展示 · 共享 Sheet, Flutter 业务与状态层 (Dart)" aria-pressed="false" data-node-kind="frontend" data-node-sublabel="列表展示 · 共享 Sheet" data-node-context="Flutter 业务与状态层 (Dart)">
+          <title>首页分区、时间线与弹窗 · 列表展示 · 共享 Sheet · Flutter 业务与状态层 (Dart)</title>
+          <rect x="719.8999999999999" y="382" width="224" height="60" rx="8" class="c-mask"/>
+          <rect x="719.8999999999999" y="382" width="224" height="60" rx="8" class="c-frontend" data-animate="node" style="--step:2" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="frontend" class="semantic-sigil s-frontend" transform="translate(725.8999999999999 388) scale(0.6875)">
+            <rect x="2" y="3" width="12" height="10" rx="2"/>
+            <path d="M2 6.5h12"/>
+            <circle cx="4.1" cy="4.8" r=".7" class="sigil-fill"/>
+            <circle cx="6.3" cy="4.8" r=".7" class="sigil-fill"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="831.8999999999999" y="410" class="t-primary" font-size="13.3" font-weight="600" text-anchor="middle">首页分区、时间线与弹窗</text>
+        <text data-detail="context" x="831.8999999999999" y="426" class="t-muted" font-size="10.5" text-anchor="middle">列表展示 · 共享 Sheet</text>
+        </g>
+
+        <g id="node-assignment_store" data-node-id="assignment_store" data-node-label="课业状态与协调中枢" tabindex="0" role="button" aria-label="聚焦课业状态与协调中枢，公共接口 · 共享状态与事务, Flutter 业务与状态层 (Dart)" aria-pressed="false" data-node-kind="backend" data-node-sublabel="公共接口 · 共享状态与事务" data-node-tag="AssignmentStore" data-node-context="Flutter 业务与状态层 (Dart)" data-emphasis="">
+          <title>课业状态与协调中枢 · 公共接口 · 共享状态与事务 · Flutter 业务与状态层 (Dart) · AssignmentStore</title>
+          <rect x="1055.1" y="538" width="184" height="72" rx="8" class="c-mask"/>
+          <rect x="1055.1" y="538" width="184" height="72" rx="8" class="c-backend" data-animate="node" style="--step:2" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(1061.1 544) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="1155.1" y="112" class="t-primary" font-size="12" font-weight="600" text-anchor="middle">课业状态与协调中枢</text>
-        <text data-detail="context" x="1155.1" y="128" class="t-muted" font-size="10.5" text-anchor="middle">services/ · models/</text>
-        <text data-detail="fine" x="1155.1" y="142" class="t-backend" font-size="7" text-anchor="middle">AssignmentStore</text>
+          <text data-node-label="" data-detail-anchor="" x="1147.1" y="572" class="t-primary" font-size="12.5" font-weight="600" text-anchor="middle">课业状态与协调中枢</text>
+        <text data-detail="context" x="1147.1" y="588" class="t-muted" font-size="10.5" text-anchor="middle">公共接口 · 共享状态与事务</text>
+        <text data-detail="fine" x="1147.1" y="602" class="t-backend" font-size="7" text-anchor="middle">AssignmentStore</text>
+        </g>
+
+        <g id="node-assignment_personal" data-node-id="assignment_personal" data-node-label="个人状态" tabindex="0" role="button" aria-label="聚焦个人状态，待办 · 置顶 · 课程设置, Flutter 业务与状态层 (Dart)" aria-pressed="false" data-node-kind="backend" data-node-sublabel="待办 · 置顶 · 课程设置" data-node-context="Flutter 业务与状态层 (Dart)">
+          <title>个人状态 · 待办 · 置顶 · 课程设置 · Flutter 业务与状态层 (Dart)</title>
+          <rect x="1055.0999999999997" y="430" width="184" height="60" rx="8" class="c-mask"/>
+          <rect x="1055.0999999999997" y="430" width="184" height="60" rx="8" class="c-backend" data-animate="node" style="--step:3" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(1061.0999999999997 436) scale(0.6875)">
+            <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="1147.0999999999997" y="458" class="t-primary" font-size="14" font-weight="600" text-anchor="middle">个人状态</text>
+        <text data-detail="context" x="1147.0999999999997" y="474" class="t-muted" font-size="10.5" text-anchor="middle">待办 · 置顶 · 课程设置</text>
+        </g>
+
+        <g id="node-assignment_reminders" data-node-id="assignment_reminders" data-node-label="提醒与小组件" tabindex="0" role="button" aria-label="聚焦提醒与小组件，提醒投递 · 历史与补偿, Flutter 业务与状态层 (Dart)" aria-pressed="false" data-node-kind="backend" data-node-sublabel="提醒投递 · 历史与补偿" data-node-context="Flutter 业务与状态层 (Dart)">
+          <title>提醒与小组件 · 提醒投递 · 历史与补偿 · Flutter 业务与状态层 (Dart)</title>
+          <rect x="1414.8" y="70" width="141" height="60" rx="8" class="c-mask"/>
+          <rect x="1414.8" y="70" width="141" height="60" rx="8" class="c-backend" data-animate="node" style="--step:4" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(1420.8 76) scale(0.6875)">
+            <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="1485.3" y="98" class="t-primary" font-size="12.9" font-weight="600" text-anchor="middle">提醒与小组件</text>
+        <text data-detail="context" x="1485.3" y="114" class="t-muted" font-size="10.5" text-anchor="middle">提醒投递 · 历史与补偿</text>
+        </g>
+
+        <g id="node-assignment_sync" data-node-id="assignment_sync" data-node-label="课业同步" tabindex="0" role="button" aria-label="聚焦课业同步，触发 · 租约 · 退避, Flutter 业务与状态层 (Dart)" aria-pressed="false" data-node-kind="backend" data-node-sublabel="触发 · 租约 · 退避" data-node-context="Flutter 业务与状态层 (Dart)">
+          <title>课业同步 · 触发 · 租约 · 退避 · Flutter 业务与状态层 (Dart)</title>
+          <rect x="1417.3" y="226" width="136" height="60" rx="8" class="c-mask"/>
+          <rect x="1417.3" y="226" width="136" height="60" rx="8" class="c-backend" data-animate="node" style="--step:5" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(1423.3 232) scale(0.6875)">
+            <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="1485.3" y="254" class="t-primary" font-size="14" font-weight="600" text-anchor="middle">课业同步</text>
+        <text data-detail="context" x="1485.3" y="270" class="t-muted" font-size="10.5" text-anchor="middle">触发 · 租约 · 退避</text>
+        </g>
+
+        <g id="node-assignment_session" data-node-id="assignment_session" data-node-label="账号与会话" tabindex="0" role="button" aria-label="聚焦账号与会话，恢复 · 登录 · 退出, Flutter 业务与状态层 (Dart)" aria-pressed="false" data-node-kind="backend" data-node-sublabel="恢复 · 登录 · 退出" data-node-context="Flutter 业务与状态层 (Dart)">
+          <title>账号与会话 · 恢复 · 登录 · 退出 · Flutter 业务与状态层 (Dart)</title>
+          <rect x="1417.3" y="382" width="136" height="60" rx="8" class="c-mask"/>
+          <rect x="1417.3" y="382" width="136" height="60" rx="8" class="c-backend" data-animate="node" style="--step:6" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(1423.3 388) scale(0.6875)">
+            <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="1485.3" y="410" class="t-primary" font-size="14" font-weight="600" text-anchor="middle">账号与会话</text>
+        <text data-detail="context" x="1485.3" y="426" class="t-muted" font-size="10.5" text-anchor="middle">恢复 · 登录 · 退出</text>
         </g>
 
         <g id="node-chaoxing_client" data-node-id="chaoxing_client" data-node-label="学习通采集与解析层" tabindex="0" role="button" aria-label="聚焦学习通采集与解析层，lib/src/local/ (Client + Parsers), Flutter 业务与状态层 (Dart)" aria-pressed="false" data-node-kind="backend" data-node-sublabel="lib/src/local/ (Client + Parsers)" data-node-tag="多源归一化" data-node-context="Flutter 业务与状态层 (Dart)">
           <title>学习通采集与解析层 · lib/src/local/ (Client + Parsers) · Flutter 业务与状态层 (Dart) · 多源归一化</title>
-          <rect x="1385.3" y="78" width="216" height="72" rx="8" class="c-mask"/>
-          <rect x="1385.3" y="78" width="216" height="72" rx="8" class="c-backend" data-animate="node" style="--step:3" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(1391.3 84) scale(0.6875)">
+          <rect x="1377.3" y="538" width="216" height="72" rx="8" class="c-mask"/>
+          <rect x="1377.3" y="538" width="216" height="72" rx="8" class="c-backend" data-animate="node" style="--step:9" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(1383.3 544) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="1493.3" y="112" class="t-primary" font-size="14" font-weight="600" text-anchor="middle">学习通采集与解析层</text>
-        <text data-detail="context" x="1493.3" y="128" class="t-muted" font-size="10.5" text-anchor="middle">lib/src/local/ (Client + Parsers)</text>
-        <text data-detail="fine" x="1493.3" y="142" class="t-backend" font-size="7" text-anchor="middle">多源归一化</text>
+          <text data-node-label="" data-detail-anchor="" x="1485.3" y="572" class="t-primary" font-size="14" font-weight="600" text-anchor="middle">学习通采集与解析层</text>
+        <text data-detail="context" x="1485.3" y="588" class="t-muted" font-size="10.5" text-anchor="middle">lib/src/local/ (Client + Parsers)</text>
+        <text data-detail="fine" x="1485.3" y="602" class="t-backend" font-size="7" text-anchor="middle">多源归一化</text>
         </g>
 
         <g id="node-local_storage" data-node-id="local_storage" data-node-label="本机课业与安全凭据仓" tabindex="0" role="button" aria-label="聚焦本机课业与安全凭据仓，LocalAssignmentRepository · SecureSession, Flutter 业务与状态层 (Dart)" aria-pressed="false" data-node-kind="database" data-node-sublabel="LocalAssignmentRepository · SecureSession" data-node-tag="账号隔离 + 恢复副本" data-node-context="Flutter 业务与状态层 (Dart)">
           <title>本机课业与安全凭据仓 · LocalAssignmentRepository · SecureSession · Flutter 业务与状态层 (Dart) · 账号隔离 + 恢复副本</title>
-          <rect x="1365.3" y="246" width="256" height="72" rx="8" class="c-mask"/>
-          <rect x="1365.3" y="246" width="256" height="72" rx="8" class="c-database" data-animate="node" style="--step:5" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(1371.3 252) scale(0.6875)">
+          <rect x="1357.3" y="706" width="256" height="72" rx="8" class="c-mask"/>
+          <rect x="1357.3" y="706" width="256" height="72" rx="8" class="c-database" data-animate="node" style="--step:11" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(1363.3 712) scale(0.6875)">
             <ellipse cx="8" cy="4" rx="5" ry="2"/>
             <path d="M3 4v8c0 1.1 2.2 2 5 2s5-.9 5-2V4M3 8c0 1.1 2.2 2 5 2s5-.9 5-2"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="1493.3" y="280" class="t-primary" font-size="14" font-weight="600" text-anchor="middle">本机课业与安全凭据仓</text>
-        <text data-detail="context" x="1493.3" y="296" class="t-muted" font-size="10" text-anchor="middle">LocalAssignmentRepository · SecureSession</text>
-        <text data-detail="fine" x="1493.3" y="310" class="t-database" font-size="7" text-anchor="middle">账号隔离 + 恢复副本</text>
+          <text data-node-label="" data-detail-anchor="" x="1485.3" y="740" class="t-primary" font-size="14" font-weight="600" text-anchor="middle">本机课业与安全凭据仓</text>
+        <text data-detail="context" x="1485.3" y="756" class="t-muted" font-size="10" text-anchor="middle">LocalAssignmentRepository · SecureSession</text>
+        <text data-detail="fine" x="1485.3" y="770" class="t-database" font-size="7" text-anchor="middle">账号隔离 + 恢复副本</text>
         </g>
 
         <g id="node-update_backup" data-node-id="update_backup" data-node-label="应用更新与加密备份" tabindex="0" role="button" aria-label="聚焦应用更新与加密备份，AppUpdateService · BackupService, Flutter 业务与状态层 (Dart)" aria-pressed="false" data-node-kind="backend" data-node-sublabel="AppUpdateService · BackupService" data-node-tag="双源清单 + 口令备份" data-node-context="Flutter 业务与状态层 (Dart)">
           <title>应用更新与加密备份 · AppUpdateService · BackupService · Flutter 业务与状态层 (Dart) · 双源清单 + 口令备份</title>
-          <rect x="1050.1" y="246" width="210" height="72" rx="8" class="c-mask"/>
-          <rect x="1050.1" y="246" width="210" height="72" rx="8" class="c-backend" data-animate="node" style="--step:2" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(1056.1 252) scale(0.6875)">
+          <rect x="1042.1" y="706" width="210" height="72" rx="8" class="c-mask"/>
+          <rect x="1042.1" y="706" width="210" height="72" rx="8" class="c-backend" data-animate="node" style="--step:8" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(1048.1 712) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="1155.1" y="280" class="t-primary" font-size="14" font-weight="600" text-anchor="middle">应用更新与加密备份</text>
-        <text data-detail="context" x="1155.1" y="296" class="t-muted" font-size="10.5" text-anchor="middle">AppUpdateService · BackupService</text>
-        <text data-detail="fine" x="1155.1" y="310" class="t-backend" font-size="7" text-anchor="middle">双源清单 + 口令备份</text>
+          <text data-node-label="" data-detail-anchor="" x="1147.1" y="740" class="t-primary" font-size="14" font-weight="600" text-anchor="middle">应用更新与加密备份</text>
+        <text data-detail="context" x="1147.1" y="756" class="t-muted" font-size="10.5" text-anchor="middle">AppUpdateService · BackupService</text>
+        <text data-detail="fine" x="1147.1" y="770" class="t-backend" font-size="7" text-anchor="middle">双源清单 + 口令备份</text>
         </g>
 
         <g id="node-native_host" data-node-id="native_host" data-node-label="Android 原生宿主与通道桥" tabindex="0" role="button" aria-label="聚焦Android 原生宿主与通道桥，MainActivity · VerificationBrowser, Android 原生宿主与后台层 (Kotlin / Java)" aria-pressed="false" data-node-kind="security" data-node-sublabel="MainActivity · VerificationBrowser" data-node-tag="MethodChannel 网关" data-node-context="Android 原生宿主与后台层 (Kotlin / Java)">
           <title>Android 原生宿主与通道桥 · MainActivity · VerificationBrowser · Android 原生宿主与后台层 (Kotlin / Java) · MethodChannel 网关</title>
-          <rect x="765.6" y="466" width="223" height="72" rx="8" class="c-mask"/>
-          <rect x="765.6" y="466" width="223" height="72" rx="8" class="c-security" data-animate="node" style="--step:6" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(771.6 472) scale(0.6875)">
+          <rect x="749.1" y="926" width="240" height="72" rx="8" class="c-mask"/>
+          <rect x="749.1" y="926" width="240" height="72" rx="8" class="c-security" data-animate="node" style="--step:12" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(755.1 932) scale(0.6875)">
             <path d="M8 2.2 13 4v3.5c0 3.1-1.8 5.4-5 6.5-3.2-1.1-5-3.4-5-6.5V4Z"/>
             <path d="m5.8 8 1.5 1.5 3-3"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="877.1" y="500" class="t-primary" font-size="12.1" font-weight="600" text-anchor="middle">Android 原生宿主与通道桥</text>
-        <text data-detail="context" x="877.1" y="516" class="t-muted" font-size="10.5" text-anchor="middle">MainActivity · VerificationBrowser</text>
-        <text data-detail="fine" x="877.1" y="530" class="t-security" font-size="7" text-anchor="middle">MethodChannel 网关</text>
+          <text data-node-label="" data-detail-anchor="" x="869.1" y="960" class="t-primary" font-size="13.3" font-weight="600" text-anchor="middle">Android 原生宿主与通道桥</text>
+        <text data-detail="context" x="869.1" y="976" class="t-muted" font-size="10.5" text-anchor="middle">MainActivity · VerificationBrowser</text>
+        <text data-detail="fine" x="869.1" y="990" class="t-security" font-size="7" text-anchor="middle">MethodChannel 网关</text>
         </g>
 
         <g id="node-native_reminder_worker" data-node-id="native_reminder_worker" data-node-label="后台检查与原生提醒引擎" tabindex="0" role="button" aria-label="聚焦后台检查与原生提醒引擎，WorkManager · AlarmManager · Listener, Android 原生宿主与后台层 (Kotlin / Java)" aria-pressed="false" data-node-kind="messagebus" data-node-sublabel="WorkManager · AlarmManager · Listener" data-node-tag="backgroundMain + v3 渠道" data-node-context="Android 原生宿主与后台层 (Kotlin / Java)">
           <title>后台检查与原生提醒引擎 · WorkManager · AlarmManager · Listener · Android 原生宿主与后台层 (Kotlin / Java) · backgroundMain + v3 渠道</title>
-          <rect x="399.20000000000005" y="466" width="242" height="72" rx="8" class="c-mask"/>
-          <rect x="399.20000000000005" y="466" width="242" height="72" rx="8" class="c-messagebus" data-animate="node" style="--step:9" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="messagebus" class="semantic-sigil s-messagebus" transform="translate(405.20000000000005 472) scale(0.6875)">
+          <rect x="384.20000000000005" y="926" width="256" height="72" rx="8" class="c-mask"/>
+          <rect x="384.20000000000005" y="926" width="256" height="72" rx="8" class="c-messagebus" data-animate="node" style="--step:12" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="messagebus" class="semantic-sigil s-messagebus" transform="translate(390.20000000000005 932) scale(0.6875)">
             <path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11"/>
             <circle cx="5" cy="4.5" r="1" class="sigil-fill"/>
             <circle cx="10.5" cy="8" r="1" class="sigil-fill"/>
             <circle cx="7" cy="11.5" r="1" class="sigil-fill"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="520.2" y="500" class="t-primary" font-size="14" font-weight="600" text-anchor="middle">后台检查与原生提醒引擎</text>
-        <text data-detail="context" x="520.2" y="516" class="t-muted" font-size="10.5" text-anchor="middle">WorkManager · AlarmManager · Listener</text>
-        <text data-detail="fine" x="520.2" y="530" class="t-messagebus" font-size="7" text-anchor="middle">backgroundMain + v3 渠道</text>
+          <text data-node-label="" data-detail-anchor="" x="512.2" y="960" class="t-primary" font-size="14" font-weight="600" text-anchor="middle">后台检查与原生提醒引擎</text>
+        <text data-detail="context" x="512.2" y="976" class="t-muted" font-size="10.5" text-anchor="middle">WorkManager · AlarmManager · Listener</text>
+        <text data-detail="fine" x="512.2" y="990" class="t-messagebus" font-size="7" text-anchor="middle">backgroundMain + v3 渠道</text>
         </g>
 
         <g id="node-reminder_sqlite_widget" data-node-id="reminder_sqlite_widget" data-node-label="原生提醒库与桌面小组件" tabindex="0" role="button" aria-label="聚焦原生提醒库与桌面小组件，ReminderDatabase · WidgetProvider, Android 原生宿主与后台层 (Kotlin / Java)" aria-pressed="false" data-node-kind="database" data-node-sublabel="ReminderDatabase · WidgetProvider" data-node-tag="SQLite + AppWidget" data-node-context="Android 原生宿主与后台层 (Kotlin / Java)">
           <title>原生提醒库与桌面小组件 · ReminderDatabase · WidgetProvider · Android 原生宿主与后台层 (Kotlin / Java) · SQLite + AppWidget</title>
-          <rect x="78" y="466" width="216" height="72" rx="8" class="c-mask"/>
-          <rect x="78" y="466" width="216" height="72" rx="8" class="c-database" data-animate="node" style="--step:11" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(84 472) scale(0.6875)">
+          <rect x="62" y="926" width="232" height="72" rx="8" class="c-mask"/>
+          <rect x="62" y="926" width="232" height="72" rx="8" class="c-database" data-animate="node" style="--step:12" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(68 932) scale(0.6875)">
             <ellipse cx="8" cy="4" rx="5" ry="2"/>
             <path d="M3 4v8c0 1.1 2.2 2 5 2s5-.9 5-2V4M3 8c0 1.1 2.2 2 5 2s5-.9 5-2"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="186" y="500" class="t-primary" font-size="12.7" font-weight="600" text-anchor="middle">原生提醒库与桌面小组件</text>
-        <text data-detail="context" x="186" y="516" class="t-muted" font-size="10.5" text-anchor="middle">ReminderDatabase · WidgetProvider</text>
-        <text data-detail="fine" x="186" y="530" class="t-database" font-size="7" text-anchor="middle">SQLite + AppWidget</text>
+          <text data-node-label="" data-detail-anchor="" x="178" y="960" class="t-primary" font-size="13.9" font-weight="600" text-anchor="middle">原生提醒库与桌面小组件</text>
+        <text data-detail="context" x="178" y="976" class="t-muted" font-size="10.5" text-anchor="middle">ReminderDatabase · WidgetProvider</text>
+        <text data-detail="fine" x="178" y="990" class="t-database" font-size="7" text-anchor="middle">SQLite + AppWidget</text>
         </g>
 
         <g id="node-chaoxing_remote" data-node-id="chaoxing_remote" data-node-label="超星学习通线上服务" tabindex="0" role="button" aria-label="聚焦超星学习通线上服务，登录 · 课程 · 作业 · 考试接口, 架构组件" aria-pressed="false" data-node-kind="external" data-node-sublabel="登录 · 课程 · 作业 · 考试接口" data-node-tag="外部上游" data-node-context="架构组件">
           <title>超星学习通线上服务 · 登录 · 课程 · 作业 · 考试接口 · 架构组件 · 外部上游</title>
-          <rect x="1082.6" y="476" width="191" height="72" rx="8" class="c-mask"/>
-          <rect x="1082.6" y="476" width="191" height="72" rx="8" class="c-external" data-animate="node" style="--step:4" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(1088.6 482) scale(0.6875)">
+          <rect x="1066.1" y="936" width="208" height="72" rx="8" class="c-mask"/>
+          <rect x="1066.1" y="936" width="208" height="72" rx="8" class="c-external" data-animate="node" style="--step:10" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(1072.1 942) scale(0.6875)">
             <rect x="2.5" y="5" width="8.5" height="8" rx="1.5"/>
             <path d="M8 2.5h5.5V8M13.5 2.5 7.5 8.5"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="1178.1" y="510" class="t-primary" font-size="13.2" font-weight="600" text-anchor="middle">超星学习通线上服务</text>
-        <text data-detail="context" x="1178.1" y="526" class="t-muted" font-size="10.5" text-anchor="middle">登录 · 课程 · 作业 · 考试接口</text>
-        <text data-detail="fine" x="1178.1" y="540" class="t-external" font-size="7" text-anchor="middle">外部上游</text>
+          <text data-node-label="" data-detail-anchor="" x="1170.1" y="970" class="t-primary" font-size="14" font-weight="600" text-anchor="middle">超星学习通线上服务</text>
+        <text data-detail="context" x="1170.1" y="986" class="t-muted" font-size="10.5" text-anchor="middle">登录 · 课程 · 作业 · 考试接口</text>
+        <text data-detail="fine" x="1170.1" y="1000" class="t-external" font-size="7" text-anchor="middle">外部上游</text>
         </g>
 
         <g id="node-release_channels" data-node-id="release_channels" data-node-label="CI 门禁与双源分发渠道" tabindex="0" role="button" aria-label="聚焦CI 门禁与双源分发渠道，scripts/ · .github/workflows/, 架构组件" aria-pressed="false" data-node-kind="cloud" data-node-sublabel="scripts/ · .github/workflows/" data-node-tag="GitHub + Gitee" data-node-context="架构组件">
           <title>CI 门禁与双源分发渠道 · scripts/ · .github/workflows/ · 架构组件 · GitHub + Gitee</title>
-          <rect x="1337.6" y="476" width="200" height="72" rx="8" class="c-mask"/>
-          <rect x="1337.6" y="476" width="200" height="72" rx="8" class="c-cloud" data-animate="node" style="--step:8" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="cloud" class="semantic-sigil s-cloud" transform="translate(1343.6 482) scale(0.6875)">
+          <rect x="1325.6" y="842" width="208" height="72" rx="8" class="c-mask"/>
+          <rect x="1325.6" y="842" width="208" height="72" rx="8" class="c-cloud" data-animate="node" style="--step:12" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="cloud" class="semantic-sigil s-cloud" transform="translate(1331.6 848) scale(0.6875)">
             <path d="M4.3 12.5h7.3a2.4 2.4 0 0 0 .2-4.8 4 4 0 0 0-7.5-1.3A3.1 3.1 0 0 0 4.3 12.5Z"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="1437.6" y="510" class="t-primary" font-size="12" font-weight="600" text-anchor="middle">CI 门禁与双源分发渠道</text>
-        <text data-detail="context" x="1437.6" y="526" class="t-muted" font-size="10.5" text-anchor="middle">scripts/ · .github/workflows/</text>
-        <text data-detail="fine" x="1437.6" y="540" class="t-cloud" font-size="7" text-anchor="middle">GitHub + Gitee</text>
+          <text data-node-label="" data-detail-anchor="" x="1429.6" y="876" class="t-primary" font-size="12.6" font-weight="600" text-anchor="middle">CI 门禁与双源分发渠道</text>
+        <text data-detail="context" x="1429.6" y="892" class="t-muted" font-size="10.5" text-anchor="middle">scripts/ · .github/workflows/</text>
+        <text data-detail="fine" x="1429.6" y="906" class="t-cloud" font-size="7" text-anchor="middle">GitHub + Gitee</text>
         </g>
 
         <!-- Connection labels -->
-        <g data-detail="context" data-edge-from="ui_shell" data-edge-to="assignment_store" data-edge-label="状态订阅与交互" data-edge-key="0" data-edge-id="ui_to_store">
-          <rect x="966.8999999999999" y="85.95" width="77.2" height="14" rx="3" class="c-mask"/>
-          <text x="1005.4999999999999" y="95.95" class="t-edge-emphasis" font-size="9.5" font-weight="500" text-anchor="middle">状态订阅与交互</text>
+        <g data-detail="context" data-edge-from="ui_shell" data-edge-to="home_interactions" data-edge-label="首页入口" data-edge-key="0" data-edge-id="shell_to_home_interactions">
+          <rect x="703.2999999999998" y="255.23255813953483" width="48.4" height="14" rx="3" class="c-mask"/>
+          <text x="727.4999999999999" y="265.23255813953483" class="t-edge-dashed" font-size="10" font-weight="500" text-anchor="middle">首页入口</text>
         </g>
-        <g data-detail="context" data-edge-from="ui_shell" data-edge-to="update_backup" data-edge-label="更新检查与备份" data-edge-key="1" data-edge-id="ui_to_update">
-          <rect x="845.6999999999998" y="199" width="77.2" height="14" rx="3" class="c-mask"/>
-          <text x="884.2999999999998" y="209" class="t-edge-default" font-size="9.5" font-weight="500" text-anchor="middle">更新检查与备份</text>
+        <g data-detail="context" data-edge-from="ui_shell" data-edge-to="home_timeline" data-edge-label="首页展示组件" data-edge-key="1" data-edge-id="shell_to_home_timeline">
+          <rect x="747.3" y="483" width="67.6" height="14" rx="3" class="c-mask"/>
+          <text x="781.0999999999999" y="493" class="t-edge-dashed" font-size="9.6" font-weight="500" text-anchor="middle">首页展示组件</text>
         </g>
-        <g data-detail="context" data-edge-from="assignment_store" data-edge-to="chaoxing_client" data-edge-label="拉取与取消同步" data-edge-key="2" data-edge-id="store_to_client">
-          <rect x="1276.1" y="85.95" width="77.2" height="14" rx="3" class="c-mask"/>
-          <text x="1314.6999999999998" y="95.95" class="t-edge-emphasis" font-size="9.5" font-weight="500" text-anchor="middle">拉取与取消同步</text>
+        <g data-detail="context" data-edge-from="assignment_store" data-edge-to="assignment_personal" data-edge-label="个人状态" data-edge-key="2" data-edge-id="store_to_personal_part">
+          <rect x="1081.6999999999998" y="507" width="48.4" height="14" rx="3" class="c-mask"/>
+          <text x="1105.8999999999999" y="517" class="t-edge-dashed" font-size="10" font-weight="500" text-anchor="middle">个人状态</text>
         </g>
-        <g data-detail="context" data-edge-from="chaoxing_client" data-edge-to="chaoxing_remote" data-edge-label="HTTPS 会话采集" data-edge-key="3" data-edge-id="client_to_chaoxing">
-          <rect x="1542.1000000000001" y="221.5" width="77.2" height="14" rx="3" class="c-mask"/>
-          <text x="1580.7" y="231.5" class="t-edge-emphasis" font-size="9.1" font-weight="500" text-anchor="middle">HTTPS 会话采集</text>
+        <g data-detail="context" data-edge-from="assignment_store" data-edge-to="assignment_reminders" data-edge-label="提醒" data-edge-key="3" data-edge-id="store_to_reminders_part">
+          <rect x="1379.5272727272732" y="419.1" width="30" height="14" rx="3" class="c-mask"/>
+          <text x="1394.5272727272732" y="429.1" class="t-edge-dashed" font-size="10" font-weight="500" text-anchor="middle">提醒</text>
         </g>
-        <g data-detail="context" data-edge-from="assignment_store" data-edge-to="local_storage" data-edge-label="读写快照与凭据" data-edge-key="4" data-edge-id="store_to_local">
-          <rect x="1305.9677966101717" y="112.95" width="77.2" height="14" rx="3" class="c-mask"/>
-          <text x="1344.5677966101716" y="122.95" class="t-edge-default" font-size="9.5" font-weight="500" text-anchor="middle">读写快照与凭据</text>
+        <g data-detail="context" data-edge-from="assignment_store" data-edge-to="assignment_sync" data-edge-label="同步" data-edge-key="4" data-edge-id="store_to_sync_part">
+          <rect x="1264.0069767441819" y="332.9" width="30" height="14" rx="3" class="c-mask"/>
+          <text x="1279.0069767441819" y="342.9" class="t-edge-dashed" font-size="10" font-weight="500" text-anchor="middle">同步</text>
         </g>
-        <g data-detail="context" data-edge-from="assignment_store" data-edge-to="native_host" data-edge-label="提醒桥接与租约" data-edge-key="5" data-edge-id="store_to_host">
-          <rect x="984.4999999999999" y="223" width="77.2" height="14" rx="3" class="c-mask"/>
-          <text x="1023.0999999999999" y="233" class="t-edge-security" font-size="9.5" font-weight="500" text-anchor="middle">提醒桥接与租约</text>
+        <g data-detail="context" data-edge-from="assignment_store" data-edge-to="assignment_session" data-edge-label="会话" data-edge-key="5" data-edge-id="store_to_session_part">
+          <rect x="1329.1069767441818" y="482.9999999999999" width="30" height="14" rx="3" class="c-mask"/>
+          <text x="1344.1069767441818" y="492.9999999999999" class="t-edge-dashed" font-size="10" font-weight="500" text-anchor="middle">会话</text>
         </g>
-        <g data-detail="context" data-edge-from="update_backup" data-edge-to="native_host" data-edge-label="APK 校验与加解密" data-edge-key="6" data-edge-id="update_to_host">
-          <rect x="929.2" y="364" width="86.8" height="14" rx="3" class="c-mask"/>
-          <text x="972.6" y="374" class="t-edge-security" font-size="9.2" font-weight="500" text-anchor="middle">APK 校验与加解密</text>
+        <g data-detail="context" data-edge-from="ui_shell" data-edge-to="assignment_store" data-edge-label="状态订阅与交互" data-edge-key="6" data-edge-id="ui_to_store">
+          <rect x="960.8999999999999" y="545.95" width="77.2" height="14" rx="3" class="c-mask"/>
+          <text x="999.4999999999999" y="555.95" class="t-edge-emphasis" font-size="9.5" font-weight="500" text-anchor="middle">状态订阅与交互</text>
         </g>
-        <g data-detail="context" data-edge-from="update_backup" data-edge-to="release_channels" data-edge-label="拉取清单与安装包" data-edge-key="7" data-edge-id="update_to_channels">
-          <rect x="1310.1999999999998" y="369" width="86.8" height="14" rx="3" class="c-mask"/>
-          <text x="1353.6" y="379" class="t-edge-dashed" font-size="9.4" font-weight="500" text-anchor="middle">拉取清单与安装包</text>
+        <g data-detail="context" data-edge-from="ui_shell" data-edge-to="update_backup" data-edge-label="更新检查与备份" data-edge-key="7" data-edge-id="ui_to_update">
+          <rect x="844.6999999999998" y="617" width="77.2" height="14" rx="3" class="c-mask"/>
+          <text x="883.2999999999998" y="627" class="t-edge-default" font-size="9.5" font-weight="500" text-anchor="middle">更新检查与备份</text>
         </g>
-        <g data-detail="context" data-edge-from="native_host" data-edge-to="native_reminder_worker" data-edge-label="调度 Worker 与闹钟" data-edge-key="8" data-edge-id="host_to_worker">
-          <rect x="655.2" y="516" width="96.39999999999999" height="14" rx="3" class="c-mask"/>
-          <text x="703.4000000000001" y="526" class="t-edge-default" font-size="8.9" font-weight="500" text-anchor="middle">调度 Worker 与闹钟</text>
+        <g data-detail="context" data-edge-from="assignment_store" data-edge-to="chaoxing_client" data-edge-label="拉取与取消同步" data-edge-key="8" data-edge-id="store_to_client">
+          <rect x="1205.775" y="636" width="77.2" height="14" rx="3" class="c-mask"/>
+          <text x="1244.375" y="646" class="t-edge-emphasis" font-size="9.5" font-weight="500" text-anchor="middle">拉取与取消同步</text>
         </g>
-        <g data-detail="context" data-edge-from="native_reminder_worker" data-edge-to="assignment_store" data-edge-label="拉起 backgroundMain" data-edge-key="9" data-edge-id="worker_to_store">
-          <rect x="600.4418604651186" y="46.65517241379311" width="101.2" height="14" rx="3" class="c-mask"/>
-          <text x="651.0418604651186" y="56.65517241379311" class="t-edge-dashed" font-size="8.6" font-weight="500" text-anchor="middle">拉起 backgroundMain</text>
+        <g data-detail="context" data-edge-from="chaoxing_client" data-edge-to="chaoxing_remote" data-edge-label="HTTPS 会话采集" data-edge-key="9" data-edge-id="client_to_chaoxing">
+          <rect x="1538.5465116279097" y="945.6" width="77.2" height="14" rx="3" class="c-mask"/>
+          <text x="1577.1465116279096" y="955.6" class="t-edge-emphasis" font-size="9.1" font-weight="500" text-anchor="middle">HTTPS 会话采集</text>
         </g>
-        <g data-detail="context" data-edge-from="native_reminder_worker" data-edge-to="reminder_sqlite_widget" data-edge-label="二次校验与记录" data-edge-key="10" data-edge-id="worker_to_sqlite">
-          <rect x="308" y="482" width="77.2" height="14" rx="3" class="c-mask"/>
-          <text x="346.6" y="492" class="t-edge-default" font-size="9.5" font-weight="500" text-anchor="middle">二次校验与记录</text>
+        <g data-detail="context" data-edge-from="assignment_store" data-edge-to="local_storage" data-edge-label="读写快照与凭据" data-edge-key="10" data-edge-id="store_to_local">
+          <rect x="1297.1864406779637" y="579" width="77.2" height="14" rx="3" class="c-mask"/>
+          <text x="1335.7864406779636" y="589" class="t-edge-default" font-size="9.5" font-weight="500" text-anchor="middle">读写快照与凭据</text>
         </g>
-        <g data-detail="context" data-edge-from="assignment_store" data-edge-to="reminder_sqlite_widget" data-edge-label="刷新小组件快照" data-edge-key="11" data-edge-id="store_to_widget">
-          <rect x="684.9499999999999" y="16" width="77.2" height="14" rx="3" class="c-mask"/>
-          <text x="723.55" y="26" class="t-edge-dashed" font-size="9.5" font-weight="500" text-anchor="middle">刷新小组件快照</text>
+        <g data-detail="context" data-edge-from="assignment_store" data-edge-to="native_host" data-edge-label="提醒桥接与租约" data-edge-key="11" data-edge-id="store_to_host">
+          <rect x="978.4999999999999" y="683" width="77.2" height="14" rx="3" class="c-mask"/>
+          <text x="1017.0999999999999" y="693" class="t-edge-security" font-size="9.5" font-weight="500" text-anchor="middle">提醒桥接与租约</text>
+        </g>
+        <g data-detail="context" data-edge-from="update_backup" data-edge-to="native_host" data-edge-label="APK 校验与加解密" data-edge-key="12" data-edge-id="update_to_host">
+          <rect x="929.7" y="824" width="86.8" height="14" rx="3" class="c-mask"/>
+          <text x="973.1" y="834" class="t-edge-security" font-size="9.2" font-weight="500" text-anchor="middle">APK 校验与加解密</text>
+        </g>
+        <g data-detail="context" data-edge-from="update_backup" data-edge-to="release_channels" data-edge-label="拉取清单与安装包" data-edge-key="13" data-edge-id="update_to_channels">
+          <rect x="1298.1999999999998" y="782" width="86.8" height="14" rx="3" class="c-mask"/>
+          <text x="1341.6" y="792" class="t-edge-dashed" font-size="9.4" font-weight="500" text-anchor="middle">拉取清单与安装包</text>
+        </g>
+        <g data-detail="context" data-edge-from="native_host" data-edge-to="native_reminder_worker" data-edge-label="调度 Worker 与闹钟" data-edge-key="14" data-edge-id="host_to_worker">
+          <rect x="646.45" y="942" width="96.39999999999999" height="14" rx="3" class="c-mask"/>
+          <text x="694.6500000000001" y="952" class="t-edge-default" font-size="8.9" font-weight="500" text-anchor="middle">调度 Worker 与闹钟</text>
+        </g>
+        <g data-detail="context" data-edge-from="native_reminder_worker" data-edge-to="assignment_store" data-edge-label="拉起 backgroundMain" data-edge-key="15" data-edge-id="worker_to_store">
+          <rect x="405" y="785.875" width="101.2" height="14" rx="3" class="c-mask"/>
+          <text x="455.6" y="795.875" class="t-edge-dashed" font-size="8.6" font-weight="500" text-anchor="middle">拉起 backgroundMain</text>
+        </g>
+        <g data-detail="context" data-edge-from="native_reminder_worker" data-edge-to="reminder_sqlite_widget" data-edge-label="二次校验与记录" data-edge-key="16" data-edge-id="worker_to_sqlite">
+          <rect x="300.5" y="942" width="77.2" height="14" rx="3" class="c-mask"/>
+          <text x="339.1" y="952" class="t-edge-default" font-size="9.5" font-weight="500" text-anchor="middle">二次校验与记录</text>
+        </g>
+        <g data-detail="context" data-edge-from="assignment_store" data-edge-to="reminder_sqlite_widget" data-edge-label="刷新小组件快照" data-edge-key="17" data-edge-id="store_to_widget">
+          <rect x="987.9" y="618.875" width="77.2" height="14" rx="3" class="c-mask"/>
+          <text x="1026.5" y="628.875" class="t-edge-dashed" font-size="9.5" font-weight="500" text-anchor="middle">刷新小组件快照</text>
         </g>
 
         <!-- Boundary labels (foreground masks keep routes out of titles) -->
         <g data-graph-role="structural-frame-label" data-composition-frame-id="0" data-composition-frame-kind="region" data-composition-frame-label="Flutter 业务与状态层 (Dart)">
-          <rect data-graph-role="structural-frame-label-mask" x="1177.1" y="56" width="188.0955000709677" height="18" rx="3" class="c-mask"/>
-          <text data-boundary-label="" x="1181.1" y="70.99354938709678" class="t-cloud" font-size="10.993549387096772" font-weight="600">Flutter 业务与状态层 (Dart)</text>
+          <rect data-graph-role="structural-frame-label-mask" x="693.8999999999999" y="48" width="186.00517749032258" height="18" rx="3" class="c-mask"/>
+          <text data-boundary-label="" x="697.8999999999999" y="62.86451712903226" class="t-cloud" font-size="10.864517129032258" font-weight="600">Flutter 业务与状态层 (Dart)</text>
         </g>
 
         <g data-graph-role="structural-frame-label" data-composition-frame-id="1" data-composition-frame-kind="security-group" data-composition-frame-label="Android 原生宿主与后台层 (Kotlin / Java)">
-          <rect data-graph-role="structural-frame-label-mask" x="286" y="444" width="273.8451852903225" height="18" rx="3" class="c-mask"/>
-          <text data-boundary-label="" x="290" y="458.9935493870968" class="t-security" font-size="10.993549387096772" font-weight="600">Android 原生宿主与后台层 (Kotlin / Java)</text>
+          <rect data-graph-role="structural-frame-label-mask" x="520.2" y="904" width="270.7484110967742" height="18" rx="3" class="c-mask"/>
+          <text data-boundary-label="" x="524.2" y="918.8645171290323" class="t-security" font-size="10.864517129032258" font-weight="600">Android 原生宿主与后台层 (Kotlin / Java)</text>
         </g>
 
         <!-- Legend -->
         <g data-legend="" data-legend-bridge="">
-          <text x="40" y="604" class="t-primary" font-size="12" font-weight="650">图例</text>
-          <g data-legend-semantic-kind="frontend" data-legend-kind="frontend" data-legend-label="前端" data-legend-x="40" data-legend-baseline="624" data-legend-width="68">
-            <rect x="40" y="615" width="16" height="10" rx="2.5" class="c-frontend" stroke-width="1"/>
-            <text x="62" y="624" class="t-muted" font-size="10" font-weight="500">前端</text>
+          <text x="40" y="1050" class="t-primary" font-size="12" font-weight="650">图例</text>
+          <g data-legend-semantic-kind="frontend" data-legend-kind="frontend" data-legend-label="前端" data-legend-x="40" data-legend-baseline="1070" data-legend-width="68">
+            <rect x="40" y="1061" width="16" height="10" rx="2.5" class="c-frontend" stroke-width="1"/>
+            <text x="62" y="1070" class="t-muted" font-size="10" font-weight="500">前端</text>
           </g>
-          <g data-legend-semantic-kind="backend" data-legend-kind="backend" data-legend-label="后端" data-legend-x="130" data-legend-baseline="624" data-legend-width="68">
-            <rect x="130" y="615" width="16" height="10" rx="2.5" class="c-backend" stroke-width="1"/>
-            <text x="152" y="624" class="t-muted" font-size="10" font-weight="500">后端</text>
+          <g data-legend-semantic-kind="backend" data-legend-kind="backend" data-legend-label="后端" data-legend-x="130" data-legend-baseline="1070" data-legend-width="68">
+            <rect x="130" y="1061" width="16" height="10" rx="2.5" class="c-backend" stroke-width="1"/>
+            <text x="152" y="1070" class="t-muted" font-size="10" font-weight="500">后端</text>
           </g>
-          <g data-legend-semantic-kind="database" data-legend-kind="database" data-legend-label="数据库" data-legend-x="220" data-legend-baseline="624" data-legend-width="81">
-            <rect x="220" y="615" width="16" height="10" rx="2.5" class="c-database" stroke-width="1"/>
-            <text x="242" y="624" class="t-muted" font-size="10" font-weight="500">数据库</text>
+          <g data-legend-semantic-kind="database" data-legend-kind="database" data-legend-label="数据库" data-legend-x="220" data-legend-baseline="1070" data-legend-width="81">
+            <rect x="220" y="1061" width="16" height="10" rx="2.5" class="c-database" stroke-width="1"/>
+            <text x="242" y="1070" class="t-muted" font-size="10" font-weight="500">数据库</text>
           </g>
-          <g data-legend-semantic-kind="cloud" data-legend-kind="cloud" data-legend-label="云服务" data-legend-x="323" data-legend-baseline="624" data-legend-width="81">
-            <rect x="323" y="615" width="16" height="10" rx="2.5" class="c-cloud" stroke-width="1"/>
-            <text x="345" y="624" class="t-muted" font-size="10" font-weight="500">云服务</text>
+          <g data-legend-semantic-kind="cloud" data-legend-kind="cloud" data-legend-label="云服务" data-legend-x="323" data-legend-baseline="1070" data-legend-width="81">
+            <rect x="323" y="1061" width="16" height="10" rx="2.5" class="c-cloud" stroke-width="1"/>
+            <text x="345" y="1070" class="t-muted" font-size="10" font-weight="500">云服务</text>
           </g>
-          <g data-legend-semantic-kind="security" data-legend-kind="security" data-legend-label="安全" data-legend-x="426" data-legend-baseline="624" data-legend-width="68">
-            <rect x="426" y="615" width="16" height="10" rx="2.5" class="c-security" stroke-width="1"/>
-            <text x="448" y="624" class="t-muted" font-size="10" font-weight="500">安全</text>
+          <g data-legend-semantic-kind="security" data-legend-kind="security" data-legend-label="安全" data-legend-x="426" data-legend-baseline="1070" data-legend-width="68">
+            <rect x="426" y="1061" width="16" height="10" rx="2.5" class="c-security" stroke-width="1"/>
+            <text x="448" y="1070" class="t-muted" font-size="10" font-weight="500">安全</text>
           </g>
-          <g data-legend-semantic-kind="messagebus" data-legend-kind="messagebus" data-legend-label="消息总线" data-legend-x="516" data-legend-baseline="624" data-legend-width="93">
-            <rect x="516" y="615" width="16" height="10" rx="2.5" class="c-messagebus" stroke-width="1"/>
-            <text x="538" y="624" class="t-muted" font-size="10" font-weight="500">消息总线</text>
+          <g data-legend-semantic-kind="messagebus" data-legend-kind="messagebus" data-legend-label="消息总线" data-legend-x="516" data-legend-baseline="1070" data-legend-width="93">
+            <rect x="516" y="1061" width="16" height="10" rx="2.5" class="c-messagebus" stroke-width="1"/>
+            <text x="538" y="1070" class="t-muted" font-size="10" font-weight="500">消息总线</text>
           </g>
-          <g data-legend-semantic-kind="external" data-legend-kind="external" data-legend-label="外部系统" data-legend-x="631" data-legend-baseline="624" data-legend-width="93">
-            <rect x="631" y="615" width="16" height="10" rx="2.5" class="c-external" stroke-width="1"/>
-            <text x="653" y="624" class="t-muted" font-size="10" font-weight="500">外部系统</text>
+          <g data-legend-semantic-kind="external" data-legend-kind="external" data-legend-label="外部系统" data-legend-x="631" data-legend-baseline="1070" data-legend-width="93">
+            <rect x="631" y="1061" width="16" height="10" rx="2.5" class="c-external" stroke-width="1"/>
+            <text x="653" y="1070" class="t-muted" font-size="10" font-weight="500">外部系统</text>
           </g>
         </g>
       <metadata id="archify-software-notices">NOTICE

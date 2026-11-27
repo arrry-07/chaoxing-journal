@@ -3,13 +3,14 @@
   "diagram_type": "architecture",
   "meta": {
     "title": "学习通课业手记 · 系统架构与模块边界",
+    "subtitle": "更新于 2026-11-27",
     "locale": "zh-CN",
     "output": "docs/architecture/architecture.html",
     "quality_profile": "showcase",
     "repository": {
       "url": "https://github.com/arrry-07/chaoxing-journal.git",
       "provider": "github",
-      "revision": "6a8af334bb5f5c54ffbf81f15f7065aaf4364b8a"
+      "revision": "a33f066cc5e82e07050e15c6844172b68bd787e0"
     },
     "views": [
       {
@@ -44,13 +45,64 @@
       "sublabel": "lib/main.dart · app/ · features/",
       "tag": "GoRouter + 4 Tab",
       "sources": [
-        { "path": "study_assistant-1.1.0/local_app/lib/src/app" },
-        { "path": "study_assistant-1.1.0/local_app/lib/src/features" },
+        {
+          "path": "study_assistant-1.1.0/local_app/lib/src/app"
+        },
+        {
+          "path": "study_assistant-1.1.0/local_app/lib/src/features"
+        },
         {
           "path": "study_assistant-1.1.0/local_app/lib/main.dart",
           "line": 55,
           "end_line": 100,
           "label": "main 与会话恢复启动"
+        }
+      ],
+      "explanation": "AppShell 管理四个主标签页。AssignmentListScreen 组装首页交互和时间线列表，筛选面板使用共享弹窗入口。"
+    },
+    {
+      "id": "home_interactions",
+      "type": "frontend",
+      "label": "首页搜索、筛选与排序",
+      "sublabel": "AssignmentListScreen · Sheet",
+      "sources": [
+        {
+          "path": "study_assistant-1.1.0/local_app/lib/src/features/assignment_list_screen.dart",
+          "line": 101,
+          "label": "首页状态订阅与交互编排"
+        },
+        {
+          "path": "study_assistant-1.1.0/local_app/lib/src/features/widgets/home_action_bar.dart",
+          "line": 51,
+          "label": "顶部操作栏与排序轻菜单"
+        },
+        {
+          "path": "study_assistant-1.1.0/local_app/lib/src/features/widgets/home_filter_sheet.dart",
+          "line": 31,
+          "label": "搜索筛选面板与标签"
+        }
+      ]
+    },
+    {
+      "id": "home_timeline",
+      "type": "frontend",
+      "label": "首页分区、时间线与弹窗",
+      "sublabel": "列表展示 · 共享 Sheet",
+      "sources": [
+        {
+          "path": "study_assistant-1.1.0/local_app/lib/src/features/widgets/home_list_sections.dart",
+          "line": 1006,
+          "label": "同步状态、标题栏与分组标题"
+        },
+        {
+          "path": "study_assistant-1.1.0/local_app/lib/src/features/widgets/home_timeline_list.dart",
+          "line": 400,
+          "label": "时间线数据与列表展示"
+        },
+        {
+          "path": "study_assistant-1.1.0/local_app/lib/src/features/widgets/journal_modal_sheet.dart",
+          "line": 7,
+          "label": "共享 BottomSheet 动效入口"
         }
       ]
     },
@@ -59,16 +111,93 @@
       "type": "backend",
       "emphasis": true,
       "label": "课业状态与协调中枢",
-      "sublabel": "services/ · models/",
+      "sublabel": "公共接口 · 共享状态与事务",
       "tag": "AssignmentStore",
       "sources": [
-        { "path": "study_assistant-1.1.0/local_app/lib/src/services" },
-        { "path": "study_assistant-1.1.0/local_app/lib/src/models" },
+        {
+          "path": "study_assistant-1.1.0/local_app/lib/src/services"
+        },
+        {
+          "path": "study_assistant-1.1.0/local_app/lib/src/models"
+        },
         {
           "path": "study_assistant-1.1.0/local_app/lib/src/services/assignment_store.dart",
-          "line": 90,
+          "line": 96,
           "end_line": 160,
-          "label": "AssignmentStore 核心协调器"
+          "label": "AssignmentStore 公共入口与依赖"
+        }
+      ],
+      "explanation": "AssignmentStore 保留公共接口、共享状态与事务协调。个人状态、提醒、同步和会话各由对应的 Dart part 执行编排，独立协调器承担判断与状态计算。"
+    },
+    {
+      "id": "assignment_personal",
+      "type": "backend",
+      "label": "个人状态",
+      "sublabel": "待办 · 置顶 · 课程设置",
+      "sources": [
+        {
+          "path": "study_assistant-1.1.0/local_app/lib/src/services/assignment_store_personal.dart",
+          "line": 3,
+          "label": "个人状态写入与编排"
+        },
+        {
+          "path": "study_assistant-1.1.0/local_app/lib/src/services/assignment_personal_state_coordinator.dart",
+          "line": 15,
+          "label": "置顶、手动截止与课程状态计算"
+        }
+      ]
+    },
+    {
+      "id": "assignment_reminders",
+      "type": "backend",
+      "label": "提醒与小组件",
+      "sublabel": "提醒投递 · 历史与补偿",
+      "sources": [
+        {
+          "path": "study_assistant-1.1.0/local_app/lib/src/services/assignment_store_reminders.dart",
+          "line": 446,
+          "label": "提醒计划与小组件刷新编排"
+        },
+        {
+          "path": "study_assistant-1.1.0/local_app/lib/src/services/assignment_reminder_coordinator.dart",
+          "line": 124,
+          "label": "提醒判断、取消结果与解释"
+        }
+      ]
+    },
+    {
+      "id": "assignment_sync",
+      "type": "backend",
+      "label": "课业同步",
+      "sublabel": "触发 · 租约 · 退避",
+      "sources": [
+        {
+          "path": "study_assistant-1.1.0/local_app/lib/src/services/assignment_store_sync.dart",
+          "line": 449,
+          "label": "同步触发、租约与读写编排"
+        },
+        {
+          "path": "study_assistant-1.1.0/local_app/lib/src/services/assignment_sync_coordinator.dart",
+          "line": 12,
+          "label": "同步选课、补扫、退避与报告"
+        }
+      ]
+    },
+    {
+      "id": "assignment_session",
+      "type": "backend",
+      "label": "账号与会话",
+      "sublabel": "恢复 · 登录 · 退出",
+      "sources": [
+        {
+          "path": "study_assistant-1.1.0/local_app/lib/src/services/assignment_store_session.dart",
+          "line": 6,
+          "label": "会话恢复、切换与清理编排"
+        },
+        {
+          "path": "study_assistant-1.1.0/local_app/lib/src/services/assignment_session_coordinator.dart",
+          "line": 65,
+          "label": "会话转换与恢复决策"
         }
       ]
     },
@@ -233,7 +362,11 @@
     {
       "kind": "region",
       "label": "Flutter 业务与状态层 (Dart)",
-      "wraps": ["ui_shell", "assignment_store", "chaoxing_client", "local_storage", "update_backup"]
+      "wraps": [
+        "ui_shell", "home_interactions", "home_timeline",
+        "assignment_store", "assignment_personal", "assignment_reminders", "assignment_sync", "assignment_session",
+        "chaoxing_client", "local_storage", "update_backup"
+      ]
     },
     {
       "kind": "security-group",
@@ -242,6 +375,12 @@
     }
   ],
   "connections": [
+    { "id": "shell_to_home_interactions", "from": "ui_shell", "to": "home_interactions", "label": "首页入口", "variant": "dashed" },
+    { "id": "shell_to_home_timeline", "from": "ui_shell", "to": "home_timeline", "label": "首页展示组件", "variant": "dashed" },
+    { "id": "store_to_personal_part", "from": "assignment_store", "to": "assignment_personal", "label": "个人状态", "variant": "dashed" },
+    { "id": "store_to_reminders_part", "from": "assignment_store", "to": "assignment_reminders", "label": "提醒", "variant": "dashed" },
+    { "id": "store_to_sync_part", "from": "assignment_store", "to": "assignment_sync", "label": "同步", "variant": "dashed" },
+    { "id": "store_to_session_part", "from": "assignment_store", "to": "assignment_session", "label": "会话", "variant": "dashed" },
     { "id": "ui_to_store", "from": "ui_shell", "to": "assignment_store", "label": "状态订阅与交互", "variant": "emphasis" },
     { "id": "ui_to_update", "from": "ui_shell", "to": "update_backup", "label": "更新检查与备份" },
     { "id": "store_to_client", "from": "assignment_store", "to": "chaoxing_client", "label": "拉取与取消同步", "variant": "emphasis" },

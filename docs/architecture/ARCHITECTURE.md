@@ -1,7 +1,7 @@
 # 学习通课业手记 · 架构导航（人机共用）
 
-- **基线 Commit**：`62a4825`（`architecture.json` 与 `sync-reminder.dataflow.json` 锚定 `6a8af33`，`reminder-db.erd.json` 与 `architecture-tour.story.json` 锚定 `d8b7f47`，完整 40 位修订号见各 JSON 清单；后续可用 `git log 62a4825..HEAD --stat` 快速判断文档是否过期）
-- **更新日期**：2026-11-26
+- **基线 Commit**：`a33f066`（`architecture.json` 与 `sync-reminder.dataflow.json` 锚定 `a33f066`，`reminder-db.erd.json` 与 `architecture-tour.story.json` 仍锚定 `d8b7f47`。各 JSON 清单记录完整 40 位修订号。可用 `git log a33f066..HEAD --stat` 核对后续代码变更）
+- **更新日期**：2026-11-27
 - **适用范围**：`study_assistant-1.1.0/local_app/`（Flutter 业务层与 Android 原生宿主/后台层）、`scripts/` 与 `.github/workflows/` 门禁及分发链路；`references/xuexitong-cli/` 仅作只读上游协议参考
 
 ## 架构与数据流图入口
@@ -48,8 +48,13 @@
 | --- | --- | --- |
 | 应用入口与双引擎启动 | `study_assistant-1.1.0/local_app/lib/main.dart` | 承载前台 `main` 与后台无界面 `backgroundMain` 双入口；前台先恢复本机快照再挂载界面，后台通过 `MethodChannel` 与原生 Worker 协同执行自动检查 |
 | 导航壳、主题与动效基础 | `study_assistant-1.1.0/local_app/lib/src/app/`（入口 `app_shell.dart`） | 管理 `GoRouter` 路由与 4 Tab 主壳、浅/深双主题设计系统、页面转场与预测性返回策略、Clawd 伴侣周期协调 |
-| 业务页面与公共组件 | `study_assistant-1.1.0/local_app/lib/src/features/`、`.../widgets/` | 覆盖首页、日历、统计、个人页、登录与设置子页，以及悬浮毛玻璃顶栏、像素伙伴、作业卡等展示控件；只消费领域投影状态，不直连网络与原生存储 |
-| 课业协调中枢与领域模型 | `study_assistant-1.1.0/local_app/lib/src/services/assignment_store.dart`、`.../services/`、`.../models/` | 全仓状态与行为中枢，统一协调多源同步、时间信任与排序投影（`CourseworkDeadline`、`AssignmentQuery`）、学期归类、本地记录与提醒计划生成 |
+| 业务页面与公共组件 | `study_assistant-1.1.0/local_app/lib/src/features/`、`features/widgets/` | 覆盖首页、日历、统计、个人页、登录与设置。页面消费领域投影状态，不直连网络或原生存储 |
+| 首页交互与列表 | `features/assignment_list_screen.dart`、同层 `widgets/` 下的 `home_action_bar.dart`、`home_filter_sheet.dart`、`home_list_sections.dart`、`home_timeline_list.dart`、`journal_modal_sheet.dart` | `AssignmentListScreen` 持有页面状态与事件编排，组件分别负责操作栏与排序菜单、搜索筛选、首页分区、时间线列表。筛选面板经共享弹窗入口使用统一动效 |
+| 课业协调中枢与领域模型 | `study_assistant-1.1.0/local_app/lib/src/services/assignment_store.dart`、`.../services/`、`.../models/` | `AssignmentStore` 保留公共接口、共享状态与事务协调，使用 `CourseworkDeadline` 和 `AssignmentQuery` 处理时间信任与排序投影 |
+| Store · 个人状态 | `assignment_store_personal.dart`、`assignment_personal_state_coordinator.dart` | 编排个人待办、置顶、手动截止及课程设置的读写。协调器计算个人状态变更 |
+| Store · 提醒 | `assignment_store_reminders.dart`、`assignment_reminder_coordinator.dart` | 编排提醒计划、历史、通知补偿和桌面小组件刷新。协调器提供提醒判断、取消结果和提醒解释 |
+| Store · 同步 | `assignment_store_sync.dart`、`assignment_sync_coordinator.dart` | 编排多源同步与跨引擎同步租约。协调器计算同步选课、历史补扫、服务端退避和报告 |
+| Store · 会话 | `assignment_store_session.dart`、`assignment_session_coordinator.dart` | 编排恢复、登录、账号切换、退出和备份恢复。协调器提供会话转换及恢复决策 |
 | 学习通采集与多源解析层 | `study_assistant-1.1.0/local_app/lib/src/local/chaoxing_local_client.dart`、`.../local/*_parser.dart` | 封装超星学习通会话请求、取消令牌与熔断重试，将课程、作业、考试、章节、课堂任务、AI 练习与通知归一化为稳定领域模型 |
 | 本机课业与安全凭据仓 | `study_assistant-1.1.0/local_app/lib/src/local/local_assignment_repository.dart`、`.../services/secure_session_store.dart` | 基于 `SharedPreferences` 维护按账号隔离的课业/待办/课程设置快照与损坏恢复副本；通过 `FlutterSecureStorage` 与 WebView 清理保管登录凭据 |
 | Android 原生宿主与安全桥 | `study_assistant-1.1.0/local_app/android/app/src/main/kotlin/com/example/studyassistant/MainActivity.kt`、`.../java/com/example/studyassistant/` | 暴露安全验证 WebView、外部链接、APK 原签名/ABI 校验安装、SAF 口令加解密备份（`BackupCrypto`）、通知权限体检与音效等 `MethodChannel` |
@@ -89,10 +94,14 @@
 
 | 改动或排查场景 | 优先查看目录 / 入口文件 |
 | --- | --- |
-| 首页筛选、分组、置顶、`FB-005` 排序与卡片展示 | `lib/src/services/assignment_query.dart`、`assignment_grouping.dart`、`lib/src/features/assignment_list_screen.dart` |
-| 学习通登录、会话失效、验证码或某类任务解析漏抓 | `lib/src/local/chaoxing_local_client.dart`、`lib/src/local/chaoxing_*_parser.dart`、`references/xuexitong-cli/` |
+| 首页筛选、分组、置顶、`FB-005` 排序与卡片展示 | `lib/src/features/assignment_list_screen.dart` 管理页面状态。操作栏和排序菜单看 `widgets/home_action_bar.dart`，搜索和筛选看 `widgets/home_filter_sheet.dart`，同步状态与分组标题看 `widgets/home_list_sections.dart`，时间线与卡片看 `widgets/home_timeline_list.dart`。排序与分组规则看 `lib/src/services/assignment_query.dart`、`assignment_grouping.dart` |
+| 共享底部弹窗的进出场或减弱动态 | `lib/src/features/widgets/journal_modal_sheet.dart`、`lib/src/app/journal_motion.dart` |
+| 个人待办、置顶、手动截止或课程设置写入 | `lib/src/services/assignment_store_personal.dart`、`assignment_personal_state_coordinator.dart` |
+| 课业同步、自动检查、选课范围或退避 | `lib/src/services/assignment_store_sync.dart`、`assignment_sync_coordinator.dart` |
+| 学习通登录、会话失效或账号切换 | `lib/src/services/assignment_store_session.dart`、`assignment_session_coordinator.dart`、`lib/src/local/chaoxing_local_client.dart` |
+| 验证码或某类任务解析漏抓 | `lib/src/local/chaoxing_local_client.dart`、`lib/src/local/chaoxing_*_parser.dart`、`references/xuexitong-cli/` |
 | 截止时间显示、改期冲突、手动截止或考试范围 | `lib/src/services/coursework_deadline.dart`、`exam_wall_time.dart`、`exam_schedule_presentation.dart` |
-| 后台检查调度、通知漏响/误响、静音时段或历史记录 | `lib/src/services/background_reminder_gateway.dart`、`local_notification_service.dart`、`android/.../FlutterCheckWorker.kt`、`ReminderDatabase.kt`、`AssignmentNotificationPublisher.kt` |
+| 后台检查调度、通知漏响/误响、静音时段或历史记录 | `lib/src/services/assignment_store_reminders.dart`、`assignment_reminder_coordinator.dart`、`background_reminder_gateway.dart`、`local_notification_service.dart`、`android/.../FlutterCheckWorker.kt`、`ReminderDatabase.kt`、`AssignmentNotificationPublisher.kt` |
 | 界面主题配色、转场动画、悬浮顶栏或 Clawd 像素伙伴 | `lib/src/app/app_shell.dart`、`journal.dart`、`lib/src/services/clawd_companion_controller.dart`、`lib/src/features/widgets/` |
 | 检查更新、双源清单回退或 APK 校验安装 | `lib/src/services/app_update_service.dart`、`app_update_controller.dart`、`android/.../UpdateApkPolicy.java`、`MainActivity.kt` |
 | 加密备份与个人附件/工作区 | `lib/src/services/backup_service.dart`、`android/.../BackupCrypto.java`、`BackupBridge.kt`、`PersonalFileBridge.kt` |
