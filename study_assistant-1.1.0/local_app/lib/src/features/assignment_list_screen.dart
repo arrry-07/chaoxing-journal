@@ -662,7 +662,12 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
         JournalContextMenuAction(
           label: '添加课业或待办',
           icon: Icons.add_rounded,
-          onSelected: () => _manualActions.openEditor(context),
+          onSelected: () => _manualActions.openEditor(
+            context,
+            initialKind: _typeFilter == AssignmentTypeFilter.exam
+                ? ManualEntry.kindExam
+                : ManualEntry.kindTodo,
+          ),
         ),
         JournalContextMenuAction(
           label: '个人待办与考试',

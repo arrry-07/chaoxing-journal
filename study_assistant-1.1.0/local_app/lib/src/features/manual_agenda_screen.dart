@@ -601,9 +601,11 @@ class _EditorState extends State<ManualEntryEditor> {
   bool _missingEntry = false;
   bool _dirty = false;
   bool _saving = false;
+  bool _deleting = false;
   bool _attaching = false;
   bool _togglingDone = false;
-  bool get busy => _saving || _attaching || _togglingDone;
+  bool get _persisting => _saving || _deleting;
+  bool get busy => _persisting || _attaching || _togglingDone;
   bool _moreOptionsExpanded = false;
   int _lastFilledMoreCount = 0;
   UnsavedEditGuard? _leaveGuard;
@@ -683,12 +685,12 @@ class _EditorState extends State<ManualEntryEditor> {
     _leaveGuard?.register(
       this,
       routeScope: widget.routeScope,
-      hasUnsavedChanges: () => _dirty || _saving,
+      hasUnsavedChanges: () => _dirty || _persisting,
       draftRevision: () =>
           '${title.text}|${course.text}|${location.text}|${note.text}|'
           '${minutes.text}|$kind|$remind|$at|'
           '${_attachments.map((a) => a.relativePath).join(',')}',
-      blocksNavigation: () => _saving,
+      blocksNavigation: () => _persisting,
       confirmDiscard: _confirmDiscard,
       isStale: () =>
           !widget.store.isAuthenticated ||
@@ -730,8 +732,10 @@ class _EditorState extends State<ManualEntryEditor> {
   }
 
   Future<bool> _confirmDiscard() async {
-    if (_saving) {
-      setState(() => error = '个人安排正在保存，请稍候再离开');
+    if (_persisting) {
+      setState(
+        () => error = _deleting ? '个人安排正在删除，请稍候再离开' : '个人安排正在保存，请稍候再离开',
+      );
       return false;
     }
     final result = await showUnsavedEditDialog(
@@ -1036,7 +1040,7 @@ class _EditorState extends State<ManualEntryEditor> {
     );
     if (confirmed != true || !mounted) return;
     setState(() {
-      _saving = true;
+      _deleting = true;
     });
     final ok = await widget.store.saveNotebook(
       (n) => n.withEntries([
@@ -1053,14 +1057,14 @@ class _EditorState extends State<ManualEntryEditor> {
           widget.store.manualAttachmentService.deleteFiles(discardedDrafts),
         );
       }
-      _saving = false;
+      _deleting = false;
       _dirty = false;
       await WidgetsBinding.instance.endOfFrame;
     }
     if (!mounted || !ok) {
       if (mounted) {
         setState(() {
-          _saving = false;
+          _deleting = false;
           if (!ok) {
             error = widget.store.saveFeedback(
               false,
@@ -1326,9 +1330,9 @@ class _EditorState extends State<ManualEntryEditor> {
     }
     final filledMoreCount = _filledMoreCount;
     return PopScope(
-        canPop: !_dirty && !_saving,
+        canPop: !_dirty && !_persisting,
         onPopInvokedWithResult: (didPop, result) async {
-          if (didPop || (!_dirty && !_saving)) return;
+          if (didPop || (!_dirty && !_persisting)) return;
           final editorRoute = ModalRoute.of(context);
           final router = GoRouter.maybeOf(context);
           final guard = _leaveGuard;
