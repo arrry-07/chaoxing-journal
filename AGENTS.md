@@ -14,7 +14,7 @@
 - 日常在 `dev` 工作，通过定向快检后提交并轻量推送 `origin/dev`（无需重复确认；阶段收口或停机交接时同步更新 [dev 本地状态](docs/ai-workflow/DEV_STATE.md)，里程碑/打包收口时更新 [PROJECT_STATE.md](docs/ai-workflow/PROJECT_STATE.md)，不必为每个中间小提交重复刷写），细则见[日常推送门禁](docs/ai-workflow/VALIDATION.md#dev-日常推送门禁)。
 - 推送 `origin/dev` 前必查 `git status` 与提交 Diff，排除凭据、Cookie、账号响应、敏感日志、`docs/feedback/`、`scripts/demo-video/`、个人材料及 APK 等大体积二进制。日常默认交付到 `dev`，日常集成和正式发布分别按[两阶段门禁](docs/ai-workflow/VALIDATION.md#集成验收与正式发布)核对授权。
 - 推送完成后，在最终回复末尾固定附两行供代码走查：最新 `origin/dev` 提交号（完整 SHA 与简短信息），以及对比链接 `https://github.com/arrry-07/chaoxing-journal/compare/main...dev` 与核心修改文件的 `dev` 直达链接。
-- 本地快检使用缓存依赖，按需运行 `python scripts/verify_local_gate.py --tests <相关测试>`（自带单测超时熔断；涉 Android/Kotlin 改动同步跑 `python scripts/run_android_tests.py --local-fast`；含中文路径时勿直接运行 `flutter analyze`）。
+- 本地快检按[行为影响选入口](docs/ai-workflow/VALIDATION.md#local-checks)：纯文档或静态文案核对差异与适用场景，局部业务改动跑对应行为用例，Android/Kotlin 改动运行 `python scripts/run_android_tests.py --local-fast`。共享契约与集成按全量门禁执行。
 - 修改课业、时间信任或首页筛选时，读[学习通参考实现](docs/guides/开发与贡献.md#学习通参考实现)与[首页课业行为约束](docs/guides/开发与贡献.md#首页课业排序长期约束)。确认逾期在双向时间排序中始终置底，保留 `FB-005` 回归。
 - 第三方 API、版本兼容或升级先查锁文件（Flutter 用 `pubspec.lock`），再用 Context7 核对对应版本文档。项目内部逻辑直接检查本地源码和测试。
 - 视觉与布局改动须有当前任务的明确要求；功能修复只改必需的可观察界面状态，并在交付中说明。无关视觉问题只记录。

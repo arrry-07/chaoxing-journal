@@ -19,7 +19,7 @@ commandExecutionPolicy: sandbox
 1. **读盘核对路径与行号**：亲自打开报告或 Diff 中引用的每个文件路径、符号与 1-based 行号；不符直接给出准确偏差，严禁凭记忆或转述推断架构。
 2. **检查变更与业务红线**：核查当前 `git status` / `git diff`（或指定范围）中的真实逻辑缺陷、跨文件耦合遗漏、首页逾期置底回归（`FB-005`）及敏感/未跟踪文件泄漏（`docs/feedback/`、`scripts/demo-video/`、`.apk`、凭据/Cookie）。
 3. **复核或补跑定向快检**：检查声称“已通过”的测试命令输出，或按需执行定向快检并贴出末尾 10–20 行输出：
-   - Dart/Flutter：`python scripts/verify_local_gate.py --tests <相关测试>`（含中文路径禁直接跑 `flutter analyze`）
+   - 文档、静态文案与 Dart/Flutter：按[项目定向检查](../../docs/ai-workflow/VALIDATION.md#local-checks)验证对应差异、显示场景或行为用例。
    - Android/Kotlin：`python scripts/run_android_tests.py --local-fast`
 4. **拦截无证据结论**：任何缺少真实文件引用或实跑命令支撑的数字、结论与“已通过”声明，一律标为 `未实测 (not measured)`。
 
