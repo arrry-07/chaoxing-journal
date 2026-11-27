@@ -146,15 +146,23 @@ class _StatsScreenState extends State<StatsScreen> with WidgetsBindingObserver {
   ClawdPageContextSnapshot _buildStatsSnapshot() {
     final store = widget.store;
     final now = _now;
+    final coursework = store.courseworkState;
+    final overviewScoped = store
+        .statsAssignmentsForScope(_termScope, now: now)
+        .where((a) => AssignmentStatistics.isCountedInOverview(
+              a,
+              coursework: coursework,
+            ))
+        .toList(growable: false);
     final rangeResult = LocalRecordQuery.filterStatsRecords(
-      store.statsAssignmentsForScope(_termScope, now: now),
+      overviewScoped,
       _range,
       now,
     );
     final stats = AssignmentStatistics(
       rangeResult.records,
       now: now,
-      coursework: store.courseworkState,
+      coursework: coursework,
     );
     final allUnknown = stats.total > 0 && stats.unknown == stats.total;
     return ClawdPageContextSnapshot(
@@ -368,12 +376,19 @@ class _StatsScreenState extends State<StatsScreen> with WidgetsBindingObserver {
           final journal = Journal.of(context);
           final store = widget.store;
           final now = _now;
+          final coursework = store.courseworkState;
+          final overviewScoped = store
+              .statsAssignmentsForScope(_termScope, now: now)
+              .where((a) => AssignmentStatistics.isCountedInOverview(
+                    a,
+                    coursework: coursework,
+                  ))
+              .toList(growable: false);
           final rangeResult = LocalRecordQuery.filterStatsRecords(
-            store.statsAssignmentsForScope(_termScope, now: now),
+            overviewScoped,
             _range,
             now,
           );
-          final coursework = store.courseworkState;
           final records = rangeResult.records;
           final excludedUnscheduled = rangeResult.excludedUnscheduledCount;
           final stats =
@@ -542,7 +557,7 @@ class _StatsScreenState extends State<StatsScreen> with WidgetsBindingObserver {
                                 if (_range != StatsTimeRange.all) ...[
                                   const SizedBox(height: 4),
                                   Text(
-                                    '${_range.label}内暂无带确定时间的课业记录，可切回“全部”查看。',
+                                    '${_range.label}内暂无带确定时间的课业记录，可切回“不限时间”查看。',
                                     style: journal.metadata,
                                   ),
                                 ],
@@ -610,7 +625,7 @@ class _StatsScreenState extends State<StatsScreen> with WidgetsBindingObserver {
                                         title: '统计口径说明',
                                         items: [
                                           '统计范围为已关注课程的作业/任务与账号级考试。',
-                                          '已在本机隐藏的记录不计入统计；提交状态未知的记录计入总数，不折算为已完成。',
+                                          '已在本机隐藏的记录不计入统计；纯广播考试通知不计入完成率与状态桶，可在“学习记录（全部状态）”完整查看；其余提交状态未知的记录计入总数，不折算为已完成。',
                                           '切换未来 7 天 / 30 天时，无确定时间的课业不参与时间窗口统计。',
                                           '点击状态行或课程行查看明细；长按或左滑课程行可快捷取消关注或本机隐藏。',
                                         ],
@@ -622,6 +637,9 @@ class _StatsScreenState extends State<StatsScreen> with WidgetsBindingObserver {
                                     counts: stats.counts,
                                     colors: barColors,
                                     trackColor: journal.parchment,
+                                    overdueStripeColor: journal.isDark
+                                        ? journal.paper.withValues(alpha: 0.38)
+                                        : Colors.white.withValues(alpha: 0.55),
                                     animateDuration: JournalMotion.duration(
                                       context,
                                       const Duration(milliseconds: 340),
@@ -646,22 +664,67 @@ class _StatsScreenState extends State<StatsScreen> with WidgetsBindingObserver {
                           ],
                         ),
                       const SizedBox(height: 18),
-                      Padding(
-                        padding: const EdgeInsets.only(left: 2, bottom: 8),
-                        child: Text('各课程待处理', style: journal.section),
-                      ),
-                      if (pendingGroups.isEmpty)
-                        JournalGroupedCard(
-                          key: const ValueKey('stats-course-empty'),
-                          padding: const EdgeInsets.all(16),
-                          children: [
-                            Text('当前没有待处理的课程', style: journal.metadata),
-                          ],
-                        )
-                      else
-                        JournalGroupedCard(
-                          dividerIndent: 52,
-                          children: [
+                      JournalGroupedCard(
+                        key: pendingGroups.isEmpty
+                            ? const ValueKey('stats-course-empty')
+                            : const ValueKey('stats-course-card'),
+                        dividerIndent: 52,
+                        children: [
+                          Container(
+                            key: const ValueKey('stats-course-header'),
+                            width: double.infinity,
+                            decoration: BoxDecoration(
+                              color: journal.sectionHeaderFill,
+                              border: Border(
+                                bottom: BorderSide(
+                                  color: journal.divider,
+                                  width: 0.6,
+                                ),
+                              ),
+                            ),
+                            padding: const EdgeInsets.fromLTRB(16, 13, 16, 9),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    '各课程待处理',
+                                    style: journal.section.copyWith(
+                                      fontSize: 16.5,
+                                    ),
+                                  ),
+                                ),
+                                if (pendingGroups.isNotEmpty) ...[
+                                  const SizedBox(width: 8),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 8,
+                                      vertical: 2.5,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: journal.parchment,
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    child: Text(
+                                      '共 ${pendingGroups.length} 门',
+                                      style: journal.metadata.copyWith(
+                                        fontSize: 12,
+                                        color: journal.muted,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                          if (pendingGroups.isEmpty)
+                            Padding(
+                              padding: const EdgeInsets.all(16),
+                              child: Text(
+                                '当前没有待处理的课程',
+                                style: journal.metadata,
+                              ),
+                            )
+                          else
                             for (final group in pendingGroups)
                               _buildCourseRow(
                                 context,
@@ -670,8 +733,8 @@ class _StatsScreenState extends State<StatsScreen> with WidgetsBindingObserver {
                                 now: now,
                                 journal: journal,
                               ),
-                          ],
-                        ),
+                        ],
+                      ),
                     ],
                   ),
                 ),
@@ -735,6 +798,20 @@ class _StatsScreenState extends State<StatsScreen> with WidgetsBindingObserver {
         );
 
     final largeText = JournalLayout.isLargeText(context);
+    final indicator = _StatusIndicatorDot(
+      color: dotColor,
+      striped: index == 2,
+      stripeColor: journal.isDark
+          ? journal.paper.withValues(alpha: 0.38)
+          : Colors.white.withValues(alpha: 0.55),
+      borderColor: index == 2
+          ? journal.ink.withValues(alpha: 0.35)
+          : index == 3
+              ? (journal.isDark
+                  ? journal.subtle.withValues(alpha: 0.45)
+                  : journal.ruleStrong)
+              : null,
+    );
     final content = ConstrainedBox(
       constraints: const BoxConstraints(minHeight: 48),
       child: Padding(
@@ -745,14 +822,7 @@ class _StatsScreenState extends State<StatsScreen> with WidgetsBindingObserver {
                 children: [
                   Padding(
                     padding: const EdgeInsets.only(top: 10),
-                    child: Container(
-                      width: 8,
-                      height: 8,
-                      decoration: BoxDecoration(
-                        color: dotColor,
-                        shape: BoxShape.circle,
-                      ),
-                    ),
+                    child: indicator,
                   ),
                   const SizedBox(width: 10),
                   Expanded(
@@ -786,14 +856,7 @@ class _StatsScreenState extends State<StatsScreen> with WidgetsBindingObserver {
               )
             : Row(
                 children: [
-                  Container(
-                    width: 8,
-                    height: 8,
-                    decoration: BoxDecoration(
-                      color: dotColor,
-                      shape: BoxShape.circle,
-                    ),
-                  ),
+                  indicator,
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(
@@ -879,6 +942,7 @@ class _StatsScreenState extends State<StatsScreen> with WidgetsBindingObserver {
                 text: '待完成 ${own.pending}',
                 fg: journal.ink,
                 bg: journal.parchment,
+                borderColor: journal.rule,
                 journal: journal,
               ),
             if (own.expired > 0)
@@ -886,6 +950,9 @@ class _StatsScreenState extends State<StatsScreen> with WidgetsBindingObserver {
                 text: '已逾期 ${own.expired}',
                 fg: journal.overdueSky,
                 bg: journal.overdueSkyBg,
+                borderColor: journal.overdueSky.withValues(
+                  alpha: journal.isDark ? 0.36 : 0.25,
+                ),
                 journal: journal,
               ),
             if (own.unknown > 0)
@@ -893,6 +960,7 @@ class _StatsScreenState extends State<StatsScreen> with WidgetsBindingObserver {
                 text: '待核对 ${own.unknown}',
                 fg: journal.muted,
                 bg: journal.parchment,
+                borderColor: journal.rule,
                 journal: journal,
               ),
           ],
@@ -924,7 +992,11 @@ class _StatsScreenState extends State<StatsScreen> with WidgetsBindingObserver {
                     pillTexts,
                     spacing: 5,
                   );
+                  final narrowScaled =
+                      MediaQuery.sizeOf(context).width <= 380 &&
+                          MediaQuery.textScalerOf(context).scale(14) >= 18.0;
                   final stacked = largeText ||
+                      narrowScaled ||
                       constraints.maxWidth - gap - pillsWidth < minNameWidth;
                   if (stacked) {
                     return Column(
@@ -1038,15 +1110,17 @@ class _CourseStatPill extends StatelessWidget {
     required this.text,
     required this.fg,
     required this.bg,
+    required this.borderColor,
     required this.journal,
   });
 
   final String text;
   final Color fg;
   final Color bg;
+  final Color borderColor;
   final JournalPalette journal;
 
-  static const _padding = EdgeInsets.symmetric(horizontal: 6.5, vertical: 3);
+  static const _padding = EdgeInsets.symmetric(horizontal: 7, vertical: 3);
 
   static TextStyle _style(JournalPalette journal) => journal.pillLabel.copyWith(
         fontSize: 11.5,
@@ -1070,7 +1144,7 @@ class _CourseStatPill extends StatelessWidget {
         textScaler: scaler,
         maxLines: 1,
       )..layout();
-      total += painter.width + _padding.horizontal;
+      total += painter.width + _padding.horizontal + 2;
       painter.dispose();
     }
     return total;
@@ -1083,6 +1157,7 @@ class _CourseStatPill extends StatelessWidget {
       decoration: BoxDecoration(
         color: bg,
         borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: borderColor, width: 0.7),
       ),
       child: Text(
         text,
@@ -1118,7 +1193,7 @@ class _StatsTermScopeBarState extends State<_StatsTermScopeBar>
         CourseTermScope.currentTerm => '本学期',
         CourseTermScope.currentAcademicYear => '本学年',
         CourseTermScope.pastTerms => '往期',
-        CourseTermScope.allTerms => '全部',
+        CourseTermScope.allTerms => '全部学期',
       };
 
   @override
@@ -1370,6 +1445,14 @@ class _AnimatedRatioHero extends StatelessWidget {
         return Text.rich(
           TextSpan(
             children: [
+              TextSpan(
+                text: '已完成 ',
+                style: journal.entryTitle.copyWith(
+                  fontSize: 15.5,
+                  color: journal.muted,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
               TextSpan(text: '$doneVal', style: journal.statHero),
               TextSpan(
                 text: ' / $total',
@@ -1392,12 +1475,14 @@ class _MultiSegmentStatsBar extends StatelessWidget {
     required this.counts,
     required this.colors,
     required this.trackColor,
+    required this.overdueStripeColor,
     required this.animateDuration,
   });
 
   final List<int> counts;
   final List<Color> colors;
   final Color trackColor;
+  final Color overdueStripeColor;
   final Duration animateDuration;
 
   @override
@@ -1429,7 +1514,7 @@ class _MultiSegmentStatsBar extends StatelessWidget {
               child: Row(
                 children: [
                   for (var i = 0; i < active.length; i++) ...[
-                    if (i > 0) const SizedBox(width: 2),
+                    if (i > 0) const SizedBox(width: 2.5),
                     Expanded(
                       flex: math.max(1, active[i].count),
                       child: TweenAnimationBuilder<double>(
@@ -1443,6 +1528,17 @@ class _MultiSegmentStatsBar extends StatelessWidget {
                             key: ValueKey('stats-bar-seg-${active[i].index}'),
                             height: 10,
                             color: colors[active[i].index],
+                            child: active[i].index == 2
+                                ? ClipRect(
+                                    child: CustomPaint(
+                                      key: const ValueKey(
+                                          'stats-bar-overdue-stripes'),
+                                      painter: _DiagonalStripePainter(
+                                        stripeColor: overdueStripeColor,
+                                      ),
+                                    ),
+                                  )
+                                : null,
                           ),
                         ),
                       ),
@@ -1456,4 +1552,82 @@ class _MultiSegmentStatsBar extends StatelessWidget {
       },
     );
   }
+}
+
+class _StatusIndicatorDot extends StatelessWidget {
+  const _StatusIndicatorDot({
+    required this.color,
+    this.striped = false,
+    this.stripeColor,
+    this.borderColor,
+  });
+
+  final Color color;
+  final bool striped;
+  final Color? stripeColor;
+  final Color? borderColor;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 10,
+      height: 10,
+      decoration: BoxDecoration(
+        color: color,
+        shape: BoxShape.circle,
+        border: borderColor == null
+            ? null
+            : Border.all(color: borderColor!, width: 0.8),
+      ),
+      child: striped && stripeColor != null
+          ? ClipOval(
+              child: CustomPaint(
+                painter: _DiagonalStripePainter(
+                  stripeColor: stripeColor!,
+                  spacing: 3.5,
+                  strokeWidth: 1.2,
+                ),
+              ),
+            )
+          : null,
+    );
+  }
+}
+
+class _DiagonalStripePainter extends CustomPainter {
+  const _DiagonalStripePainter({
+    required this.stripeColor,
+    this.spacing = 6.0,
+    this.strokeWidth = 1.6,
+  });
+
+  final Color stripeColor;
+  final double spacing;
+  final double strokeWidth;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (size.isEmpty) return;
+    canvas.save();
+    canvas.clipRect(Offset.zero & size);
+    final paint = Paint()
+      ..color = stripeColor
+      ..strokeWidth = strokeWidth
+      ..style = PaintingStyle.stroke
+      ..isAntiAlias = true;
+    for (double x = -size.height; x < size.width + size.height; x += spacing) {
+      canvas.drawLine(
+        Offset(x, size.height),
+        Offset(x + size.height, 0),
+        paint,
+      );
+    }
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(covariant _DiagonalStripePainter oldDelegate) =>
+      oldDelegate.stripeColor != stripeColor ||
+      oldDelegate.spacing != spacing ||
+      oldDelegate.strokeWidth != strokeWidth;
 }

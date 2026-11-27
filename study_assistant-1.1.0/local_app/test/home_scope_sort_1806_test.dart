@@ -1277,5 +1277,97 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('home-due-summary')), findsNothing);
     });
+
+    test(
+        'M4 natural sort matches rune-by-rune order across surrogate pairs, fullwidth, digits, polyphones, and FB-005 overdue bottom',
+        () {
+      final now = DateTime(2026, 5, 10, 12, 0);
+      final dueSoon = DateTime(2026, 5, 11, 18, 0);
+      final dueLater = DateTime(2026, 5, 13, 18, 0);
+      final overdue = DateTime(2026, 5, 9, 18, 0);
+
+      Assignment makeItem({
+        required String id,
+        required String course,
+        required String title,
+        required DateTime deadline,
+      }) =>
+          Assignment(
+            id: id,
+            courseName: course,
+            title: title,
+            deadlineAt: deadline,
+            requirementsText: '',
+            status: 'pending',
+            lastSyncedAt: now,
+            deadlineTrusted: true,
+          );
+
+      final items = <Assignment>[
+        makeItem(id: 'n10', course: '高等数学', title: '第10章作业', deadline: dueSoon),
+        makeItem(id: 'n2', course: '高等数学', title: '第2章作业', deadline: dueSoon),
+        makeItem(
+            id: 'n002', course: '高等数学', title: '第002章作业', deadline: dueSoon),
+        makeItem(
+            id: 'emoji', course: '高等数学', title: '😀 实验报告', deadline: dueSoon),
+        makeItem(
+            id: 'fullwidth', course: '高等数学', title: '！实验报告', deadline: dueSoon),
+        makeItem(
+            id: 'poly-a', course: '重庆历史', title: '重修说明', deadline: dueLater),
+        makeItem(
+            id: 'poly-b', course: '音乐鉴赏', title: '乐理练习', deadline: dueLater),
+        makeItem(id: 'over', course: '大学物理', title: '已逾期作业', deadline: overdue),
+      ];
+
+      // 1) Title sort: fullwidth '！' (U+FF01) MUST sort BEFORE Emoji '😀' (U+1F600)
+      //    just like `.runes` code point comparison (UTF-16 surrogate pair 0xD83D < 0xFF01 would invert this!).
+      final byTitle = AssignmentQuery.sortHome(
+        items,
+        HomeSortOrder.title,
+        now: now,
+      );
+      expect(byTitle.last.id, 'over', reason: 'FB-005 overdue stays bottom');
+      final fullwidthIdx = byTitle.indexWhere((a) => a.id == 'fullwidth');
+      final emojiIdx = byTitle.indexWhere((a) => a.id == 'emoji');
+      expect(fullwidthIdx, lessThan(emojiIdx));
+
+      // Natural numeric segments: 第2章 < 第002章 (tie broken by raw length/string) < 第10章
+      final n2Idx = byTitle.indexWhere((a) => a.id == 'n2');
+      final n002Idx = byTitle.indexWhere((a) => a.id == 'n002');
+      final n10Idx = byTitle.indexWhere((a) => a.id == 'n10');
+      expect(n2Idx, lessThan(n10Idx));
+      expect(n002Idx, lessThan(n10Idx));
+
+      // 2) Deadline asc & desc both keep overdue at the very bottom (FB-005).
+      final byAsc = AssignmentQuery.sortHome(
+        items,
+        HomeSortOrder.deadlineAsc,
+        now: now,
+      );
+      final byDesc = AssignmentQuery.sortHome(
+        items,
+        HomeSortOrder.deadlineDesc,
+        now: now,
+      );
+      expect(byAsc.last.id, 'over');
+      expect(byDesc.last.id, 'over');
+      expect(byAsc.first.deadlineAt, dueSoon);
+      expect(byDesc.first.deadlineAt, dueLater);
+
+      // 3) Course sort orders courses deterministically by natural pinyin
+      //    ('重庆历史' < '大学物理' < '高等数学' < '音乐鉴赏') and preserves all items.
+      final byCourse = AssignmentQuery.sortHome(
+        items,
+        HomeSortOrder.courseName,
+        now: now,
+      );
+      expect(byCourse, hasLength(items.length));
+      expect(byCourse.first.courseName, '重庆历史');
+      final mathItems = byCourse.where((a) => a.courseName == '高等数学').toList();
+      expect(mathItems.indexWhere((a) => a.id == 'fullwidth'),
+          lessThan(mathItems.indexWhere((a) => a.id == 'emoji')));
+      expect(mathItems.indexWhere((a) => a.id == 'n2'),
+          lessThan(mathItems.indexWhere((a) => a.id == 'n10')));
+    });
   });
 }

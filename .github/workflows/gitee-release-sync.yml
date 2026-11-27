@@ -1,14 +1,16 @@
-name: GitHub release index and Gitee batch sync
+name: GitHub release index and Gitee auto-mirror sync
 
-# Every published GitHub Release updates the small Gitee index. APK mirroring
-# remains an explicit batch operation with no scheduled or per-release upload.
+# Every published GitHub Release performs a two-step progressive sync:
+# Step A publishes the lightweight GitHub-backed index within seconds, then
+# Step B mirrors the verified APK to Gitee Release and switches update-manual.json
+# to Gitee primary + GitHub backup after anonymous full redownload verification.
 on:
   release:
     types: [published]
   workflow_dispatch:
     inputs:
       mode:
-        description: Update the small index, sync a batch checkpoint, or seed explicit tags
+        description: Update the small index, sync and mirror latest, or seed explicit tags
         required: true
         type: choice
         default: index
@@ -45,7 +47,7 @@ concurrency:
 
 jobs:
   sync:
-    name: Update index or verify and publish a Gitee batch
+    name: Update index and mirror verified APK to Gitee
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
@@ -68,8 +70,27 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Run offline synchronizer tests
+        run: |
+          python3 -m py_compile scripts/gitee_release_sync.py
+          python3 scripts/test_gitee_release_sync.py
+          python3 scripts/test_gitee_workflow.py
+
+      - name: Publish baseline Gitee index on release
+        if: ${{ github.event_name == 'release' }}
+        shell: bash
+        run: |
+          args=(
+            --mode index
+            --retention "$RETENTION"
+          )
+          if [[ -n "$TAGS" ]]; then
+            args+=(--tags "$TAGS")
+          fi
+          python3 scripts/gitee_release_sync.py "${args[@]}"
+
       - name: Install APK verification tools
-        if: ${{ github.event_name != 'release' && inputs.mode != 'index' }}
+        if: ${{ github.event_name == 'release' || inputs.mode != 'index' }}
         run: |
           # ubuntu-latest already provides the Android SDK and cmdline tools.
           SDKMANAGER="${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}/cmdline-tools/latest/bin/sdkmanager"
@@ -77,13 +98,23 @@ jobs:
           yes | "$SDKMANAGER" --licenses >/dev/null
           "$SDKMANAGER" "build-tools;36.0.0"
 
-      - name: Run offline synchronizer tests
+      - name: Mirror latest APK to Gitee and switch primary URL
+        if: ${{ github.event_name == 'release' }}
+        shell: bash
         run: |
-          python3 -m py_compile scripts/gitee_release_sync.py
-          python3 scripts/test_gitee_release_sync.py
-          python3 scripts/test_gitee_workflow.py
+          AAPT="${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}/build-tools/36.0.0/aapt"
+          APKSIGNER="${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}/build-tools/36.0.0/apksigner"
+          test -x "$AAPT"
+          test -x "$APKSIGNER"
+          python3 scripts/gitee_release_sync.py \
+            --mode latest \
+            --upload-missing \
+            --retention "$RETENTION" \
+            --aapt "$AAPT" \
+            --apksigner "$APKSIGNER"
 
-      - name: Synchronize Gitee distribution
+      - name: Synchronize Gitee distribution (manual dispatch)
+        if: ${{ github.event_name != 'release' }}
         shell: bash
         run: |
           args=(
@@ -101,6 +132,6 @@ jobs:
             APKSIGNER="${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}/build-tools/36.0.0/apksigner"
             test -x "$AAPT"
             test -x "$APKSIGNER"
-            args+=(--aapt "$AAPT" --apksigner "$APKSIGNER")
+            args+=(--upload-missing --aapt "$AAPT" --apksigner "$APKSIGNER")
           fi
           python3 scripts/gitee_release_sync.py "${args[@]}"

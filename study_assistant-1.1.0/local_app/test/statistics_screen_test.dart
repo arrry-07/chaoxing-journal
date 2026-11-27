@@ -12,6 +12,7 @@ import 'package:study_assistant_mobile/src/features/widgets/journal_floating_nav
 import 'package:study_assistant_mobile/src/features/widgets/journal_grouped_card.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/models/course.dart';
+import 'package:study_assistant_mobile/src/models/course_term_preferences.dart';
 import 'package:study_assistant_mobile/src/models/home_filters.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
 import 'package:study_assistant_mobile/src/services/course_term_catalog.dart';
@@ -429,8 +430,14 @@ void main() {
     expect(find.byType(JournalFloatingNavBar), findsOneWidget);
 
     // Drill down from a course row and preserve the course identity.
-    await t.scrollUntilVisible(find.text('高等数学与统计课程'), 200);
-    await t.tap(find.text('高等数学与统计课程'));
+    final courseLabel = find.text('高等数学与统计课程');
+    await t.scrollUntilVisible(courseLabel, 200);
+    await Scrollable.ensureVisible(
+      t.element(courseLabel),
+      alignment: 0.4,
+    );
+    await t.pumpAndSettle();
+    await t.tap(courseLabel);
     await t.pumpAndSettle();
     spec = t
         .widget<LocalRecordsScreen>(find.byType(LocalRecordsScreen))
@@ -449,10 +456,7 @@ void main() {
     expect(find.textContaining('/ 3'), findsOneWidget);
 
     final accountExamLabel = find.text('账号考试');
-    await Scrollable.ensureVisible(
-      t.element(accountExamLabel),
-      alignment: 0.5,
-    );
+    await t.scrollUntilVisible(accountExamLabel, 200);
     await t.pumpAndSettle();
     await t.tap(accountExamLabel);
     await t.pumpAndSettle();
@@ -629,5 +633,278 @@ void main() {
       expect((rects[i].center.dy - baseY).abs(), lessThanOrEqualTo(1.0));
       expect(rects[i].left, greaterThan(rects[i - 1].left));
     }
+  });
+
+  testWidgets(
+      'unkeyed past-term exams route to pastTerms (3-tier inference) and noticeOnly exams stay in LocalRecords(all) while excluded from stats overview & status drill-down',
+      (t) async {
+    SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
+    final now = DateTime.utc(2026, 11, 20, 4); // 2026-2027 fall
+    final store = AssignmentStore(
+      sessionStore: f.Session(),
+      notificationService: f.Notifications(),
+      widgetSnapshotService: f.WidgetService(),
+      clock: () => now,
+    );
+    addTearDown(store.dispose);
+    await store.repository.activateAccount('A');
+    await store.repository.saveCourses(const [
+      CourseRef(
+          courseId: '1', clazzId: '10', name: '本学期操作系统', folderName: '2026年秋'),
+      CourseRef(
+          courseId: '2', clazzId: '20', name: '上学期大学物理', folderName: '2026年春'),
+    ], account: 'A');
+    await store.repository.mergeAndSave([
+      // Current term formal work: 1 completed + 1 overdue
+      Assignment(
+        id: 'cx:work:1:10:1',
+        courseName: '本学期操作系统',
+        title: '进程调度实验',
+        deadlineAt: now.add(const Duration(days: 2)),
+        requirementsText: '',
+        status: 'submitted',
+        lastSyncedAt: now,
+      ),
+      Assignment(
+        id: 'cx:work:1:10:2',
+        courseName: '本学期操作系统',
+        title: '内存管理作业',
+        deadlineAt: now.subtract(const Duration(days: 1)),
+        requirementsText: '',
+        status: 'pending',
+        lastSyncedAt: now,
+      ),
+      // Tier 1: unkeyed exam with past startAt (2026 spring)
+      Assignment(
+        id: 'cx:exam:account:account:101',
+        source: AssignmentSource.exam,
+        courseName: '账号考试',
+        title: '往期时间戳考试',
+        deadlineAt: null,
+        requirementsText: '',
+        status: 'unknown',
+        lastSyncedAt: now,
+        exam: ExamInfo(
+          examId: '101',
+          startAt: DateTime.utc(2026, 6, 10, 2),
+          startTrusted: true,
+          lifecycle: 'ended',
+        ),
+      ),
+      // Tier 2: unkeyed exam with explicit term text only (no timestamps)
+      Assignment(
+        id: 'cx:exam:account:account:102',
+        source: AssignmentSource.exam,
+        courseName: '账号考试',
+        title: '2025-2026-2 线性代数期末考试',
+        deadlineAt: null,
+        requirementsText: '',
+        status: 'unknown',
+        lastSyncedAt: now,
+        exam: const ExamInfo(examId: '102'),
+      ),
+      // Tier 3: unkeyed exam matching archived same-name course
+      Assignment(
+        id: 'cx:exam:account:account:103',
+        source: AssignmentSource.exam,
+        courseName: '上学期大学物理',
+        title: '期末无时间考试',
+        deadlineAt: null,
+        requirementsText: '',
+        status: 'unknown',
+        lastSyncedAt: now,
+        exam: const ExamInfo(examId: '103'),
+      ),
+      // Current-term pure broadcast noticeOnly exam: excluded from overview/status buckets, kept in LocalRecords(all)
+      Assignment(
+        id: 'cx:examNotice:inbox:notice999',
+        source: AssignmentSource.exam,
+        courseName: '本学期操作系统',
+        title: '期中考试通知广播',
+        deadlineAt: null,
+        requirementsText: '2026年11月25日开考通知',
+        status: 'unknown',
+        publishedAt: now.subtract(const Duration(days: 1)),
+        lastSyncedAt: now,
+        exam: const ExamInfo(examId: 'notice999', noticeOnly: true),
+      ),
+    ], completeSync: true);
+    await store.restoreSession();
+
+    // 1. Current term stats scope drops the 3 past unkeyed exams, keeps noticeOnly in underlying store list.
+    final currentScoped =
+        store.statsAssignmentsForScope(CourseTermScope.currentTerm, now: now);
+    expect(
+      currentScoped.map((a) => a.id),
+      unorderedEquals([
+        'cx:work:1:10:1',
+        'cx:work:1:10:2',
+        'cx:examNotice:inbox:notice999',
+      ]),
+    );
+    // Past terms scope receives all 3 inferred past unkeyed exams.
+    final pastScoped =
+        store.statsAssignmentsForScope(CourseTermScope.pastTerms, now: now);
+    expect(
+      pastScoped.map((a) => a.id),
+      containsAll([
+        'cx:exam:account:account:101',
+        'cx:exam:account:account:102',
+        'cx:exam:account:account:103',
+      ]),
+    );
+
+    // 2. LocalRecords (status=all) keeps noticeOnly visible; status=unknown excludes noticeOnly (1:1 with StatsScreen).
+    final allRecords = LocalRecordQuery.query(
+      store,
+      const LocalRecordFilterSpec(
+        scope: LocalRecordScopeFilter.followedStats,
+        termScope: CourseTermScope.currentTerm,
+        status: LocalRecordStatusFilter.all,
+      ),
+      now,
+    );
+    expect(
+      allRecords.groups.map((g) => g.primary.id),
+      contains('cx:examNotice:inbox:notice999'),
+    );
+    final unknownRecords = LocalRecordQuery.query(
+      store,
+      const LocalRecordFilterSpec(
+        scope: LocalRecordScopeFilter.followedStats,
+        termScope: CourseTermScope.currentTerm,
+        status: LocalRecordStatusFilter.unknown,
+      ),
+      now,
+    );
+    expect(unknownRecords.groups, isEmpty);
+
+    // 3. StatsScreen UI renders disambiguated labels, 45° overdue stripes, embedded header, and 1/2 (50%) without unknown row.
+    t.view.physicalSize = const Size(360, 800);
+    t.view.devicePixelRatio = 1.0;
+    addTearDown(t.view.reset);
+
+    await t.pumpWidget(MaterialApp(
+      theme: StudyAssistantTheme.light,
+      builder: (context, child) => MediaQuery(
+        data: MediaQuery.of(context)
+            .copyWith(textScaler: const TextScaler.linear(1.3)),
+        child: child!,
+      ),
+      home: Scaffold(body: StatsScreen(store: store, clock: () => now)),
+    ));
+    await t.pumpAndSettle();
+    expect(t.takeException(), isNull);
+    expect(find.text('全部学期'), findsOneWidget);
+    expect(find.text('不限时间'), findsOneWidget);
+    expect(find.textContaining('已完成 1'), findsOneWidget);
+    expect(find.textContaining('/ 2'), findsOneWidget);
+    expect(find.text('50%'), findsOneWidget);
+    expect(find.text('提交未知'), findsNothing);
+    expect(find.byKey(const ValueKey('stats-bar-overdue-stripes')),
+        findsOneWidget);
+    expect(find.byKey(const ValueKey('stats-course-header')), findsOneWidget);
+    expect(find.text('共 1 门'), findsOneWidget);
+  });
+
+  test(
+      'unkeyed exam respects startTrusted/endTrusted and multi-year archived courses never leak into currentAcademicYear',
+      () {
+    final now =
+        DateTime(2026, 5, 10, 12); // 2025-2026 spring (academicYearStart=2025)
+    final catalog = CourseTermCatalog.build(
+      courses: const [
+        CourseRef(
+          courseId: 'old1',
+          clazzId: '1',
+          name: '大学英语',
+          folderName: '2024-2025学年第一学期',
+        ),
+        CourseRef(
+          courseId: 'old2',
+          clazzId: '2',
+          name: '大学英语',
+          folderName: '2025-2026学年第一学期',
+        ),
+      ],
+      assignments: const [],
+      notices: const [],
+      preferences: const CourseTermPreferences.empty(),
+      now: now,
+    );
+
+    // Untrusted past startAt + trusted current-term endAt -> must classify as currentTerm!
+    final untrustedStartExam = Assignment(
+      id: 'cx:exam:account:account:5001',
+      courseName: '未知课',
+      title: '英语机考',
+      deadlineAt: null,
+      requirementsText: '',
+      status: 'pending',
+      lastSyncedAt: now,
+      deadlineTrusted: false,
+      source: AssignmentSource.exam,
+      exam: ExamInfo(
+        examId: '5001',
+        startAt: DateTime(2025, 12, 10, 9),
+        startTrusted: false,
+        endAt: DateTime(2026, 5, 25, 11),
+        endTrusted: true,
+        lifecycle: 'scheduled',
+      ),
+    );
+    expect(
+      catalog.matchesAssignmentInStatsScope(
+        untrustedStartExam,
+        CourseTermScope.currentTerm,
+      ),
+      isTrue,
+    );
+    expect(
+      catalog.matchesAssignmentInStatsScope(
+        untrustedStartExam,
+        CourseTermScope.pastTerms,
+      ),
+      isFalse,
+    );
+
+    // Multi-year archived same-name courses (2024 fall + 2025 fall) ->
+    // unkeyed dateless exam goes to pastTerms, NOT currentTerm and NOT currentAcademicYear.
+    final multiPastExam = Assignment(
+      id: 'cx:exam:account:account:5002',
+      courseName: '大学英语',
+      title: '历史机考',
+      deadlineAt: null,
+      requirementsText: '',
+      status: 'unknown',
+      lastSyncedAt: now,
+      deadlineTrusted: false,
+      source: AssignmentSource.exam,
+      exam: const ExamInfo(
+        examId: '5002',
+        lifecycle: 'ended',
+      ),
+    );
+    expect(
+      catalog.matchesAssignmentInStatsScope(
+        multiPastExam,
+        CourseTermScope.pastTerms,
+      ),
+      isTrue,
+    );
+    expect(
+      catalog.matchesAssignmentInStatsScope(
+        multiPastExam,
+        CourseTermScope.currentTerm,
+      ),
+      isFalse,
+    );
+    expect(
+      catalog.matchesAssignmentInStatsScope(
+        multiPastExam,
+        CourseTermScope.currentAcademicYear,
+      ),
+      isFalse,
+    );
   });
 }

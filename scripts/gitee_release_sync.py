@@ -53,6 +53,8 @@ SIGNER_SHA256 = (
 MAX_DOWNLOAD_BYTES = 256 * 1024 * 1024
 MAX_JSON_BYTES = 2 * 1024 * 1024
 GITEE_UPLOAD_TIMEOUT_SECONDS = 600
+GITEE_UPLOAD_RETRIES = 2
+GITEE_UPLOAD_RETRY_BACKOFF_SECONDS = 3.0
 USER_AGENT = "chaoxing-journal-gitee-sync/1.0"
 VERSION_FILE_PATH = "study_assistant-1.1.0/local_app/pubspec.yaml"
 # Project patch labels include 01-09. Preserve that spelling in Tags/URLs,
@@ -479,45 +481,64 @@ class HttpClient:
             "\n%{http_code} %{size_upload} %{speed_upload}",
             url,
         ]
-        try:
-            result = subprocess.run(
-                command,
-                input=f"form-string = {token_config}\n",
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=GITEE_UPLOAD_TIMEOUT_SECONDS + 30,
-                check=False,
+        for attempt in range(GITEE_UPLOAD_RETRIES + 1):
+            try:
+                result = subprocess.run(
+                    command,
+                    input=f"form-string = {token_config}\n",
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=GITEE_UPLOAD_TIMEOUT_SECONDS + 30,
+                    check=False,
+                )
+            except subprocess.TimeoutExpired:
+                if attempt < GITEE_UPLOAD_RETRIES:
+                    time.sleep(GITEE_UPLOAD_RETRY_BACKOFF_SECONDS * (attempt + 1))
+                    continue
+                raise safe_io_error(url) from None
+            response_text, separator, metrics_text = result.stdout.rstrip().rpartition(
+                "\n"
             )
-        except subprocess.TimeoutExpired:
-            raise safe_io_error(url) from None
-        response_text, separator, metrics_text = result.stdout.rstrip().rpartition(
-            "\n"
-        )
-        if not separator:
-            response_text = ""
-            metrics_text = result.stdout.strip()
-        metrics = metrics_text.split()
-        status = None
-        uploaded = None
-        speed = None
-        if metrics:
-            try:
-                status = int(metrics[0])
-            except ValueError:
-                pass
-        if len(metrics) > 1:
-            try:
-                uploaded = int(float(metrics[1]))
-            except ValueError:
-                pass
-        if len(metrics) > 2:
-            try:
-                speed = float(metrics[2])
-            except ValueError:
-                pass
-        if result.returncode != 0 or status not in (200, 201):
+            if not separator:
+                response_text = ""
+                metrics_text = result.stdout.strip()
+            metrics = metrics_text.split()
+            status = None
+            uploaded = None
+            speed = None
+            if metrics:
+                try:
+                    status = int(metrics[0])
+                except ValueError:
+                    pass
+            if len(metrics) > 1:
+                try:
+                    uploaded = int(float(metrics[1]))
+                except ValueError:
+                    pass
+            if len(metrics) > 2:
+                try:
+                    speed = float(metrics[2])
+                except ValueError:
+                    pass
+            if result.returncode == 0 and status in (200, 201):
+                response = response_text.encode("utf-8")
+                if len(response) > MAX_JSON_BYTES:
+                    raise SyncError(
+                        "Gitee upload response exceeded the size limit."
+                    )
+                try:
+                    return json.loads(response.decode("utf-8"))
+                except (UnicodeDecodeError, json.JSONDecodeError):
+                    raise SyncError(
+                        "Gitee returned invalid JSON after upload."
+                    ) from None
+            transient = status is None or status == 0 or status == 429 or status >= 500
+            if transient and attempt < GITEE_UPLOAD_RETRIES:
+                time.sleep(GITEE_UPLOAD_RETRY_BACKOFF_SECONDS * (attempt + 1))
+                continue
             parsed = urllib.parse.urlsplit(url)
             safe_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
             detail = f"HTTP {status}" if status is not None else "no HTTP status"
@@ -528,13 +549,7 @@ class HttpClient:
             if speed is not None:
                 detail += f" at {speed:.0f} B/s"
             raise SyncError(f"Gitee upload failed for {safe_url} ({detail}).")
-        response = response_text.encode("utf-8")
-        if len(response) > MAX_JSON_BYTES:
-            raise SyncError("Gitee upload response exceeded the size limit.")
-        try:
-            return json.loads(response.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError):
-            raise SyncError("Gitee returned invalid JSON after upload.") from None
+        raise SyncError("Gitee upload failed after retries.")
 
     def download(
         self,
@@ -779,6 +794,7 @@ class GitHubReleaseSource:
         *,
         aapt: Path,
         apksigner: Path,
+        local_apk: Path | None = None,
     ) -> tuple[ReleaseArtifact, dict[str, Any]]:
         release = self.metadata(tag)
         release_tag = str(release.get("tag_name", ""))
@@ -820,13 +836,24 @@ class GitHubReleaseSource:
         directory.mkdir(parents=True, exist_ok=True)
         apk_path = directory / apk_name
         checksum_path = directory / "SHA256SUMS.txt"
-        self.client.download(
-            apk_url,
-            apk_path,
-            token=self.client._github_token,
-            expected_size=size,
-            expected_sha256=github_sha,
-        )
+        if local_apk is not None:
+            resolved_local = local_apk.resolve()
+            if not resolved_local.is_file():
+                raise SyncError("Local APK file did not exist.")
+            if resolved_local.stat().st_size != size:
+                raise SyncError("Local APK size did not match GitHub release asset.")
+            if sha256_file(resolved_local) != github_sha:
+                raise SyncError("Local APK SHA-256 did not match GitHub release asset.")
+            if resolved_local != apk_path.resolve():
+                shutil.copyfile(resolved_local, apk_path)
+        else:
+            self.client.download(
+                apk_url,
+                apk_path,
+                token=self.client._github_token,
+                expected_size=size,
+                expected_sha256=github_sha,
+            )
         self.client.download(
             checksum_url,
             checksum_path,
@@ -1335,17 +1362,17 @@ def render_readme(
 - stable：`{stable}`，仅在大更新或紧急热修时推进。
 - manual：`{manual}`，指向最新正式发布。
 - 最多保留 3 个 APK Release；更早版本请前往 GitHub Releases。
-- GitHub 是每次正式发布的必发源和备用下载源，Gitee 是国内批量镜像。
+- GitHub 是每次正式发布的必发源和备用下载源，Gitee 是国内直连主链镜像。
 
 固定清单：
 
 - {GITEE_RAW_BASE}/update-stable.json
 - {GITEE_RAW_BASE}/update-manual.json
 
-维护流程由 `arrry-07/chaoxing-journal` 的 GitHub Actions 在维护者指定的
-批量同步点手动上传和校验 APK。GitHub Release 发布后只自动更新小索引；
-未镜像版本直接使用 GitHub 下载地址，镜像版本只有在大小、SHA-256、包名、
-版本和签名校验通过后才切换为 Gitee 主地址。
+维护流程由 `arrry-07/chaoxing-journal` 的 GitHub Actions 自动执行两步渐进同步：
+GitHub Release 发布后先秒级更新保底索引，随后自动将经大小、SHA-256、包名、
+版本与原签名核验的正式 APK 镜像至 Gitee Release，并经公网匿名完整回下载校验后
+将清单切换为 Gitee 国内主链 + GitHub 备用链。
 """
 
 
@@ -1365,6 +1392,22 @@ def _download_public_apk(
     )
 
 
+def _same_release_identity(
+    left: ReleaseArtifact | None,
+    right: ReleaseArtifact | None,
+) -> bool:
+    if left is None or right is None:
+        return False
+    return (
+        left.tag == right.tag
+        and left.version_name == right.version_name
+        and left.version_code == right.version_code
+        and left.apk_name == right.apk_name
+        and left.size == right.size
+        and left.sha256 == right.sha256
+    )
+
+
 def verify_gitee_release(
     gitee: GiteeReleaseClient,
     client: HttpClient,
@@ -1372,13 +1415,37 @@ def verify_gitee_release(
     *,
     full_download: bool,
     work_dir: Path,
+    upload_missing: bool = False,
+    apk_path: Path | None = None,
 ) -> GiteeRelease:
     release = gitee.find_release(artifact.tag)
+    uploaded_now = False
     if release is None:
-        raise SyncError(
-            f"Gitee release {artifact.tag} must be created and uploaded "
-            "in the Gitee web backend before synchronization."
-        )
+        if not upload_missing:
+            raise SyncError(
+                f"Gitee release {artifact.tag} must be created and uploaded "
+                "in the Gitee web backend before synchronization."
+            )
+        if apk_path is None or not apk_path.is_file():
+            raise SyncError(
+                f"Verified APK for {artifact.tag} is required before uploading to Gitee."
+            )
+        created = gitee.create_release(artifact)
+        gitee.upload_apk(created, apk_path)
+        uploaded_now = True
+        refreshed = gitee.find_release(artifact.tag)
+        if refreshed is not None and any(
+            isinstance(a.get("name"), str) and a["name"] == artifact.apk_name
+            for a in refreshed.assets
+        ):
+            release = refreshed
+        else:
+            release = GiteeRelease(
+                release_id=created.release_id,
+                tag=created.tag,
+                assets=({"name": artifact.apk_name},),
+                body=(refreshed.body if refreshed and refreshed.body else artifact.notes),
+            )
     apk_assets = [
         asset
         for asset in release.assets
@@ -1387,6 +1454,31 @@ def verify_gitee_release(
     ]
     if len(apk_assets) > 1:
         raise SyncError("Gitee release contained multiple APK assets.")
+    if len(apk_assets) == 0 and upload_missing and not uploaded_now:
+        if apk_path is None or not apk_path.is_file():
+            raise SyncError(
+                f"Verified APK for {artifact.tag} is required before uploading to Gitee."
+            )
+        gitee.upload_apk(release, apk_path)
+        refreshed = gitee.find_release(artifact.tag)
+        if refreshed is not None and any(
+            isinstance(a.get("name"), str) and a["name"] == artifact.apk_name
+            for a in refreshed.assets
+        ):
+            release = refreshed
+        else:
+            release = GiteeRelease(
+                release_id=release.release_id,
+                tag=release.tag,
+                assets=({"name": artifact.apk_name},),
+                body=release.body or artifact.notes,
+            )
+        apk_assets = [
+            asset
+            for asset in release.assets
+            if isinstance(asset.get("name"), str)
+            and str(asset["name"]).endswith(".apk")
+        ]
     if len(apk_assets) != 1 or apk_assets[0].get("name") != artifact.apk_name:
         raise SyncError("Gitee release APK identity did not match.")
     if full_download:
@@ -1411,18 +1503,26 @@ def verify_gitee_artifacts(
     *,
     latest_tag: str,
     work_dir: Path,
+    upload_missing: bool = False,
+    full_download_tags: Iterable[str] | None = None,
 ) -> dict[str, GiteeRelease]:
     unique = {artifact.tag: artifact for artifact in artifacts}
     if latest_tag not in unique:
         raise SyncError("Latest release was missing from Gitee verification.")
+    download_set = {latest_tag}
+    if full_download_tags is not None:
+        download_set.update(full_download_tags)
     verified: dict[str, GiteeRelease] = {}
     for artifact in unique.values():
+        candidate_apk = work_dir / artifact.tag / artifact.apk_name
         verified[artifact.tag] = verify_gitee_release(
             gitee,
             client,
             artifact,
-            full_download=artifact.tag == latest_tag,
+            full_download=artifact.tag in download_set,
             work_dir=work_dir,
+            upload_missing=upload_missing,
+            apk_path=candidate_apk if candidate_apk.is_file() else None,
         )
     return verified
 
@@ -1456,6 +1556,7 @@ def prune_gitee_releases(
     stable_tag: str,
     manual_tag: str,
     limit: int,
+    require_stable: bool = True,
 ) -> list[str]:
     releases = gitee.list_releases()
     managed = [
@@ -1469,9 +1570,12 @@ def prune_gitee_releases(
         )
     ]
     tags = [release.tag for release in managed]
+    effective_stable_tag = (
+        stable_tag if (require_stable or stable_tag in tags) else manual_tag
+    )
     keep = select_retained_tags(
         tags,
-        stable_tag=stable_tag,
+        stable_tag=effective_stable_tag,
         manual_tag=manual_tag,
         limit=limit,
     )
@@ -1652,6 +1756,10 @@ def synchronize(args: argparse.Namespace) -> int:
             current_manual_json=current_manual_json,
             tags=seed_tags,
         )
+    local_apk_arg = getattr(args, "local_apk", "")
+    local_apk_path = Path(local_apk_arg).resolve() if local_apk_arg else None
+    if local_apk_path is not None and len(tags) != 1:
+        raise SyncError("--local-apk can only be used with a single release tag.")
     aapt = Path(args.aapt) if args.aapt else find_android_tool("aapt")
     apksigner = Path(args.apksigner) if args.apksigner else find_android_tool(
         "apksigner"
@@ -1659,10 +1767,15 @@ def synchronize(args: argparse.Namespace) -> int:
     artifacts: list[ReleaseArtifact] = []
     raw_releases: dict[str, dict[str, Any]] = {}
     for tag in tags:
+        download_kwargs: dict[str, Any] = {
+            "aapt": aapt,
+            "apksigner": apksigner,
+        }
+        if local_apk_path is not None:
+            download_kwargs["local_apk"] = local_apk_path
         artifact, raw_release = github.download_and_verify(
             tag,
-            aapt=aapt,
-            apksigner=apksigner,
+            **download_kwargs,
         )
         artifacts.append(artifact)
         raw_releases[artifact.tag] = raw_release
@@ -1717,17 +1830,35 @@ def synchronize(args: argparse.Namespace) -> int:
             target_manual = fetched_stable
         raw_releases[fetched_stable.tag] = raw_stable
 
+    stable_is_mirrored = manifest_has_verified_gitee_mirror(
+        current_stable_json,
+        target_stable,
+        gitee_repository=args.gitee_repository,
+        github_repository=args.github_repository,
+    )
+    stable_needs_mirror_publish = (
+        current_stable_json is None
+        or not _same_release_identity(target_stable, current_stable)
+        or (not stable_is_mirrored and target_stable.tag == target_manual.tag)
+    )
     verification_artifacts = {
         artifact.tag: artifact for artifact in artifacts
     }
-    verification_artifacts[target_stable.tag] = target_stable
+    if stable_needs_mirror_publish or stable_is_mirrored:
+        verification_artifacts[target_stable.tag] = target_stable
     verification_artifacts[target_manual.tag] = target_manual
+    upload_missing = getattr(args, "upload_missing", False)
+    full_download_tags = {target_manual.tag}
+    if stable_needs_mirror_publish:
+        full_download_tags.add(target_stable.tag)
     verified_releases = verify_gitee_artifacts(
         gitee,
         client,
         verification_artifacts.values(),
         latest_tag=target_manual.tag,
         work_dir=work_dir,
+        upload_missing=upload_missing,
+        full_download_tags=full_download_tags,
     )
     target_manual = with_gitee_release_notes(
         target_manual,
@@ -1738,13 +1869,9 @@ def synchronize(args: argparse.Namespace) -> int:
     generated_dir.mkdir(parents=True, exist_ok=True)
     stable_output = generated_dir / "update-stable.json"
     manual_output = generated_dir / "update-manual.json"
-    stable_is_mirrored = manifest_has_verified_gitee_mirror(
-        current_stable_json,
-        target_stable,
-        gitee_repository=args.gitee_repository,
-        github_repository=args.github_repository,
-    )
-    if current_stable_json is None or target_stable != current_stable:
+    if current_stable_json is None or not _same_release_identity(
+        target_stable, current_stable
+    ):
         raw = raw_releases[target_stable.tag]
         evidence_path = generated_dir / "stable-evidence.json"
         evidence_path.write_text(
@@ -1787,13 +1914,15 @@ def synchronize(args: argparse.Namespace) -> int:
         gitee_repository=args.gitee_repository,
         github_repository=args.github_repository,
     )
-    if current_manual_json is not None and target_manual == current_manual:
-        if manual_is_mirrored:
+    if current_manual_json is not None and _same_release_identity(
+        target_manual, current_manual
+    ):
+        if manual_is_mirrored and target_manual.notes == current_manual.notes:
             manual_manifest = current_manual_json
         else:
             # The latest manual APK has just passed the anonymous Gitee
-            # redownload/hash checks. Same-version URL refresh must not ask the
-            # normal generator for a strictly older previous release.
+            # redownload/hash checks. Same-version URL or notes refresh must
+            # not ask the normal generator for a strictly older previous release.
             manual_manifest = build_manifest(
                 target_manual,
                 gitee_repository=args.gitee_repository,
@@ -1834,11 +1963,18 @@ def synchronize(args: argparse.Namespace) -> int:
     )
     stable_tag = f"v{stable_manifest['versionName']}"
     manual_tag = f"v{manual_manifest['versionName']}"
+    stable_requires_gitee = manifest_has_verified_gitee_mirror(
+        stable_manifest,
+        target_stable,
+        gitee_repository=args.gitee_repository,
+        github_repository=args.github_repository,
+    )
     deleted = prune_gitee_releases(
         gitee,
         stable_tag=stable_tag,
         manual_tag=manual_tag,
         limit=args.retention,
+        require_stable=stable_requires_gitee,
     )
     print(
         json.dumps(
@@ -1870,6 +2006,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--apksigner", default="")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--promote-stable", action="store_true")
+    parser.add_argument("--upload-missing", action="store_true")
+    parser.add_argument("--local-apk", default="")
     return parser
 
 

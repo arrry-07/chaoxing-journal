@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart'
+    show listEquals, setEquals, visibleForTesting;
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
@@ -7,6 +9,7 @@ import '../../app/journal.dart';
 import '../../app/journal_motion.dart';
 import '../../models/assignment.dart';
 import '../../models/assignment_sync_progress.dart';
+import '../../models/course.dart';
 import '../../models/local_coursework_state.dart';
 import '../../models/personal_workspace.dart';
 import '../../models/pinned_assignments.dart';
@@ -148,6 +151,120 @@ HomeCoursePickerProjection computeHomeCoursePickerProjection({
   );
 }
 
+class _HomeProjectionCacheEntry {
+  const _HomeProjectionCacheEntry({
+    required this.store,
+    required this.accountEpoch,
+    required this.isAuthenticated,
+    required this.homeCatalog,
+    required this.localRecordGroups,
+    required this.termCatalog,
+    required this.coursework,
+    required this.notebook,
+    required this.personal,
+    required this.courses,
+    required this.unfollowedCourseKeys,
+    required this.query,
+    required this.typeFilter,
+    required this.deadlineFilter,
+    required this.courseKey,
+    required this.sortOrder,
+    required this.completingManualIds,
+    required this.nowMinute,
+    required this.filtersActive,
+    required this.catalogAssignments,
+    required this.displayIndex,
+    required this.displayAssignments,
+    required this.options,
+    required this.items,
+    required this.selectedCourseIdle,
+    required this.sortedTimelineItems,
+    required this.plans,
+    required this.plannedIds,
+    required this.dueSummary,
+    required this.upcomingExam,
+    required this.hasManualItems,
+    required this.followedCourses,
+    required this.activeAgenda,
+  });
+
+  final AssignmentStore store;
+  final int accountEpoch;
+  final bool isAuthenticated;
+  final List<Assignment> homeCatalog;
+  final Object localRecordGroups;
+  final Object termCatalog;
+  final LocalCourseworkState coursework;
+  final StudyNotebook notebook;
+  final PersonalWorkspace personal;
+  final List<CourseRef> courses;
+  final Set<String> unfollowedCourseKeys;
+  final String query;
+  final AssignmentTypeFilter typeFilter;
+  final AssignmentDeadlineFilter deadlineFilter;
+  final String? courseKey;
+  final HomeSortOrder sortOrder;
+  final Set<String> completingManualIds;
+  final int nowMinute;
+
+  final bool filtersActive;
+  final List<Assignment> catalogAssignments;
+  final AssignmentDisplayIndex displayIndex;
+  final List<Assignment> displayAssignments;
+  final List<HomeCourseFilterOption> options;
+  final List<Assignment> items;
+  final bool selectedCourseIdle;
+  final List<HomeTimelineItem> sortedTimelineItems;
+  final List<DailyPlanItem> plans;
+  final Set<String> plannedIds;
+  final HomeDueSummary dueSummary;
+  final HomeUpcomingExam? upcomingExam;
+  final bool hasManualItems;
+  final int followedCourses;
+  final int activeAgenda;
+
+  bool matches({
+    required AssignmentStore store,
+    required List<Assignment> homeCatalog,
+    required Object localRecordGroups,
+    required Object termCatalog,
+    required List<CourseRef> courses,
+    required Set<String> unfollowedCourseKeys,
+    required String query,
+    required AssignmentTypeFilter typeFilter,
+    required AssignmentDeadlineFilter deadlineFilter,
+    required String? courseKey,
+    required HomeSortOrder sortOrder,
+    required Set<String> completingManualIds,
+    required int nowMinute,
+  }) =>
+      identical(this.store, store) &&
+      accountEpoch == store.accountEpoch &&
+      isAuthenticated == store.isAuthenticated &&
+      identical(this.homeCatalog, homeCatalog) &&
+      identical(this.localRecordGroups, localRecordGroups) &&
+      identical(this.termCatalog, termCatalog) &&
+      identical(coursework, store.courseworkState) &&
+      identical(notebook, store.notebook) &&
+      identical(personal, store.personal) &&
+      this.query == query &&
+      this.typeFilter == typeFilter &&
+      this.deadlineFilter == deadlineFilter &&
+      this.courseKey == courseKey &&
+      this.sortOrder == sortOrder &&
+      this.nowMinute == nowMinute &&
+      setEquals(this.completingManualIds, completingManualIds) &&
+      listEquals(this.courses, courses) &&
+      setEquals(this.unfollowedCourseKeys, unfollowedCourseKeys);
+}
+
+_HomeProjectionCacheEntry? _homeProjectionCache;
+
+@visibleForTesting
+void clearHomeProjectionCacheForTesting() {
+  _homeProjectionCache = null;
+}
+
 HomeViewData prepareHomeViewData({
   required AssignmentStore store,
   required DateTime now,
@@ -161,84 +278,202 @@ HomeViewData prepareHomeViewData({
   required HomeSortOrder sortOrder,
   required Set<String> completingManualIds,
 }) {
-  final filtersActive = query.trim().isNotEmpty ||
-      typeFilter != AssignmentTypeFilter.all ||
-      courseKey != null ||
-      deadlineFilter != AssignmentDeadlineFilter.all;
-  final coursework = store.courseworkState;
-  final catalogAssignments = courseKey == null
-      ? store.homeCatalogAssignments
-      : store.homeCatalogAssignmentsWithSelectedCourse(courseKey);
-  final displayIndex = courseKey == null
-      ? store.homeDisplayIndex
-      : AssignmentDisplayIndex.from(catalogAssignments);
-  final displayAssignments = AssignmentQuery.currentDisplay(
-    catalogAssignments,
-    now,
-    index: displayIndex,
-    coursework: coursework,
-  );
-  final options = computeHomeCoursePickerProjection(
-    store: store,
-    now: now,
-    selectedCourseKey: courseKey,
-    fallbackDisplayIndex: displayIndex,
-  ).options;
-  final items = !recoveryActive
-      ? AssignmentQuery.filterHome(
-          catalogAssignments,
-          query: query,
-          courseKey: courseKey,
-          deadline: deadlineFilter,
-          type: typeFilter,
-          includeHistorical: false,
-          index: displayIndex,
-          now: now,
-          coursework: coursework,
-        )
-      : displayAssignments
-          .where((assignment) => recoveryMatches?.call(assignment) ?? false)
-          .toList();
-  final selectedCourseName = courseKey == null
-      ? null
-      : options
-          .where((option) => option.courseKey == courseKey)
-          .firstOrNull
-          ?.name;
-  final manualItems = !recoveryActive
-      ? HomeManualTimeline.filterManualEntries(
-          store.isAuthenticated
-              ? store.notebook.entries
-              : const <ManualEntry>[],
-          query: query,
-          selectedCourseName: selectedCourseName,
-          deadline: deadlineFilter,
-          type: typeFilter,
-          keepVisibleIds: completingManualIds,
-          now: now,
-        )
-      : const <ManualEntry>[];
-  final selectedCourseIdle = !recoveryActive &&
-      courseKey != null &&
-      query.trim().isEmpty &&
-      deadlineFilter == AssignmentDeadlineFilter.all &&
-      typeFilter == AssignmentTypeFilter.all &&
-      manualItems.isEmpty &&
-      !displayAssignments.any((a) => a.courseKey == courseKey);
-  final sortedTimelineItems = HomeManualTimeline.mergeAndSort(
-    assignments: items,
-    manualEntries: manualItems,
-    order: sortOrder,
-    now: now,
-    sourceRecords: catalogAssignments,
-    displayIndex: displayIndex,
-    prioritizeStartOnly: !recoveryActive,
-    coursework: coursework,
-    keepVisibleIds: completingManualIds,
-  );
-  final today = PersonalWorkspace.dayKey(now);
-  final plans = store.personal.plans.where((p) => p.day == today).toList();
-  final plannedIds = plans.map((p) => p.assignmentId).toSet();
+  final bool filtersActive;
+  final LocalCourseworkState coursework;
+  final List<Assignment> catalogAssignments;
+  final AssignmentDisplayIndex displayIndex;
+  final List<Assignment> displayAssignments;
+  final List<HomeCourseFilterOption> options;
+  final List<Assignment> items;
+  final bool selectedCourseIdle;
+  final List<HomeTimelineItem> sortedTimelineItems;
+  final List<DailyPlanItem> plans;
+  final Set<String> plannedIds;
+  final HomeDueSummary dueSummary;
+  final HomeUpcomingExam? upcomingExam;
+  final bool hasManualItems;
+  final int followedCourses;
+  final int activeAgenda;
+
+  final homeCatalog = store.homeCatalogAssignments;
+  final localRecordGroups = store.localRecordGroups;
+  final termCatalog = store.termCatalog;
+  final courses = store.courses;
+  final unfollowedCourseKeys = <String>{
+    for (final course in courses)
+      if (!store.follows(course.key)) course.key,
+  };
+  final nowMinute = now.millisecondsSinceEpoch ~/ 60000;
+  final cached = _homeProjectionCache;
+  if (!recoveryActive &&
+      cached != null &&
+      cached.matches(
+        store: store,
+        homeCatalog: homeCatalog,
+        localRecordGroups: localRecordGroups,
+        termCatalog: termCatalog,
+        courses: courses,
+        unfollowedCourseKeys: unfollowedCourseKeys,
+        query: query,
+        typeFilter: typeFilter,
+        deadlineFilter: deadlineFilter,
+        courseKey: courseKey,
+        sortOrder: sortOrder,
+        completingManualIds: completingManualIds,
+        nowMinute: nowMinute,
+      )) {
+    filtersActive = cached.filtersActive;
+    coursework = cached.coursework;
+    catalogAssignments = cached.catalogAssignments;
+    displayIndex = cached.displayIndex;
+    displayAssignments = cached.displayAssignments;
+    options = cached.options;
+    items = cached.items;
+    selectedCourseIdle = cached.selectedCourseIdle;
+    sortedTimelineItems = cached.sortedTimelineItems;
+    plans = cached.plans;
+    plannedIds = cached.plannedIds;
+    dueSummary = cached.dueSummary;
+    upcomingExam = cached.upcomingExam;
+    hasManualItems = cached.hasManualItems;
+    followedCourses = cached.followedCourses;
+    activeAgenda = cached.activeAgenda;
+  } else {
+    filtersActive = query.trim().isNotEmpty ||
+        typeFilter != AssignmentTypeFilter.all ||
+        courseKey != null ||
+        deadlineFilter != AssignmentDeadlineFilter.all;
+    coursework = store.courseworkState;
+    catalogAssignments = courseKey == null
+        ? homeCatalog
+        : store.homeCatalogAssignmentsWithSelectedCourse(courseKey);
+    displayIndex = courseKey == null
+        ? store.homeDisplayIndex
+        : AssignmentDisplayIndex.from(catalogAssignments);
+    displayAssignments = AssignmentQuery.currentDisplay(
+      catalogAssignments,
+      now,
+      index: displayIndex,
+      coursework: coursework,
+    );
+    options = computeHomeCoursePickerProjection(
+      store: store,
+      now: now,
+      selectedCourseKey: courseKey,
+      fallbackDisplayIndex: displayIndex,
+    ).options;
+    items = !recoveryActive
+        ? AssignmentQuery.filterHome(
+            catalogAssignments,
+            query: query,
+            courseKey: courseKey,
+            deadline: deadlineFilter,
+            type: typeFilter,
+            includeHistorical: false,
+            index: displayIndex,
+            now: now,
+            coursework: coursework,
+          )
+        : displayAssignments
+            .where((assignment) => recoveryMatches?.call(assignment) ?? false)
+            .toList();
+    final selectedCourseName = courseKey == null
+        ? null
+        : options
+            .where((option) => option.courseKey == courseKey)
+            .firstOrNull
+            ?.name;
+    final manualItems = !recoveryActive
+        ? HomeManualTimeline.filterManualEntries(
+            store.isAuthenticated
+                ? store.notebook.entries
+                : const <ManualEntry>[],
+            query: query,
+            selectedCourseName: selectedCourseName,
+            deadline: deadlineFilter,
+            type: typeFilter,
+            keepVisibleIds: completingManualIds,
+            now: now,
+          )
+        : const <ManualEntry>[];
+    hasManualItems = manualItems.isNotEmpty;
+    selectedCourseIdle = !recoveryActive &&
+        courseKey != null &&
+        query.trim().isEmpty &&
+        deadlineFilter == AssignmentDeadlineFilter.all &&
+        typeFilter == AssignmentTypeFilter.all &&
+        manualItems.isEmpty &&
+        !displayAssignments.any((a) => a.courseKey == courseKey);
+    sortedTimelineItems = HomeManualTimeline.mergeAndSort(
+      assignments: items,
+      manualEntries: manualItems,
+      order: sortOrder,
+      now: now,
+      sourceRecords: catalogAssignments,
+      displayIndex: displayIndex,
+      prioritizeStartOnly: !recoveryActive,
+      coursework: coursework,
+      keepVisibleIds: completingManualIds,
+    );
+    final today = PersonalWorkspace.dayKey(now);
+    plans = store.personal.plans.where((p) => p.day == today).toList();
+    plannedIds = plans.map((p) => p.assignmentId).toSet();
+    dueSummary = HomeDueSummary.from(
+      catalogAssignments,
+      now: now,
+      index: displayIndex,
+      coursework: coursework,
+      manualEntries: store.isAuthenticated ? store.notebook.entries : const [],
+    );
+    upcomingExam = !recoveryActive
+        ? HomeUpcomingExam.select(
+            catalogAssignments,
+            now: now,
+            index: displayIndex,
+            coursework: coursework,
+            courseKey: courseKey,
+          )
+        : null;
+    followedCourses = courses.length - unfollowedCourseKeys.length;
+    activeAgenda = store.notebook.entries.where((e) => !e.done).length;
+    if (!recoveryActive) {
+      _homeProjectionCache = _HomeProjectionCacheEntry(
+        store: store,
+        accountEpoch: store.accountEpoch,
+        isAuthenticated: store.isAuthenticated,
+        homeCatalog: homeCatalog,
+        localRecordGroups: localRecordGroups,
+        termCatalog: termCatalog,
+        coursework: coursework,
+        notebook: store.notebook,
+        personal: store.personal,
+        courses: List<CourseRef>.of(courses),
+        unfollowedCourseKeys: unfollowedCourseKeys,
+        query: query,
+        typeFilter: typeFilter,
+        deadlineFilter: deadlineFilter,
+        courseKey: courseKey,
+        sortOrder: sortOrder,
+        completingManualIds: Set<String>.of(completingManualIds),
+        nowMinute: nowMinute,
+        filtersActive: filtersActive,
+        catalogAssignments: catalogAssignments,
+        displayIndex: displayIndex,
+        displayAssignments: displayAssignments,
+        options: options,
+        items: items,
+        selectedCourseIdle: selectedCourseIdle,
+        sortedTimelineItems: sortedTimelineItems,
+        plans: plans,
+        plannedIds: plannedIds,
+        dueSummary: dueSummary,
+        upcomingExam: upcomingExam,
+        hasManualItems: hasManualItems,
+        followedCourses: followedCourses,
+        activeAgenda: activeAgenda,
+      );
+    }
+  }
   final sync = HomeSyncPresentation.from(
     store.syncReport,
     loading: store.isLoading,
@@ -253,17 +488,10 @@ HomeViewData prepareHomeViewData({
     widgetWarning: store.serviceWarnings.any((w) => w.contains('小组件')) &&
         store.syncReport.phase == SyncPhase.success,
   );
-  final dueSummary = HomeDueSummary.from(
-    catalogAssignments,
-    now: now,
-    index: displayIndex,
-    coursework: coursework,
-    manualEntries: store.isAuthenticated ? store.notebook.entries : const [],
-  );
   final showDueSummary = !recoveryActive &&
       (catalogAssignments.isNotEmpty ||
           displayAssignments.isNotEmpty ||
-          manualItems.isNotEmpty ||
+          hasManualItems ||
           store.syncReport.phase == SyncPhase.success ||
           store.syncReport.lastDataSuccessAt != null ||
           store.lastSyncAt != null);
@@ -272,15 +500,6 @@ HomeViewData prepareHomeViewData({
       : sync.showCached
           ? '${sync.summary} · 显示上次记录'
           : sync.summary;
-  final upcomingExam = !recoveryActive
-      ? HomeUpcomingExam.select(
-          catalogAssignments,
-          now: now,
-          index: displayIndex,
-          coursework: coursework,
-          courseKey: courseKey,
-        )
-      : null;
   final buddyMood = busy
       ? JournalPixelBuddyMood.syncing
       : dueSummary.dueToday > 0
@@ -291,9 +510,6 @@ HomeViewData prepareHomeViewData({
                       sortedTimelineItems.isEmpty))
               ? JournalPixelBuddyMood.allClear
               : JournalPixelBuddyMood.idle;
-  final followedCourses =
-      store.courses.where((c) => store.follows(c.key)).length;
-  final activeAgenda = store.notebook.entries.where((e) => !e.done).length;
   final homeSnapshot = ClawdPageContextSnapshot(
     tab: ClawdPrimaryTab.home,
     dueToday: dueSummary.dueToday,
@@ -425,6 +641,7 @@ class HomeTimelineList extends StatelessWidget {
     required this.recoveryQueryParameter,
     required this.recoveryQueryValue,
     required this.headerBlock,
+    this.topPadding = 14.0,
     required this.catalogAssignments,
     required this.displayAssignments,
     required this.displayIndex,
@@ -457,6 +674,7 @@ class HomeTimelineList extends StatelessWidget {
   final String recoveryQueryParameter;
   final String? recoveryQueryValue;
   final Widget headerBlock;
+  final double topPadding;
   final List<Assignment> catalogAssignments;
   final List<Assignment> displayAssignments;
   final AssignmentDisplayIndex displayIndex;
@@ -771,7 +989,7 @@ class HomeTimelineList extends StatelessWidget {
       ),
       padding: EdgeInsets.fromLTRB(
         16,
-        14,
+        topPadding,
         16,
         JournalLayout.floatingNavClearance(context),
       ),

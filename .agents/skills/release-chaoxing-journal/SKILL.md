@@ -54,9 +54,15 @@ Use `verified-delivery` for general delivery evidence and the approved project p
   local full Flutter run.
 - Group release documentation into one final edit that does not move the Tag.
 - Treat GitHub Release as mandatory for every formal package. Every published
-  Release triggers the repository's automatic small Gitee index update. Disclose this coupled effect before publishing if the user restricts distribution to GitHub. An explicit exclusion of any Gitee write requires resolving that conflict before publication. Separate manual index writes require authorization; report lag if sync is delayed. Gitee APK bytes remain an optional
-  batch mirror. Upload APKs only at an explicit checkpoint, never for every
-  patch, and never upload or redownload every historical package.
+  Release triggers the repository's two-step progressive Gitee sync: Step A
+  updates the small index within seconds, and Step B runs `mode=latest --upload-missing`
+  to automatically mirror the verified APK to Gitee Release and switch
+  `update-manual.json` to Gitee primary + GitHub backup after anonymous full
+  redownload verification. Disclose this coupled effect before publishing if the
+  user restricts distribution to GitHub. An explicit exclusion of any Gitee write
+  requires resolving that conflict before publication. Separate manual index writes
+  or `--promote-stable` runs require authorization; report lag or upload fallback
+  if cross-border upload stalls. Never upload or redownload every historical package.
 - When infrastructure retries produce no new evidence, diagnose the current
   state before changing method or reporting a blocker. Retry counts are not
   permission to bypass a required gate; external-write timeouts require an

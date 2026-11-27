@@ -181,17 +181,23 @@ List<HomeCourseFilterOption> buildHomeCourseFilterOptions({
       ),
     );
   }
-  options.sort((a, b) {
-    final byName = compareNaturalPinyin(a.name, b.name);
-    if (byName != 0) return byName;
-    final byTeacher = compareNaturalPinyin(a.teacherLabel, b.teacherLabel);
-    if (byTeacher != 0) return byTeacher;
-    final byClass = a.clazzId.compareTo(b.clazzId);
-    if (byClass != 0) return byClass;
-    final byCourse = a.courseId.compareTo(b.courseId);
-    if (byCourse != 0) return byCourse;
-    return a.courseKey.compareTo(b.courseKey);
-  });
+  if (options.length > 1) {
+    final prepared = [
+      for (final option in options) _PreparedCourseFilterOption(option),
+    ];
+    prepared.sort((a, b) {
+      final byName = a.nameKey.compareTo(b.nameKey);
+      if (byName != 0) return byName;
+      final byTeacher = a.teacherKey.compareTo(b.teacherKey);
+      if (byTeacher != 0) return byTeacher;
+      final byClass = a.option.clazzId.compareTo(b.option.clazzId);
+      if (byClass != 0) return byClass;
+      final byCourse = a.option.courseId.compareTo(b.option.courseId);
+      if (byCourse != 0) return byCourse;
+      return a.option.courseKey.compareTo(b.option.courseKey);
+    });
+    return List.unmodifiable([for (final entry in prepared) entry.option]);
+  }
   return List.unmodifiable(options);
 }
 
@@ -253,6 +259,15 @@ List<HomeCourseFilterOption> sortHomeCourseOptionsByCount(
 String homeCourseCountLabel(int count) => count > 0 ? '$count 项' : '暂无';
 
 String _normalized(String value) => value.trim().toLowerCase();
+
+class _PreparedCourseFilterOption {
+  _PreparedCourseFilterOption(this.option)
+      : nameKey = NaturalSortKey(option.name);
+
+  final HomeCourseFilterOption option;
+  final NaturalSortKey nameKey;
+  late final NaturalSortKey teacherKey = NaturalSortKey(option.teacherLabel);
+}
 
 class _KnownCourse {
   const _KnownCourse({

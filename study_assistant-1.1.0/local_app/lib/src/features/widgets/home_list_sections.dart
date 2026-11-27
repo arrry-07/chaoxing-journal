@@ -31,31 +31,23 @@ class HomeAmbientGlowPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     if (size.isEmpty || fade <= 0.01) return;
 
-    final primaryCenter = Offset(size.width * 0.16, -24);
-    final primaryRadius = size.width * 0.72;
-    final primaryPaint = Paint()
-      ..shader = RadialGradient(
-        colors: [
-          primaryGlow.withValues(alpha: primaryGlow.a * fade),
-          primaryGlow.withValues(alpha: 0),
-        ],
-      ).createShader(
-        Rect.fromCircle(center: primaryCenter, radius: primaryRadius),
-      );
-    canvas.drawCircle(primaryCenter, primaryRadius, primaryPaint);
+    final baseAlpha = (primaryGlow.a * fade).clamp(0.0, 1.0);
+    if (baseAlpha <= 0.001) return;
 
-    final warmCenter = Offset(size.width * 0.88, 12);
-    final warmRadius = size.width * 0.56;
-    final warmPaint = Paint()
-      ..shader = RadialGradient(
+    final rect = Offset.zero & size;
+    final paint = Paint()
+      ..shader = LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        stops: const [0.0, 0.36, 0.72, 1.0],
         colors: [
-          warmGlow.withValues(alpha: warmGlow.a * fade),
-          warmGlow.withValues(alpha: 0),
+          primaryGlow.withValues(alpha: baseAlpha),
+          primaryGlow.withValues(alpha: baseAlpha * 0.56),
+          primaryGlow.withValues(alpha: baseAlpha * 0.16),
+          primaryGlow.withValues(alpha: 0.0),
         ],
-      ).createShader(
-        Rect.fromCircle(center: warmCenter, radius: warmRadius),
-      );
-    canvas.drawCircle(warmCenter, warmRadius, warmPaint);
+      ).createShader(rect);
+    canvas.drawRect(rect, paint);
   }
 
   @override
@@ -495,14 +487,19 @@ class HomeTitleHeaderRow extends StatelessWidget {
 
     return LayoutBuilder(
       builder: (context, constraints) {
+        final screenWidth = MediaQuery.sizeOf(context).width;
         final largeText = JournalLayout.isLargeText(context);
-        final buddySize =
-            largeText ? 24.0 : (constraints.maxWidth < 350 ? 32.0 : 38.0);
+        final buddySize = ClawdTitleStage.resolvedBuddySize(context);
         final allowStageMotion = showPixelBuddy &&
             !reduceMotion &&
             !recoveryActive &&
             !largeText &&
-            constraints.maxWidth >= 330;
+            screenWidth >= 350.0 &&
+            constraints.maxWidth >= 316.0;
+        final roofHeadroom = ClawdTitleStage.roofHeadroomFor(
+          allowStageMotion: allowStageMotion,
+          buddySize: buddySize,
+        );
         final titleStage = AnimatedBuilder(
           animation: controller,
           builder: (context, _) => ClawdTitleStage(
@@ -520,11 +517,14 @@ class HomeTitleHeaderRow extends StatelessWidget {
         );
         if (!largeText && constraints.maxWidth >= 300) {
           return Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(child: titleStage),
               const SizedBox(width: 8),
-              actionsRow,
+              Padding(
+                padding: EdgeInsets.only(top: roofHeadroom),
+                child: actionsRow,
+              ),
             ],
           );
         }

@@ -11,16 +11,26 @@ batch synchronization, manifest failures, or client fallback behavior.
   and `update-manual.json`.
 - Publishing on GitHub triggers the small manual index update. Stable promotion requires the explicit workflow-dispatch option and authorization. Disclose this coupling before a GitHub-only release; resolve an explicit Gitee write exclusion before publishing. APK URLs point to GitHub until the Gitee batch mirror is verified.
 - GitHub Release is mandatory for every formal package. Every published
-  Release updates only the small Gitee index; APK bytes remain an optional
-  batched mirror.
-- The workflow allows `release: published` for `mode=index` and
-  `workflow_dispatch` for index, latest, or seed. It must not subscribe to
-  schedules, and a Release event must never upload APKs or prune attachments.
+  Release triggers the two-step progressive Gitee sync: Step A (`mode=index`)
+  publishes the lightweight GitHub-backed `update-manual.json` within seconds,
+  then Step B (`mode=latest --upload-missing`) mirrors the verified APK to
+  Gitee Release and switches `update-manual.json` to Gitee primary + GitHub
+  backup after anonymous full redownload and SHA-256 verification. Stable
+  promotion still requires explicit `workflow_dispatch` `promote_stable=true`
+  and authorization.
+- The workflow subscribes only to `release: published` and `workflow_dispatch`
+  (never `schedule`). `release: published` runs Step A (`mode=index`) followed
+  by Step B (`mode=latest --upload-missing`); `workflow_dispatch` supports
+  `index`, `latest`, and `seed` (with `--upload-missing` enabled for non-index
+  modes).
 - Index mode reads Release metadata, `SHA256SUMS.txt`, and the Tag's pubspec
-  version. It does not download/upload APK bytes or alter Gitee attachments.
-- Actions verifies and publishes manifests; it does not upload APKs. At a
-  chosen batch checkpoint, upload only the latest selected APK once through the
-  Gitee web backend from the workstation.
+  version without downloading/uploading APK bytes.
+- `--upload-missing` creates the Gitee Release and uploads the verified APK
+  only when absent, skips idempotently when the exact matching APK already
+  exists, and aborts on mismatched or duplicate APK attachments. If GitHub
+  Actions hits a cross-border upload stall, Step A keeps the GitHub-backed
+  index live while the publisher can upload the identical verified APK locally
+  (or via `--local-apk <path> --upload-missing`) and rerun `workflow_dispatch(mode=latest)`.
 - In batch mode, historical releases are checked for existence and matching
   attachment name. Do not redownload every historical APK. The latest manual
   APK gets one anonymous full download and SHA-256 verification before

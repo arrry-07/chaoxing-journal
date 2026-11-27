@@ -10,15 +10,27 @@ Duration feedbackDuration({bool action = false, bool accessible = false}) =>
 /// [TransientFeedbackController]. A new message replaces the visible one
 /// instead of queueing behind it, and shares the app-wide duration and the
 /// themed floating snackbar style.
-void showJournalMessage(BuildContext context, String message) {
+void showJournalMessage(
+  BuildContext context,
+  String message, {
+  SnackBarAction? action,
+}) {
   final messenger = ScaffoldMessenger.maybeOf(context);
   if (messenger == null) return;
   TransientFeedbackController.revokeOwner(messenger);
-  final duration =
-      feedbackDuration(accessible: MediaQuery.accessibleNavigationOf(context));
+  final duration = feedbackDuration(
+    action: action != null,
+    accessible: MediaQuery.accessibleNavigationOf(context),
+  );
   messenger
     ..clearSnackBars()
-    ..showSnackBar(SnackBar(content: Text(message), duration: duration));
+    ..showSnackBar(
+      SnackBar(
+        content: Text(message),
+        action: action,
+        duration: duration,
+      ),
+    );
 }
 
 /// Rounded floating container shared by the banners stacked above the

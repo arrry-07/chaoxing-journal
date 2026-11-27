@@ -35,8 +35,9 @@ void main() {
     addTearDown(store.dispose);
     await t.pumpWidget(
         MaterialApp(home: Scaffold(body: ProfileScreen(store: store))));
-    await t.scrollUntilVisible(find.text('GitHub 源码'), 400);
-    expect(find.byTooltip('打开链接'), findsOneWidget);
+    await t.scrollUntilVisible(find.text('GitHub 项目'), 400);
+    expect(find.byKey(const ValueKey('profile-github-copy')), findsOneWidget);
+    expect(find.text('复制链接'), findsOneWidget);
   });
 
   testWidgets('profile uses tinted groups and berry destructive actions',
@@ -429,16 +430,16 @@ void main() {
     await t.pumpWidget(MaterialApp(
         home: Scaffold(
             body: ProfileScreen(store: store, externalLinkService: external))));
-    final row = find.widgetWithText(ListTile, 'GitHub 源码');
-    await t.ensureVisible(row);
+    await t.scrollUntilVisible(find.text('GitHub 项目'), 400);
     await t.pumpAndSettle();
-    await t.tap(find.text('GitHub 源码'));
+    await t.tap(find.text('GitHub 项目'));
+    await t.pumpAndSettle();
+    expect(
+        external.openedUrls, ['https://github.com/arrry-07/chaoxing-journal']);
+    expect(copied, isEmpty);
+    await t.tap(find.byKey(const ValueKey('profile-github-copy')));
     await t.pumpAndSettle();
     expect(copied, ['https://github.com/arrry-07/chaoxing-journal']);
-    expect(external.openedUrls, isEmpty);
-    await t.tap(find.byTooltip('打开链接'));
-    await t.pumpAndSettle();
-    expect(copied.length, 1);
     expect(external.openedUrls.length, 1);
     await t.ensureVisible(find.text('关于我们'));
     await t.tap(find.text('关于我们'));
@@ -464,7 +465,8 @@ void main() {
       ),
     );
 
-    expect(find.text('设置'), findsOneWidget);
+    expect(find.text('设置'), findsNothing);
+    expect(find.text('其他入口'), findsOneWidget);
     expect(find.text('提醒与通知'), findsOneWidget);
     expect(find.text('同步学习通'), findsOneWidget);
     for (final label in ['外观与交互', '显示与小组件', '个人待办与考试', '学习记录']) {

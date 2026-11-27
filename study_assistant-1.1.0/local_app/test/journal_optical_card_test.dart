@@ -74,8 +74,8 @@ void main() {
   group('JournalPalette optical tokens', () {
     test('light palette exposes the documented values', () {
       const palette = JournalPalette.light;
-      expect(palette.ambientPrimaryGlow, const Color(0x163D63DD));
-      expect(palette.ambientWarmGlow, const Color(0x12D97757));
+      expect(palette.ambientPrimaryGlow, const Color(0x0E5B749B));
+      expect(palette.ambientWarmGlow, const Color(0x00000000));
       expect(palette.cardShadowContact, const Color(0x071F2328));
       expect(palette.cardShadowAmbient, const Color(0x0A1F2328));
       expect(palette.cardTopHighlight, const Color(0xB8FFFFFF));
@@ -91,8 +91,8 @@ void main() {
 
     test('dark palette exposes the documented values', () {
       const palette = JournalPalette.dark;
-      expect(palette.ambientPrimaryGlow, const Color(0x1C88A8F8));
-      expect(palette.ambientWarmGlow, const Color(0x1AE5896B));
+      expect(palette.ambientPrimaryGlow, const Color(0x0CEEDAC0));
+      expect(palette.ambientWarmGlow, const Color(0x00000000));
       expect(palette.cardShadowContact, const Color(0x24000000));
       expect(palette.cardShadowAmbient, const Color(0x38000000));
       expect(palette.cardTopHighlight, const Color(0x18FFF8EB));
