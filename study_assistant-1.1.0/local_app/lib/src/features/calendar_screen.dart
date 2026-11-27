@@ -731,7 +731,7 @@ class _CalendarScreenState extends State<CalendarScreen>
                             items: [
                               '蓝点表示作业或课堂任务，橙点表示考试或考试通知，绿点表示个人待办；超过 3 项时显示“+”。',
                               '考试按开考日展示，作业与课堂任务按截止日展示，均使用北京时间。',
-                              '今天使用蓝色加粗数字标记，选中日期显示鼠尾草绿浅底圆圈。',
+                              '今天使用蓝色加粗数字标记，带圆圈的是所选日期。',
                               '左右滑动可切换月份；上滑或轻点底部横条可收拢为单周视图。',
                             ],
                           );
@@ -1063,7 +1063,7 @@ class _CalendarScreenState extends State<CalendarScreen>
                         now: now,
                         compact: widget.store.display.compact,
                         countdown: widget.store.display.countdown,
-                        showFullDeadline: false,
+                        showFullDeadline: selected == null,
                         showDivider: false,
                         contentPadding:
                             const EdgeInsets.symmetric(horizontal: 14),

@@ -25,6 +25,7 @@ class ManualHomeCard extends StatelessWidget {
     this.onLongPress,
     this.dragHandle,
     this.inPinnedSection = false,
+    this.showFullDeadline = false,
     this.compact = false,
     this.countdown = false,
     this.allowUrgentNightBreakthrough = false,
@@ -39,6 +40,7 @@ class ManualHomeCard extends StatelessWidget {
   final VoidCallback? onLongPress;
   final Widget? dragHandle;
   final bool inPinnedSection;
+  final bool showFullDeadline;
   final bool compact;
   final bool countdown;
   final bool allowUrgentNightBreakthrough;
@@ -67,7 +69,7 @@ class ManualHomeCard extends StatelessWidget {
     final railWidth = AssignmentCard.measureRailWidth(
       context,
       inPinnedSection: inPinnedSection,
-      showCountdown: countdown,
+      showCountdown: !showFullDeadline && !inPinnedSection && countdown,
     );
     final today =
         at != null && AssignmentQuery.dayKey(at) == AssignmentQuery.dayKey(now);
@@ -101,7 +103,10 @@ class ManualHomeCard extends StatelessWidget {
         );
       }
       if (!inPinnedSection) {
-        if (countdown && !overdue) {
+        final within24h = !overdue &&
+            at.isAfter(now) &&
+            at.difference(now) < const Duration(hours: 24);
+        if (!showFullDeadline && countdown && within24h) {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
@@ -166,14 +171,15 @@ class ManualHomeCard extends StatelessWidget {
               height: 1.22,
             ),
           ),
-          Text(
-            remaining,
-            style: journal.metadata.copyWith(
-              color: pinUrgent ? journal.accent : journal.subtle,
-              fontSize: 11,
-              height: 1.22,
+          if (remaining != dateLabel)
+            Text(
+              remaining,
+              style: journal.metadata.copyWith(
+                color: pinUrgent ? journal.accent : journal.subtle,
+                fontSize: 11,
+                height: 1.22,
+              ),
             ),
-          ),
         ],
       );
     }
@@ -203,7 +209,18 @@ class ManualHomeCard extends StatelessWidget {
             : quietHoursSkipped
                 ? '夜间静音时段未排期'
                 : null;
+    final beijingAt = at == null ? null : AssignmentQuery.beijing(at);
+    final crossYear = beijingAt != null &&
+        beijingAt.year != AssignmentQuery.beijing(now).year;
+    final fullDeadlineLine = beijingAt != null &&
+            ((showFullDeadline && !inPinnedSection) ||
+                (inPinnedSection && crossYear))
+        ? DateFormat(
+            crossYear ? 'yyyy年M月d日 HH:mm' : 'M月d日 HH:mm',
+          ).format(beijingAt)
+        : null;
     final auxiliary = <String>[
+      if (fullDeadlineLine != null) fullDeadlineLine,
       if (entry.location.trim().isNotEmpty) '地点 ${entry.location.trim()}',
       if (reminderLabel != null) reminderLabel,
       if (entry.attachments.isNotEmpty) '附件 ${entry.attachments.length}',

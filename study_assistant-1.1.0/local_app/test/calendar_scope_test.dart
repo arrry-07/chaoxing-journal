@@ -374,6 +374,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('本月议程'), findsOneWidget);
+    expect(find.textContaining('12月1日'), findsWidgets);
     final firstAssignment = find.text('十二月作业');
     final laterAssignment = find.text('十二月后续作业');
     await tester.scrollUntilVisible(laterAssignment, 180,

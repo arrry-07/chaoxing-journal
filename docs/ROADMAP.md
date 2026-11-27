@@ -21,7 +21,7 @@
 
 后续独立阶段候选方向（按价值排序，开工前复核真源）：
 
-1. **P0 · `v1.92.1` 全量拆缝与 UI/交互精修（进行中）**：`M1` 补齐 `CalendarScreen` 零滚动气泡锚点与垂直滚动收起、精简顶栏右钮并校准 5 份文档旧口径；`M2`/`M5` 按领域拆分 `AssignmentStore`（6,292 行）清晰接缝；`M3` 统一全站 Sheet 动效与卡片层级并补齐按压微缩；`M4` 拆分 `AssignmentListScreen`（3,483 行）组件、落地首页排序轻菜单与全仓 Sheet 静态守卫；`M6` 刷新架构导航图。方案见 [v1.92.1 全量拆缝重构与 UI/交互精修方案](plans/2026-11-27-v1.92.1-全量拆缝重构与UI交互精修方案.md)，借助日常 `dev → main` 集成 PR 节奏分批过云端 CI。
+1. **P0 · `v1.92.1` 全量拆缝与 UI/交互精修（已完成并经 PR `#70` 集成至 `main`）**：`M1` 补齐 `CalendarScreen` 零滚动气泡锚点与垂直滚动收起、精简顶栏右钮并校准 5 份文档旧口径；`M2`/`M5` 按领域拆分 `AssignmentStore`（6,292 → 1,077 行）清晰接缝；`M3` 统一全站 Sheet 动效与卡片层级并补齐按压微缩；`M4` 拆分 `AssignmentListScreen`（3,483 → 1,480 行）组件、落地首页排序轻菜单与全仓 Sheet 静态守卫；`M6` 刷新架构导航图。已完成 `1.92.1+133` MuMu 双主题 6/6 项核验与 PR `#70`（`4da4c02`）集成，方案已归档至 [v1.92.1 归档方案](archive/plans/2026-11-27-v1.92.1-全量拆缝重构与UI交互精修方案.md)。
 2. **P1 · 独立大版本云端后端（Supabase 反馈直发 `FB-017` + 跨设备端到端加密云同步 `FB-015`）**：采用免费 Supabase（500MB 库 + 1GB 存储 + 网页后台）配 GitHub Actions 每日保活、按需前置 Cloudflare Worker 域名反代，统一承接 App 内直发反馈与多端加密同步；`FB-015` 以 Supabase 端到端加密为主方案、WebDAV 保留为无服务端备选（前置 `PersonalWorkspace` 迁移与 `ManualEntry.updatedAt` 已于 `1.8.31` 落地，详见[长期功能分期](#long-term-phases)）。
 3. **P2 · 真实样本与物理 OEM 通知/音画复核**：在实体真机复测 `v3` 有声渠道（`@raw/journal_chime` + `SQLite v10`）锁屏/Doze/120Hz 高刷/8-bit 外放/国产后台限流表现，补充自然 `9010`、`backclazzdata` 新字段存在率与官方活动课精度、缺年改期/`completeTime` 真实样本；界面定型后按维护者确认评估 Wave B-2 浅/深 Golden 与 Wave C-2 官网截图产线。
 

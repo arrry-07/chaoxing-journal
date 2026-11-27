@@ -284,6 +284,7 @@ Widget buildHomeManualTile({
   required ManualEntry entry,
   required HomeManualActions actions,
   bool pinned = false,
+  bool showFullDeadline = false,
   Widget? dragHandle,
   List<String> pinnedVisibleKeys = const [],
   int bouncePulse = 0,
@@ -302,6 +303,7 @@ Widget buildHomeManualTile({
           onTap: () {},
           onToggleDone: () {},
           inPinnedSection: pinned,
+          showFullDeadline: showFullDeadline,
           compact: store.display.compact,
           countdown: store.display.countdown,
           allowUrgentNightBreakthrough:
@@ -335,6 +337,7 @@ Widget buildHomeManualTile({
           entry: entry,
           now: now,
           inPinnedSection: pinned,
+          showFullDeadline: showFullDeadline,
           compact: store.display.compact,
           countdown: store.display.countdown,
           allowUrgentNightBreakthrough:

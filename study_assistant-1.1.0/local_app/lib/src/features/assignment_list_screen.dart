@@ -1351,6 +1351,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
           manualActions: _manualActions,
           courseKey: _courseKey,
           typeFilter: _typeFilter,
+          sortOrder: data.sortOrder,
           filtersActive: data.filtersActive,
           selectedCourseIdle: data.selectedCourseIdle,
           busy: busy,

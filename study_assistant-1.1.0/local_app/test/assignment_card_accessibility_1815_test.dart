@@ -167,7 +167,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(
         find.semantics.byLabel(
-          RegExp(r'截止 11月20日 23:59，剩余\d+(分钟|小时|天)'),
+          RegExp(r'截止 11月20日 23:59，后天'),
         ),
         findsOneWidget,
       );

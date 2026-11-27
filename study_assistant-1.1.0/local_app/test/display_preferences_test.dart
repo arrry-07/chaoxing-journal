@@ -550,7 +550,7 @@ void main() {
                         countdown: true,
                         onTap: () {},
                         onOpenAssignment: () {}))))));
-    expect(find.text('剩余2小时'), findsOneWidget);
+    expect(find.textContaining('剩余2小时'), findsOneWidget);
     expect(t.takeException(), isNull);
   });
 
@@ -785,11 +785,44 @@ void main() {
         ['2', '3', '4']);
     expect(const DisplayPreferences().forWidget(items, now).length, 7);
   });
-  test('countdown rounds up without early expiry', () {
-    final now = DateTime.utc(2026);
+  test(
+      'countdown rounds conservatively and uses Beijing calendar day diff >= 24h',
+      () {
+    final now = DateTime.utc(2026); // Beijing 2026-01-01 08:00
     expect(
         DisplayPreferences.remaining(now.add(const Duration(seconds: 1)), now),
         '剩余1分钟');
+    expect(
+        DisplayPreferences.remaining(
+            now.add(const Duration(minutes: 45, seconds: 50)), now),
+        '剩余45分钟');
+    expect(
+        DisplayPreferences.remaining(
+            now.add(const Duration(hours: 23, minutes: 50)), now),
+        '剩余23小时');
     expect(DisplayPreferences.remaining(now, now), '已截止');
+
+    // 34 hours before tomorrow 22:50 Beijing -> must be '明天', never '剩余2天'/'剩2天'.
+    final bjNow = DateTime.utc(2026, 11, 27, 4, 50); // Beijing 12:50
+    final bjTomorrow2250 =
+        DateTime.utc(2026, 11, 28, 14, 50); // Beijing 22:50 (+34h)
+    expect(DisplayPreferences.remaining(bjTomorrow2250, bjNow), '明天');
+    expect(AssignmentCard.compactRemaining(bjTomorrow2250, bjNow), '明天');
+
+    final bjDayAfter2250 = DateTime.utc(2026, 11, 29, 14, 50); // +58h
+    expect(DisplayPreferences.remaining(bjDayAfter2250, bjNow), '后天');
+    expect(AssignmentCard.compactRemaining(bjDayAfter2250, bjNow), '后天');
+
+    final bjThreeDaysLater = DateTime.utc(2026, 11, 30, 14, 50); // +82h
+    expect(DisplayPreferences.remaining(bjThreeDaysLater, bjNow), '剩余3天');
+    expect(AssignmentCard.compactRemaining(bjThreeDaysLater, bjNow), '剩3天');
+
+    // Spanning US DST spring-forward (2026-03-08) must still compute exact Beijing days.
+    final preDstBj = DateTime.utc(2026, 3, 7, 4, 0); // Beijing 2026-03-07 12:00
+    final postDstBj =
+        DateTime.utc(2026, 3, 9, 10, 0); // Beijing 2026-03-09 18:00
+    expect(DisplayPreferences.beijingDayDiff(postDstBj, preDstBj), 2);
+    expect(DisplayPreferences.remaining(postDstBj, preDstBj), '后天');
+    expect(AssignmentCard.compactRemaining(postDstBj, preDstBj), '后天');
   });
 }

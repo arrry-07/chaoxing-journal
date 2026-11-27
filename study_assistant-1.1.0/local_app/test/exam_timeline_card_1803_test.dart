@@ -48,6 +48,7 @@ Future<void> _pump(
   Assignment a, {
   List<Assignment> sources = const [],
   bool openButton = false,
+  bool showFullDeadline = false,
   double scale = 1,
 }) async {
   await t.pumpWidget(MaterialApp(
@@ -60,6 +61,7 @@ Future<void> _pump(
             assignment: a,
             examSources: sources,
             now: _now,
+            showFullDeadline: showFullDeadline,
             onTap: () {},
             onOpenAssignment: openButton ? () {} : null,
           ),
@@ -257,4 +259,22 @@ void main() {
       }
     });
   }
+
+  testWidgets(
+      'trusted start shows full start date in body when showFullDeadline is true',
+      (t) async {
+    await _pump(
+      t,
+      _exam(
+        start: _start,
+        end: _end,
+        startTrusted: true,
+        endTrusted: true,
+      ),
+      showFullDeadline: true,
+    );
+    expect(find.text('08:30'), findsOneWidget);
+    expect(find.text('开考 2026年11月16日 08:30'), findsOneWidget);
+    expect(t.takeException(), isNull);
+  });
 }

@@ -115,11 +115,15 @@ class AssignmentCard extends StatelessWidget {
 
   static String _compactRemaining(DateTime deadline, DateTime now) {
     final diff = deadline.difference(now);
-    if (diff.isNegative || diff.inSeconds <= 0) return '已逾期';
-    final minutes = (diff.inMilliseconds / 60000).ceil();
-    if (minutes < 60) return '剩$minutes分';
-    if (minutes < 1440) return '剩${(minutes / 60).ceil()}小时';
-    return '剩${(minutes / 1440).ceil()}天';
+    if (diff.isNegative || diff.inMilliseconds <= 0) return '已逾期';
+    if (diff < const Duration(minutes: 1)) return '剩1分';
+    if (diff < const Duration(hours: 1)) return '剩${diff.inMinutes}分';
+    if (diff < const Duration(hours: 24)) return '剩${diff.inHours}小时';
+    final dayDiff = DisplayPreferences.beijingDayDiff(deadline, now);
+    if (dayDiff <= 0) return '剩${diff.inHours}小时';
+    if (dayDiff == 1) return '明天';
+    if (dayDiff == 2) return '后天';
+    return '剩$dayDiff天';
   }
 
   static String compactRemaining(DateTime deadline, DateTime now) =>
@@ -249,23 +253,23 @@ class AssignmentCard extends StatelessWidget {
     String withStart(String value) =>
         startText == null ? value : '$startText · $value';
     final beijingDeadline = d == null ? null : AssignmentQuery.beijing(d);
+    final showCrossYear = (inPinnedSection || showFullDeadline) &&
+        beijingDeadline != null &&
+        beijingDeadline.year != AssignmentQuery.beijing(now).year;
     final deadlineDate = beijingDeadline == null
         ? ''
-        : DateFormat(inPinnedSection &&
-                    beijingDeadline.year != AssignmentQuery.beijing(now).year
-                ? 'yyyy年M月d日 HH:mm'
-                : 'M月d日 HH:mm')
+        : DateFormat(showCrossYear ? 'yyyy年M月d日 HH:mm' : 'M月d日 HH:mm')
             .format(beijingDeadline);
     final deadline = deadlinePending
         ? '正在确认截止时间'
         : isManualDeadline
-            ? countdown && !inPinnedSection
+            ? countdown && !inPinnedSection && !showFullDeadline
                 ? '手动 ${DisplayPreferences.remaining(d!, now)} · 官方待确认'
                 : '手动截止 $deadlineDate · 官方待确认'
             : a.deadlineReadFailed
                 ? (a.deadlineAt == null
                     ? withStart('截止时间待确认')
-                    : '截止 ${DateFormat(inPinnedSection && AssignmentQuery.beijing(a.deadlineAt!).year != AssignmentQuery.beijing(now).year ? 'yyyy年M月d日 HH:mm' : 'M月d日 HH:mm').format(AssignmentQuery.beijing(a.deadlineAt!))} · ${a.deadlineLabel}')
+                    : '截止 ${DateFormat((inPinnedSection || showFullDeadline) && AssignmentQuery.beijing(a.deadlineAt!).year != AssignmentQuery.beijing(now).year ? 'yyyy年M月d日 HH:mm' : 'M月d日 HH:mm').format(AssignmentQuery.beijing(a.deadlineAt!))} · ${a.deadlineLabel}')
                 : bucket == AssignmentDeadlineBucket.unconfirmed &&
                         d == null &&
                         a.deadlineTrusted &&
@@ -275,7 +279,7 @@ class AssignmentCard extends StatelessWidget {
                         ? withStart(a.deadlineLabel)
                         : d == null
                             ? withStart('无截止日期')
-                            : countdown && !inPinnedSection
+                            : countdown && !inPinnedSection && !showFullDeadline
                                 ? DisplayPreferences.remaining(d, now)
                                 : '截止 $deadlineDate';
     final hasTime =
@@ -288,11 +292,14 @@ class AssignmentCard extends StatelessWidget {
         : bucket == AssignmentDeadlineBucket.confirmedNoDeadline
             ? '—'
             : '待定';
+    final within24h = hasTime &&
+        !overdue &&
+        d.isAfter(now) &&
+        d.difference(now) < const Duration(hours: 24);
     final railCountdown = !showFullDeadline &&
         !inPinnedSection &&
         countdown &&
-        hasTime &&
-        !overdue &&
+        within24h &&
         !a.isExam &&
         !isManualDeadline;
     final railWidth = _measureRailWidth(
@@ -371,7 +378,7 @@ class AssignmentCard extends StatelessWidget {
 
     final extraLines = <Widget>[
       if (a.isExam) ...[
-        if (clock.isEmpty || inPinnedSection)
+        if (clock.isEmpty || inPinnedSection || showFullDeadline)
           for (final line in examSchedule?.cardTimeLines ?? const <String>[])
             Text(line, style: metaStyle),
         if (examSchedule?.yearUnconfirmed == true)
@@ -382,7 +389,9 @@ class AssignmentCard extends StatelessWidget {
           !hasTime ||
           isManualDeadline)
         Text(
-          inPinnedSection && countdown && hasTime
+          (inPinnedSection || (showFullDeadline && !overdue)) &&
+                  countdown &&
+                  hasTime
               ? '$deadline · ${DisplayPreferences.remaining(d, now)}'
               : deadline,
           style: !hasTime && railLabel == '待定'
@@ -563,14 +572,15 @@ class AssignmentCard extends StatelessWidget {
               height: 1.22,
             ),
           ),
-          Text(
-            remLabel,
-            style: journal.metadata.copyWith(
-              color: remColor,
-              fontSize: 11,
-              height: 1.22,
+          if (remLabel != dateLabel)
+            Text(
+              remLabel,
+              style: journal.metadata.copyWith(
+                color: remColor,
+                fontSize: 11,
+                height: 1.22,
+              ),
             ),
-          ),
         ],
       );
     }

@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../app/journal.dart';
 import '../app/journal_motion.dart';
+import '../app/transient_feedback.dart';
 import '../models/course.dart';
 import '../models/course_term_preferences.dart';
 import '../services/assignment_query.dart';
@@ -23,8 +26,10 @@ class CourseListScreen extends StatefulWidget {
 
 class _CourseListScreenState extends State<CourseListScreen> {
   final _searchController = TextEditingController();
+  final _feedback = TransientFeedbackController();
   final Set<String> _selectedCourseKeys = <String>{};
   String? _lastAccountHash;
+  int? _lastAccountEpoch;
   bool _searching = false;
   bool _managingTerms = false;
   bool _autoPromoExpanded = false;
@@ -32,9 +37,109 @@ class _CourseListScreenState extends State<CourseListScreen> {
   String _query = '';
 
   @override
+  void initState() {
+    super.initState();
+    _lastAccountHash = widget.store.accountHash;
+    _lastAccountEpoch = widget.store.accountEpoch;
+    widget.store.addListener(_onStoreChanged);
+  }
+
+  @override
+  void didUpdateWidget(covariant CourseListScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.store != widget.store) {
+      oldWidget.store.removeListener(_onStoreChanged);
+      _feedback.dismiss();
+      _selectedCourseKeys.clear();
+      _lastAccountHash = widget.store.accountHash;
+      _lastAccountEpoch = widget.store.accountEpoch;
+      widget.store.addListener(_onStoreChanged);
+    }
+  }
+
+  void _onStoreChanged() {
+    if (_lastAccountHash != widget.store.accountHash ||
+        _lastAccountEpoch != widget.store.accountEpoch) {
+      _lastAccountHash = widget.store.accountHash;
+      _lastAccountEpoch = widget.store.accountEpoch;
+      _feedback.dismiss();
+      _selectedCourseKeys.clear();
+    }
+  }
+
+  @override
   void dispose() {
+    widget.store.removeListener(_onStoreChanged);
+    _feedback.dispose();
     _searchController.dispose();
     super.dispose();
+  }
+
+  Future<void> _toggleCourseFollow(
+    BuildContext context,
+    AssignmentStore store,
+    CourseRef course,
+    bool nextFollowed,
+  ) async {
+    final epoch = store.accountEpoch;
+    final previousFollowed = store.follows(course.key);
+    await store.followCourse(course.key, nextFollowed);
+    if (!mounted || !context.mounted) return;
+    if (store.accountEpoch != epoch) return;
+    if (store.operationError != null ||
+        store.follows(course.key) != nextFollowed) {
+      _feedback.show(
+        context,
+        SnackBar(
+          content: Text(store.operationError ?? '更新《${course.name}》关注状态失败，请重试'),
+        ),
+      );
+      return;
+    }
+    final message = nextFollowed
+        ? '已关注《${course.name}》，将恢复纳入首页、日历、提醒与统计'
+        : '已取消关注《${course.name}》，将从首页、日历、提醒、小组件与统计中隐藏';
+    _feedback.show(
+      context,
+      SnackBar(
+        content: Text(message),
+        action: SnackBarAction(
+          label: '撤销',
+          onPressed: () {
+            if (store.accountEpoch == epoch) {
+              unawaited(_undoCourseFollow(
+                context,
+                store,
+                course,
+                previousFollowed,
+                epoch,
+              ));
+            }
+          },
+        ),
+      ),
+    );
+  }
+
+  Future<void> _undoCourseFollow(
+    BuildContext context,
+    AssignmentStore store,
+    CourseRef course,
+    bool previousFollowed,
+    int epoch,
+  ) async {
+    if (store.accountEpoch != epoch) return;
+    await store.followCourse(course.key, previousFollowed);
+    if (!mounted || !context.mounted || store.accountEpoch != epoch) return;
+    if (store.operationError != null ||
+        store.follows(course.key) != previousFollowed) {
+      _feedback.show(
+        context,
+        SnackBar(
+          content: Text(store.operationError ?? '撤销《${course.name}》关注状态失败，请重试'),
+        ),
+      );
+    }
   }
 
   bool _matches(CourseRef course, CourseTermEntry? entry, String q) {
@@ -142,10 +247,6 @@ class _CourseListScreenState extends State<CourseListScreen> {
         animation: widget.store,
         builder: (context, _) {
           final store = widget.store;
-          if (_lastAccountHash != store.accountHash) {
-            _lastAccountHash = store.accountHash;
-            _selectedCourseKeys.clear();
-          }
           final journal = Journal.of(context);
           final termCatalog = store.termCatalog;
           final archivableKeys = termCatalog.archivablePastCourseKeys;
@@ -491,8 +592,8 @@ class _CourseListScreenState extends State<CourseListScreen> {
                                         value: store.follows(course.key),
                                         onChanged: store.isLoading
                                             ? null
-                                            : (v) => store.followCourse(
-                                                course.key, v),
+                                            : (v) => _toggleCourseFollow(
+                                                context, store, course, v),
                                       ),
                                     ),
                                   ],
