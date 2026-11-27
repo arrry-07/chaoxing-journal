@@ -1,3 +1,5 @@
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -678,5 +680,109 @@ void main() {
       findsOneWidget,
     );
     expect(t.takeException(), isNull);
+  });
+
+  testWidgets(
+      'overdue stripe painter and widget tree clip stripes to segment bounds',
+      (t) async {
+    final now = DateTime.utc(2026, 11, 10, 2);
+    final store = AssignmentStore(
+      sessionStore: SecureSessionStore(),
+      notificationService: LocalNotificationService(),
+      widgetSnapshotService: WidgetSnapshotService(),
+    );
+    addTearDown(store.dispose);
+    store.replaceAssignmentsForTest([
+      work(2, 'submitted'),
+      work(4, 'pending', due: now.add(const Duration(days: 2))),
+      work(6, 'pending', due: now.subtract(const Duration(days: 2))),
+    ]);
+
+    await t.pumpWidget(MaterialApp(
+      theme: StudyAssistantTheme.light,
+      home: Scaffold(body: StatsScreen(store: store, clock: () => now)),
+    ));
+    await t.pumpAndSettle();
+
+    final seg2 = find.byKey(const ValueKey('stats-bar-seg-2'));
+    final stripes = find.byKey(const ValueKey('stats-bar-overdue-stripes'));
+    expect(seg2, findsOneWidget);
+    expect(stripes, findsOneWidget);
+    expect(
+      find.ancestor(of: stripes, matching: find.byType(ClipRect)),
+      findsWidgets,
+    );
+    expect(
+      find.descendant(of: seg2, matching: find.byType(ClipRect)),
+      findsOneWidget,
+    );
+
+    final customPaint = t.widget<CustomPaint>(stripes);
+    final painter = customPaint.painter!;
+    final bytes = await t.runAsync(() async {
+      final recorder = ui.PictureRecorder();
+      final canvas = Canvas(recorder);
+      canvas.translate(10, 10);
+      painter.paint(canvas, const Size(24, 10));
+      final picture = recorder.endRecording();
+      final image = await picture.toImage(44, 30);
+      final data = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+      image.dispose();
+      picture.dispose();
+      return data!;
+    });
+
+    int alphaAt(int x, int y) => bytes!.getUint8((y * 44 + x) * 4 + 3);
+    var insidePainted = 0;
+    for (var y = 0; y < 30; y++) {
+      for (var x = 0; x < 44; x++) {
+        final inside = x >= 10 && x < 34 && y >= 10 && y < 20;
+        final alpha = alphaAt(x, y);
+        if (inside) {
+          if (alpha > 0) insidePainted++;
+        } else {
+          expect(alpha, 0, reason: 'pixel ($x, $y) leaked outside clip bounds');
+        }
+      }
+    }
+    expect(insidePainted, greaterThan(0));
+  });
+
+  testWidgets('dark mode unknown status indicator dot renders subtle outline',
+      (t) async {
+    final now = DateTime.utc(2026, 11, 10, 2);
+    final store = AssignmentStore(
+      sessionStore: SecureSessionStore(),
+      notificationService: LocalNotificationService(),
+      widgetSnapshotService: WidgetSnapshotService(),
+    );
+    addTearDown(store.dispose);
+    store.replaceAssignmentsForTest([
+      work(2, 'submitted'),
+      work(4, 'unknown'),
+    ]);
+
+    await t.pumpWidget(MaterialApp(
+      theme: StudyAssistantTheme.dark,
+      home: Scaffold(body: StatsScreen(store: store, clock: () => now)),
+    ));
+    await t.pumpAndSettle();
+
+    final unknownRow = find.byKey(const ValueKey('stats-status-3'));
+    expect(unknownRow, findsOneWidget);
+    final dotContainer = find.descendant(
+      of: unknownRow,
+      matching: find.byWidgetPredicate((widget) {
+        if (widget is! Container) return false;
+        final deco = widget.decoration;
+        return deco is BoxDecoration && deco.shape == BoxShape.circle;
+      }),
+    );
+    expect(dotContainer, findsOneWidget);
+    final deco = t.widget<Container>(dotContainer).decoration! as BoxDecoration;
+    expect(deco.border, isA<Border>());
+    final border = deco.border! as Border;
+    expect(
+        border.top.color, JournalPalette.dark.subtle.withValues(alpha: 0.45));
   });
 }

@@ -747,8 +747,10 @@ class _StatsScreenState extends State<StatsScreen> with WidgetsBindingObserver {
           : Colors.white.withValues(alpha: 0.55),
       borderColor: index == 2
           ? journal.ink.withValues(alpha: 0.35)
-          : index == 3 && !journal.isDark
-              ? journal.ruleStrong
+          : index == 3
+              ? (journal.isDark
+                  ? journal.subtle.withValues(alpha: 0.45)
+                  : journal.ruleStrong)
               : null,
     );
     final content = ConstrainedBox(
@@ -1463,11 +1465,13 @@ class _MultiSegmentStatsBar extends StatelessWidget {
                             height: 10,
                             color: colors[active[i].index],
                             child: active[i].index == 2
-                                ? CustomPaint(
-                                    key: const ValueKey(
-                                        'stats-bar-overdue-stripes'),
-                                    painter: _DiagonalStripePainter(
-                                      stripeColor: overdueStripeColor,
+                                ? ClipRect(
+                                    child: CustomPaint(
+                                      key: const ValueKey(
+                                          'stats-bar-overdue-stripes'),
+                                      painter: _DiagonalStripePainter(
+                                        stripeColor: overdueStripeColor,
+                                      ),
                                     ),
                                   )
                                 : null,
@@ -1540,6 +1544,9 @@ class _DiagonalStripePainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
+    if (size.isEmpty) return;
+    canvas.save();
+    canvas.clipRect(Offset.zero & size);
     final paint = Paint()
       ..color = stripeColor
       ..strokeWidth = strokeWidth
@@ -1552,6 +1559,7 @@ class _DiagonalStripePainter extends CustomPainter {
         paint,
       );
     }
+    canvas.restore();
   }
 
   @override

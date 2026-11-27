@@ -161,6 +161,23 @@ class _FakeStore extends AssignmentStore {
       explanationOverride ?? await super.explainReminder(kind: kind, id: id);
 }
 
+class _FailingFollowStore extends _FakeStore {
+  _FailingFollowStore({
+    super.session,
+    super.repository,
+    super.chaoxingClient,
+    super.clock,
+  });
+
+  bool failFollowCourse = false;
+
+  @override
+  Future<void> followCourse(String key, bool followed) async {
+    if (failFollowCourse) return;
+    await super.followCourse(key, followed);
+  }
+}
+
 Future<AssignmentStore> _createStore({
   String account = '13800000001',
   DateTime Function()? clock,
@@ -1894,6 +1911,78 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.byType(SnackBar), findsNothing);
+    });
+
+    testWidgets(
+        'CourseListScreen shows error without undo when follow toggle or undo persistence fails',
+        (tester) async {
+      final now = DateTime.utc(2026, 11, 20, 4);
+      final session = _Session('13800000001');
+      SharedPreferences.setMockInitialValues({
+        'auto_sync_interval_minutes': 0,
+      });
+      FlutterSecureStorage.setMockInitialValues({});
+      const course = CourseRef(
+        courseId: '101',
+        clazzId: '10',
+        name: '数据结构与算法',
+        folderName: '2026年秋',
+      );
+      final repo = LocalAssignmentRepository();
+      await repo.activateAccount('13800000001');
+      await repo.saveCourses(const [course], account: '13800000001');
+      final store = _FailingFollowStore(
+        session: session,
+        repository: repo,
+        chaoxingClient: _SwitchableClient(),
+        clock: () => now,
+      );
+      await store.restoreSession();
+      addTearDown(store.dispose);
+
+      await tester.pumpWidget(MaterialApp(
+        theme: StudyAssistantTheme.light,
+        home: CourseListScreen(store: store, clock: () => now),
+      ));
+      await tester.pumpAndSettle();
+
+      // 1) Initial toggle persistence fails -> shows failure message and no 撤销 button.
+      store.failFollowCourse = true;
+      expect(store.follows('101:10'), isTrue);
+      await tester.tap(find.byType(SwitchListTile));
+      await tester.pumpAndSettle();
+      expect(store.follows('101:10'), isTrue);
+      expect(
+        find.text('更新《数据结构与算法》关注状态失败，请重试'),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: find.byType(SnackBar),
+          matching: find.text('撤销'),
+        ),
+        findsNothing,
+      );
+
+      // 2) Toggle succeeds, then undo persistence fails -> shows undo failure message.
+      store.failFollowCourse = false;
+      await tester.tap(find.byType(SwitchListTile));
+      await tester.pumpAndSettle();
+      expect(store.follows('101:10'), isFalse);
+      final undoBtn = find.descendant(
+        of: find.byType(SnackBar),
+        matching: find.text('撤销'),
+      );
+      expect(undoBtn, findsOneWidget);
+
+      store.failFollowCourse = true;
+      await tester.tap(undoBtn);
+      await tester.pumpAndSettle();
+      expect(store.follows('101:10'), isFalse);
+      expect(
+        find.text('撤销《数据结构与算法》关注状态失败，请重试'),
+        findsOneWidget,
+      );
     });
   });
 }

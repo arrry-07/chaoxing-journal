@@ -469,9 +469,11 @@ class _ProfileScreenState extends State<ProfileScreen>
                                     color: journal.ruleStrong,
                                     width: 0.8,
                                   ),
-                                  minimumSize: const Size(0, 48),
+                                  tapTargetSize: MaterialTapTargetSize.padded,
+                                  minimumSize: const Size(0, 34),
                                   padding: const EdgeInsets.symmetric(
                                     horizontal: 10,
+                                    vertical: 6,
                                   ),
                                   shape: RoundedRectangleBorder(
                                     borderRadius: BorderRadius.circular(10),
@@ -617,8 +619,11 @@ class _ProfileScreenState extends State<ProfileScreen>
     showJournalMessage(context, '退出未完成，请稍后重试；本机记录可能尚未全部清理');
   }
 
-  Future<void> _copyGithubUrl(BuildContext context) async {
-    await Clipboard.setData(const ClipboardData(text: _githubUrl));
+  Future<void> _copyGithubUrl(
+    BuildContext context, {
+    String url = _githubUrl,
+  }) async {
+    await Clipboard.setData(ClipboardData(text: url));
     if (context.mounted) {
       showJournalMessage(context, '链接已复制');
     }
@@ -635,9 +640,7 @@ class _ProfileScreenState extends State<ProfileScreen>
           content: const Text('无法打开 GitHub 链接，请检查浏览器或网络'),
           action: SnackBarAction(
             label: '复制链接',
-            onPressed: () {
-              unawaited(Clipboard.setData(ClipboardData(text: url)));
-            },
+            onPressed: () => unawaited(_copyGithubUrl(context, url: url)),
           ),
         ),
       );
@@ -879,7 +882,10 @@ class _SettingsTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final journal = Journal.of(context);
     final largeText = JournalLayout.isLargeText(context);
-    final stackTrailingBelow = largeText && trailingWidget != null;
+    final narrowScaled = MediaQuery.sizeOf(context).width <= 380 &&
+        MediaQuery.textScalerOf(context).scale(14) >= 18.0;
+    final stackTrailingBelow =
+        trailingWidget != null && (largeText || narrowScaled);
     final subtitleStyle = compactSubtitle
         ? Theme.of(context).textTheme.bodySmall?.copyWith(
               fontSize: 12,

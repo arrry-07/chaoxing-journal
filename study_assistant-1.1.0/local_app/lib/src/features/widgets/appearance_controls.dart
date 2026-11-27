@@ -253,6 +253,7 @@ class _ThemeSwatch extends StatelessWidget {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       SizedBox(
+                        key: ValueKey('theme-swatch-preview-${mode.name}'),
                         width: double.infinity,
                         height: 78,
                         child: preview,

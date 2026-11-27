@@ -44,6 +44,17 @@ void main() {
     final copyBtn = find.byKey(const ValueKey('profile-github-copy'));
     expect(copyBtn, findsOneWidget);
     expect(t.getSize(copyBtn).height, greaterThanOrEqualTo(48));
+    final button = t.widget<OutlinedButton>(copyBtn);
+    expect(button.style?.tapTargetSize, MaterialTapTargetSize.padded);
+    final minSize = button.style?.minimumSize?.resolve(<WidgetState>{});
+    expect(minSize, isNotNull);
+    expect(minSize!.height, lessThan(48));
+    expect(minSize.height, 34);
+    final buttonMaterial = find.descendant(
+      of: copyBtn,
+      matching: find.byType(Material),
+    );
+    expect(t.getSize(buttonMaterial.first).height, lessThan(48));
   });
 
   testWidgets('profile uses tinted groups and berry destructive actions',
@@ -463,6 +474,7 @@ void main() {
     await t.tap(snackCopyAction);
     await t.pumpAndSettle();
     expect(copied.length, 2);
+    expect(find.text('链接已复制'), findsOneWidget);
 
     await t.ensureVisible(find.text('关于我们'));
     await t.tap(find.text('关于我们'));
@@ -742,6 +754,89 @@ void main() {
     await tester.tap(find.text('浅色'));
     await tester.pumpAndSettle();
     expect(store.display.themeMode, JournalThemeMode.light);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+      'GitHub copy button stacks below subtitle at 360dp @ 1.3x with zero overflow',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    tester.view.physicalSize = const Size(360, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final store = AssignmentStore(
+      sessionStore: _MemorySessionStore(),
+      notificationService: _NoopNotificationService(),
+      widgetSnapshotService: _NoopWidgetSnapshotService(),
+    );
+    addTearDown(store.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: StudyAssistantTheme.light,
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(context).copyWith(
+            textScaler: const TextScaler.linear(1.3),
+          ),
+          child: child!,
+        ),
+        home: Scaffold(body: ProfileScreen(store: store)),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final row = find.widgetWithText(ListTile, 'GitHub 项目');
+    await tester.scrollUntilVisible(row, 240);
+    await tester.ensureVisible(row);
+    await tester.pumpAndSettle();
+
+    final subtitle = find.text('如果课业手记帮到你，欢迎在 GitHub 点个 Star。谢谢支持！');
+    final copyBtn = find.byKey(const ValueKey('profile-github-copy'));
+    expect(subtitle, findsOneWidget);
+    expect(copyBtn, findsOneWidget);
+    final subtitleRect = tester.getRect(subtitle);
+    final buttonRect = tester.getRect(copyBtn);
+    expect(buttonRect.top, greaterThanOrEqualTo(subtitleRect.bottom - 1));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+      'theme swatch previews are 78dp tall and fully visible above fold at 360x800 @ 1.0x',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    tester.view.physicalSize = const Size(360, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final store = AssignmentStore(
+      sessionStore: _MemorySessionStore(),
+      notificationService: _NoopNotificationService(),
+      widgetSnapshotService: _NoopWidgetSnapshotService(),
+    );
+    addTearDown(store.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: StudyAssistantTheme.light,
+        home: Scaffold(body: ProfileScreen(store: store)),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    for (final mode in JournalThemeMode.values) {
+      final preview = find.byKey(ValueKey('theme-swatch-preview-${mode.name}'));
+      expect(preview, findsOneWidget);
+      final height = tester.getSize(preview).height;
+      expect(height, inInclusiveRange(76.0, 80.0));
+      expect(height, 78.0);
+
+      final card = find.byKey(ValueKey('theme-swatch-${mode.name}'));
+      expect(card, findsOneWidget);
+      final rect = tester.getRect(card);
+      expect(rect.top, greaterThanOrEqualTo(0));
+      expect(rect.bottom, lessThanOrEqualTo(800));
+    }
     expect(tester.takeException(), isNull);
   });
 }
