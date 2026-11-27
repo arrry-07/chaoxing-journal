@@ -86,11 +86,12 @@ class _CourseListScreenState extends State<CourseListScreen> {
     await store.followCourse(course.key, nextFollowed);
     if (!mounted || !context.mounted) return;
     if (store.accountEpoch != epoch) return;
-    if (store.error != null || store.follows(course.key) != nextFollowed) {
+    if (store.operationError != null ||
+        store.follows(course.key) != nextFollowed) {
       _feedback.show(
         context,
         SnackBar(
-          content: Text(store.error ?? '更新《${course.name}》关注状态失败，请重试'),
+          content: Text(store.operationError ?? '更新《${course.name}》关注状态失败，请重试'),
         ),
       );
       return;
@@ -130,11 +131,12 @@ class _CourseListScreenState extends State<CourseListScreen> {
     if (store.accountEpoch != epoch) return;
     await store.followCourse(course.key, previousFollowed);
     if (!mounted || !context.mounted || store.accountEpoch != epoch) return;
-    if (store.error != null || store.follows(course.key) != previousFollowed) {
+    if (store.operationError != null ||
+        store.follows(course.key) != previousFollowed) {
       _feedback.show(
         context,
         SnackBar(
-          content: Text(store.error ?? '撤销《${course.name}》关注状态失败，请重试'),
+          content: Text(store.operationError ?? '撤销《${course.name}》关注状态失败，请重试'),
         ),
       );
     }

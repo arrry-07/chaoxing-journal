@@ -170,6 +170,10 @@ class _FailingFollowStore extends _FakeStore {
   });
 
   bool failFollowCourse = false;
+  String? persistentWarning;
+
+  @override
+  String? get error => super.error ?? persistentWarning;
 
   @override
   Future<void> followCourse(String key, bool followed) async {
@@ -1952,8 +1956,9 @@ void main() {
         findsNothing,
       );
 
-      // 2) Toggle succeeds, then undo persistence fails -> shows undo failure message.
+      // 2) Toggle succeeds even when a persistent non-operation warning keeps store.error non-null.
       store.failFollowCourse = false;
+      store.persistentWarning = '本地记录恢复提示（与本次操作无关）';
       await tester.tap(find.byType(SwitchListTile));
       await tester.pumpAndSettle();
       expect(store.follows('101:10'), isFalse);
@@ -1963,8 +1968,25 @@ void main() {
       );
       expect(undoBtn, findsOneWidget);
 
-      store.failFollowCourse = true;
+      // Undo also succeeds under persistent warning without false failure.
       await tester.tap(undoBtn);
+      await tester.pumpAndSettle();
+      expect(store.follows('101:10'), isTrue);
+      expect(find.textContaining('撤销《数据结构与算法》关注状态失败'), findsNothing);
+
+      // 3) Toggle succeeds, then undo persistence fails -> shows undo failure message.
+      store.persistentWarning = null;
+      await tester.tap(find.byType(SwitchListTile));
+      await tester.pumpAndSettle();
+      expect(store.follows('101:10'), isFalse);
+      final undoBtn2 = find.descendant(
+        of: find.byType(SnackBar),
+        matching: find.text('撤销'),
+      );
+      expect(undoBtn2, findsOneWidget);
+
+      store.failFollowCourse = true;
+      await tester.tap(undoBtn2);
       await tester.pumpAndSettle();
       expect(store.follows('101:10'), isFalse);
       expect(

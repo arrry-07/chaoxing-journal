@@ -4,7 +4,13 @@
 > 每条固定三段：已完成改动 / 当前 commit 与状态 / 下一步待办，每段 1–2 句。
 > 只写下一个 AI 接手需要的结论与证据指针（commit、APK SHA-256、构建/截图目录路径各一次），不写操作流水、逐项实测叙述和原始日志；详细测试记录留在构建目录或对应计划/验收文档。
 
-## 2026-11-27 · v1.92.3 我的、日历、统计、课程管理精修 Stage 1 开发与 Gate 审查闭环 PASS
+## 2026-11-27 · v1.92.3 (1.92.3+134) UI 回退至 v1.92.1、保留 4 项非 UI 修复、双机实测 PASS 与 PR #71 审查收口
+
+- 已完成改动：递增版本号至 `1.92.3+134`（`4f4e5a3`），随后按维护者实机反馈将 `v1.92.2`/`v1.92.3` 全部 UI 改动完整回退至 `v1.92.1` 基线（`864fa86`），保留 4 项非 UI 功能修复（北京时间自然日差、`showFullDeadline` 完整日期、日历说明第 3 条文案修正、课程关注 `accountEpoch` 守卫撤销），并在 PR `#71` 审查反馈后补齐 `DisplayPreferences.beijingDayDiff` UTC 跨夏令时口径与 `CourseListScreen` 改检 `store.operationError`。
+- 当前 commit 与状态：代码 `864fa863` 已过 `TZ=UTC verify_local_gate.py --mode full`（`+2177 ~1` / 132 项 Python 全绿），自 `D:\campus-tools\build-work\cx1923-134-r2-20261127` 构建双架构原签名包 `D:\campus-tools\artifacts\cx1923-134\chaoxing-journal-1.92.3-r2.apk`（`64,607,886` B，SHA-256 `f61cf7c0bd6642097d4ab768511bf19aae98c7aaad029bc17e5118c5a6905f10`，v2 证书 `d36a5715...` / 16 KiB 对齐 / ZIP 473 条目全过），MuMu「学习通」（`emulator-5558`，API 35，`firstInstallTime=2026-11-04 19:05:10`）与华为真机（`MKB4C20605047402`，`HUAWEI CDY-AN00`，Android 10，`firstInstallTime=2026-11-11 22:53:16`）保数据覆盖 23/23 截屏（`D:\campus-tools\artifacts\cx1923-134\screenshots_r2`）经只读子代理审图 **`OVERALL: PASS`**（双机 `logcat` 0 崩溃/0 溢出）；当前在 PR `#71`（`dev → main`）追加审查修复后待云端 CI 全绿合入。
+- 下一步待办：待 PR `#71` 云端 CI 全绿后合入 `main`、同步回 `dev`，归档 `v1.92.2`/`v1.92.3` 两份方案至 `docs/archive/plans/` 并记录最终合入基线与 CI Run ID。
+
+## 2026-11-27 · v1.92.3 我的、日历、统计、课程管理精修 Stage 1 开发与 Gate 审查闭环 PASS（UI 已于上条回退）
 
 - 已完成改动：承接 `v1.92.2`（`cb501cf`）围绕 [v1.92.3 方案](../plans/2026-11-27-v1.92.3-我的日历统计课程管理精修与全站验收方案.md) 完成 M1–M3 全量落地（`552adbf`）：「我的」页顶栏单行化、去独立「设置」标题、新增「其他入口」卡片、三张主题预览加高至 `78dp`、「GitHub 项目」Star 文案配整行打开/右侧复制按钮与失败兜底复制；日历 `48dp` 可见周/月切换栏、单日/整月空态与图例更新、整月议程完整日期；统计「全部学期 / 不限时间」、「已完成 X / Y」（`Journal.uiFamily`）、待完成暖石板中性阶与已逾期 45° 斜纹及下钻不变量保留；课程管理统一 `inputFill/inputBorder` 与带 `accountEpoch` 守卫的关注切换「撤销」闭环；经 Gate 1 独立审查（`Gemini 4 Neon high`）拦截 1 阻断（进度条逾期斜纹未裁剪越界）/1 中级（复制按钮视觉 48dp 过高且 `360dp @ 1.3x` 未下叠）/4 次要后，由第 1 轮返工（`ccaa97b`）一次性清零并获 Gate 2 独立复审（`Gemini 4 Carbon high`）**PASS**。
 - 当前 commit 与状态：终版代码位于 `ccaa97ba59b5ffbb59e3a1740b1b96ce17230535`（`dev`，未递增 `1.92.1+133` 版本号、未打自测包、未动 `main`/Tag/Release）；终版 `HEAD` 已实跑 `TZ=UTC python scripts/verify_local_gate.py --mode full` 全绿（Flutter 全套 `+2196 ~1`、`dart analyze lib test` 0 问题、132 项 Python 单测与安全/元数据/L0 `57<=80` 校验全过；Android 原生、APK 构建、MuMu 实机与远端 CI 仍未实测）。
@@ -27,9 +33,3 @@
 - 已完成改动：承接 [v1.91.1 归档方案](../archive/plans/2026-11-26-v1.91.1-Clawd2.0文字舞台8bit音效与轻量收口方案.md) 并在两次 Stage 2 MuMu 熔断退回 `dev` 后彻底清零首页压字/气泡遮挡 `home-sync-status`/统计客串靠右/摸头爱心驻留/切 Tab 毒化共享 `tickerEnabled` 与二级页冒泡竞态（`fee9a0c`、`5593980`、`8f12a97`、`64397fe`、`5330a21`、`8d4a0f6`，同步涵盖 `509bc38` 工作流解耦，最终 `8d4a0f6` 本地 `TZ=UTC verify_local_gate.py --mode full` `+2123 ~1` / 132 项 Python 单测全绿）；PR `#68` / `#69`（Run `45851596541` / `45863592685`）、最终 `main` CI（Run `45865824746`）、Tag `v1.92.0` CI（Run `45867936379`）、`site-release-dispatch`（Run `45869719962`）与 `gitee-release-sync`（Run `45869719906` + `promote_stable=true` Run `45869736892`）全部 `success`。自最终 `main` `55e5d6e` 干净 ASCII 目录 `D:\campus-tools\build-work\cx1920-132-20261126-r3` 构建原签名双 ABI 正式包 `D:\campus-tools\artifacts\cx1920-132\chaoxing-journal-1.92.0.apk`（`64,607,886` B，SHA-256 `f5fffb0444f74c56ee22b4ebf1e86822fa3978abd9fc1cf353f02224105268fd`，`verify_apk_and_report.py` 与 `check_apk_abis.py` 全过），在 MuMu「学习通」（`emulator-5558`，API 35）保数据覆盖通过 6/6 项浅/深双主题视觉终审 **`OVERALL: PASS`**（13 张截图存 `D:\campus-tools\artifacts\cx1920-132\screenshots`，`logcat` 0 崩溃/0 溢出，4 条 `v3` 渠道就绪），完成 GitHub Release `459719737` 公开设 `latest`、五方 SHA-256 校验、Gitee `update-manual.json` / `update-stable.json` 双索引公网回读（未传 APK 镜像），并归档 `v1.91.1` 方案与 `v1.90.0` 验收记录。
 - 当前 commit 与状态：发布代码与 annotated Tag `v1.92.0`（`5b7bf90e`）固定在 `55e5d6ea982f2d5f62f48b49beb69af931b20e6b`（不动 Tag），本次 `[skip ci]` 收口文档提交同步推送至 `origin/main` 与 `origin/dev`，L0 行数 `<= 80`，工作区仅保留既有未提交个人/外部文件。
 - 下一步待办：下一 `dev` 修订自 `1.92.1+133` 起步；优先小步快修 `CalendarScreen` 气泡滚动锚点与滚动收起对齐，随后按独立审读推进 `AssignmentStore` / `AssignmentListScreen` 领域拆缝重构（结合 `509bc38` 日常集成 PR 节奏），再立项 Supabase `FB-017` 反馈直发与 `FB-015` 端到端加密云同步，并按样本节奏补齐实体 OEM 真机与外部样本验证。
-
-## 2026-11-26 · v1.92.0 (1.92.0+132) Stage 2 MuMu 目视验收触发熔断，已安全停机退回 Stage 1（已于上条闭环解决）
-
-- 已完成改动：r1 候选包（`4562eb9`，SHA-256 `2766e99a...`）通过 `SoundPool` 8-bit 音轨与静音/DND 拦截实测，但视觉审计拦截首页气泡遮挡 `home-sync-status`、统计客串靠右及摸头爱心即灭；随后 r2 候选包（`295657b`，SHA-256 `6c46b79c...`）再暴露 `NoTransitionPage` 切 Tab 毒化共享 `tickerEnabled`，均严守只读红线熔断退回 `dev` 清零。
-- 当前 commit 与状态：已随 `r3` 正式包（`55e5d6e`，SHA-256 `f5fffb04...`）与 `v1.92.0` 正式发布全部闭环。
-- 下一步待办：已闭环。

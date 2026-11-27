@@ -149,15 +149,21 @@ class DisplayPreferences {
     }).toList();
   }
 
+  static int beijingDayDiff(DateTime deadline, DateTime now) {
+    final today = AssignmentQuery.beijing(now);
+    final due = AssignmentQuery.beijing(deadline);
+    return DateTime.utc(due.year, due.month, due.day)
+        .difference(DateTime.utc(today.year, today.month, today.day))
+        .inDays;
+  }
+
   static String remaining(DateTime deadline, DateTime now) {
     final diff = deadline.difference(now);
     if (diff.isNegative || diff.inMilliseconds <= 0) return '已截止';
     if (diff < const Duration(minutes: 1)) return '剩余1分钟';
     if (diff < const Duration(hours: 1)) return '剩余${diff.inMinutes}分钟';
     if (diff < const Duration(hours: 24)) return '剩余${diff.inHours}小时';
-    final todayDay = AssignmentQuery.dayKey(now);
-    final dueDay = AssignmentQuery.dayKey(deadline);
-    final dayDiff = dueDay.difference(todayDay).inDays;
+    final dayDiff = beijingDayDiff(deadline, now);
     if (dayDiff <= 0) return '剩余${diff.inHours}小时';
     if (dayDiff == 1) return '明天';
     if (dayDiff == 2) return '后天';

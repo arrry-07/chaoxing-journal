@@ -816,5 +816,13 @@ void main() {
     final bjThreeDaysLater = DateTime.utc(2026, 11, 30, 14, 50); // +82h
     expect(DisplayPreferences.remaining(bjThreeDaysLater, bjNow), '剩余3天');
     expect(AssignmentCard.compactRemaining(bjThreeDaysLater, bjNow), '剩3天');
+
+    // Spanning US DST spring-forward (2026-03-08) must still compute exact Beijing days.
+    final preDstBj = DateTime.utc(2026, 3, 7, 4, 0); // Beijing 2026-03-07 12:00
+    final postDstBj =
+        DateTime.utc(2026, 3, 9, 10, 0); // Beijing 2026-03-09 18:00
+    expect(DisplayPreferences.beijingDayDiff(postDstBj, preDstBj), 2);
+    expect(DisplayPreferences.remaining(postDstBj, preDstBj), '后天');
+    expect(AssignmentCard.compactRemaining(postDstBj, preDstBj), '后天');
   });
 }

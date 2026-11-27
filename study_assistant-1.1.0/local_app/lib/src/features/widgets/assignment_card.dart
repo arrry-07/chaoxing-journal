@@ -119,9 +119,7 @@ class AssignmentCard extends StatelessWidget {
     if (diff < const Duration(minutes: 1)) return '剩1分';
     if (diff < const Duration(hours: 1)) return '剩${diff.inMinutes}分';
     if (diff < const Duration(hours: 24)) return '剩${diff.inHours}小时';
-    final todayDay = AssignmentQuery.dayKey(now);
-    final dueDay = AssignmentQuery.dayKey(deadline);
-    final dayDiff = dueDay.difference(todayDay).inDays;
+    final dayDiff = DisplayPreferences.beijingDayDiff(deadline, now);
     if (dayDiff <= 0) return '剩${diff.inHours}小时';
     if (dayDiff == 1) return '明天';
     if (dayDiff == 2) return '后天';
