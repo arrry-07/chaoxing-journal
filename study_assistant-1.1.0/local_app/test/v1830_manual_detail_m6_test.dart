@@ -396,6 +396,192 @@ void main() {
     expect(find.text('未找到这条个人安排'), findsOneWidget);
   });
 
+  testWidgets(
+      'M4: ManualEntryEditor progressive first screen, keyboard bottom save bar, collapsed/auto-expanded more options, zero-noise minutes/counter, reminder guidance, error scroll, and reduced-motion save toast',
+      (tester) async {
+    final now = DateTime.utc(2026, 11, 25, 2, 0);
+    final store = await _buildStore(now);
+    addTearDown(store.dispose);
+
+    tester.view.physicalSize = const Size(390, 720);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    // 1) New entry without initialCourse: first screen keeps only title, segment, time/reminder, collapsed more options, and bottom save bar.
+    await tester.pumpWidget(MaterialApp(
+      theme: StudyAssistantTheme.light,
+      home: ManualEntryEditor(store: store),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text('标题'), findsOneWidget);
+    expect(find.text('待办'), findsOneWidget);
+    expect(find.text('考试'), findsOneWidget);
+    expect(find.text('更多选项'), findsOneWidget);
+    expect(find.text('课程、地点、用时、备注与附件'), findsOneWidget);
+    expect(find.text('课程（可选）').hitTestable(), findsNothing);
+    expect(find.text('预计用时（可选）').hitTestable(), findsNothing);
+
+    // at == null shows disabled switch + "设置时间后可开启提醒" + "去设置时间" and hides permission restriction note.
+    expect(find.text('设置时间后可开启提醒'), findsOneWidget);
+    expect(find.text('受通知权限和系统调度限制'), findsNothing);
+    final setTimeBtn =
+        find.byKey(const ValueKey('manual-set-time-for-reminder'));
+    expect(setTimeBtn, findsOneWidget);
+    final reminderSwitch = tester.widget<Switch>(find.byType(Switch));
+    expect(reminderSwitch.onChanged, isNull);
+
+    // Tapping "去设置时间" opens DatePicker directly.
+    await tester.tap(setTimeBtn);
+    await tester.pumpAndSettle();
+    expect(find.byType(CalendarDatePicker), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+
+    // Save button stays in Scaffold.bottomNavigationBar and stays above keyboard inset.
+    final saveBtn = find.byKey(const ValueKey('manual-editor-save'));
+    expect(saveBtn, findsOneWidget);
+    expect(saveBtn.hitTestable(), findsOneWidget);
+
+    tester.view.viewInsets = const FakeViewPadding(bottom: 280);
+    await tester.pumpAndSettle();
+    expect(saveBtn.hitTestable(), findsOneWidget);
+    expect(tester.getRect(saveBtn).bottom, lessThanOrEqualTo(720 - 280));
+    tester.view.viewInsets = FakeViewPadding.zero;
+    await tester.pumpAndSettle();
+
+    // Counter threshold: hidden below 80% (<160 for maxLength 200), visible at >=160.
+    await tester.enterText(
+        find.byType(TextFormField).first, List.filled(159, 'a').join());
+    await tester.pump();
+    expect(find.text('159 / 200'), findsNothing);
+    await tester.enterText(
+        find.byType(TextFormField).first, List.filled(160, 'a').join());
+    await tester.pump();
+    expect(find.text('160 / 200'), findsOneWidget);
+
+    // 2) Validation error positioning: exam without time scrolls to time card and shows inline error.
+    await tester.tap(find.text('考试'));
+    await tester.pumpAndSettle();
+    await tester.tap(saveBtn);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('manual-time-error')), findsOneWidget);
+    expect(find.text('请填写考试日期和时间'), findsOneWidget);
+
+    // Switch back to todo, expand "更多选项", enter invalid minutes, collapse, then submit -> auto-expands and scrolls minutes error into view.
+    await tester.tap(find.text('待办'));
+    await tester.pumpAndSettle();
+    final moreToggle = find.byKey(const ValueKey('manual-more-options-toggle'));
+    await tester.ensureVisible(moreToggle);
+    await tester.pumpAndSettle();
+    await tester.tap(moreToggle);
+    await tester.pumpAndSettle();
+    final minutesField = find.widgetWithText(TextFormField, '预计用时（可选）');
+    await tester.ensureVisible(minutesField);
+    await tester.pumpAndSettle();
+    expect(minutesField.hitTestable(), findsOneWidget);
+    expect(find.text('例如 30（分钟，可选）'), findsOneWidget);
+    expect(tester.widget<TextFormField>(minutesField).controller!.text, '');
+    await tester.enterText(minutesField, '9999');
+    await tester.pump();
+    await tester.ensureVisible(moreToggle);
+    await tester.pumpAndSettle();
+    await tester.tap(moreToggle);
+    await tester.pumpAndSettle();
+    expect(minutesField.hitTestable(), findsNothing);
+
+    await tester.tap(saveBtn);
+    await tester.pumpAndSettle();
+    expect(minutesField.hitTestable(), findsOneWidget);
+    expect(find.text('请输入0–1440的整数').hitTestable(), findsOneWidget);
+
+    // Clear minutes to empty string -> saves as 0 with reduced-motion text feedback.
+    await tester.enterText(minutesField, '');
+    await tester.pump();
+
+    await tester.pumpWidget(MaterialApp(
+      theme: StudyAssistantTheme.light,
+      builder: (context, child) => MediaQuery(
+        data: MediaQuery.of(context).copyWith(disableAnimations: true),
+        child: child!,
+      ),
+      home: Scaffold(
+        body: Builder(
+          builder: (ctx) => TextButton(
+            onPressed: () => Navigator.of(ctx).push(
+              MaterialPageRoute<void>(
+                builder: (_) => ManualEntryEditor(store: store),
+              ),
+            ),
+            child: const Text('打开新建'),
+          ),
+        ),
+      ),
+    ));
+    await tester.tap(find.text('打开新建'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextFormField).first, '空白用时待办');
+    await tester.tap(find.byKey(const ValueKey('manual-editor-save')));
+    await tester.pumpAndSettle();
+    expect(store.notebook.entries.single.minutes, 0);
+    expect(find.text('个人安排已保存'), findsOneWidget);
+
+    // 3) Auto-expand rules: initialCourse non-empty & existing entry with optional data.
+    await tester.pumpWidget(MaterialApp(
+      theme: StudyAssistantTheme.light,
+      home: ManualEntryEditor(
+        key: const ValueKey('editor-initial-course'),
+        store: store,
+        initialCourse: '离散数学',
+      ),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.text('课程、地点、用时、备注与附件（已填 1 项）'), findsOneWidget);
+    final prefilledCourse = find.widgetWithText(TextFormField, '离散数学');
+    await tester.ensureVisible(prefilledCourse);
+    await tester.pumpAndSettle();
+    expect(prefilledCourse.hitTestable(), findsOneWidget);
+
+    const existingWithMinutes = ManualEntry(
+      id: 'm-opt',
+      title: '含时长安排',
+      kind: ManualEntry.kindTodo,
+      minutes: 45,
+    );
+    await tester.pumpWidget(MaterialApp(
+      theme: StudyAssistantTheme.light,
+      home: ManualEntryEditor(
+        key: const ValueKey('editor-with-minutes'),
+        store: store,
+        entry: existingWithMinutes,
+      ),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.text('课程、地点、用时、备注与附件（已填 1 项）'), findsOneWidget);
+    final existingMinutesField = find.widgetWithText(TextFormField, '45');
+    await tester.ensureVisible(existingMinutesField);
+    await tester.pumpAndSettle();
+    expect(existingMinutesField.hitTestable(), findsOneWidget);
+
+    const existingPlain = ManualEntry(
+      id: 'm-plain',
+      title: '纯标题安排',
+      kind: ManualEntry.kindTodo,
+    );
+    await tester.pumpWidget(MaterialApp(
+      theme: StudyAssistantTheme.light,
+      home: ManualEntryEditor(
+        key: const ValueKey('editor-plain'),
+        store: store,
+        entry: existingPlain,
+      ),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.text('课程、地点、用时、备注与附件'), findsOneWidget);
+    expect(find.text('预计用时（可选）').hitTestable(), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
   test(
       'M6 D13: rescheduleManual separates quiet-hours skips from lastWarning and uses 待办提醒/考试提醒 titles',
       () async {

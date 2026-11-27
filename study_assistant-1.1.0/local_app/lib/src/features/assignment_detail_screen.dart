@@ -156,6 +156,7 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
   final ScrollController _scrollController = ScrollController();
   final ValueNotifier<double> _headerProgress = ValueNotifier<double>(0.0);
   bool _opening = false, _hiding = false, _refreshing = false;
+  bool _openFailedFallback = false;
   bool _togglingPin = false;
   bool _savingManualDeadline = false;
   String? _actionMessage;
@@ -242,6 +243,7 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
     if (url == null) return;
     setState(() {
       _opening = true;
+      _openFailedFallback = false;
       _actionMessage = null;
       _actionMessageTarget = null;
     });
@@ -251,9 +253,10 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
     if (!mounted) return;
     setState(() {
       _opening = false;
+      _openFailedFallback = false;
       _actionMessage = opened
           ? '已请求浏览器打开。页面是否可用、登录及提交状态请在网页中核对。'
-          : '未能启动浏览器，请重试，或刷新作业信息后复制链接。';
+          : '未能启动浏览器，请重试，或刷新$_itemLabel信息后复制链接。';
       _actionMessageTarget = _DetailNoticeTarget.opening;
     });
   }
@@ -264,18 +267,23 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
     if (url == null) return;
     setState(() {
       _opening = true;
+      _openFailedFallback = false;
       _actionMessage = null;
       _actionMessageTarget = null;
     });
     widget.store.beginAssignmentVisit(widget.assignmentId);
     final target = await _links.openAssignment(url);
-    if (target == AssignmentLaunchTarget.unavailable) {
+    final failed = target == AssignmentLaunchTarget.unavailable;
+    if (failed) {
       widget.store.cancelAssignmentVisit(widget.assignmentId);
     }
     if (!mounted) return;
     setState(() {
       _opening = false;
-      _actionMessage = target.message;
+      _openFailedFallback = failed;
+      _actionMessage = failed
+          ? '未能打开学习通，请确认已安装并登录后重试；也可以改用浏览器打开或复制$_itemLabel链接。'
+          : target.message;
       _actionMessageTarget = _DetailNoticeTarget.opening;
     });
   }
@@ -344,6 +352,7 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
     }
     if (mounted) {
       setState(() {
+        _openFailedFallback = false;
         _actionMessage = message;
         _actionMessageTarget = _DetailNoticeTarget.records;
       });
@@ -1559,19 +1568,12 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
                         ),
                       ],
                       const SizedBox(height: 16),
-                      LayoutBuilder(
-                        builder: (context, constraints) {
-                          final stackButtons = constraints.maxWidth < 320 ||
-                              MediaQuery.textScalerOf(context).scale(14) >=
-                                  18.0;
-                          final primaryBtn = JournalPrimaryButton(
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          JournalPrimaryButton(
                             buttonKey: const ValueKey('assignment-detail-open'),
                             height: 48,
-                            padding: stackButtons
-                                ? null
-                                : const EdgeInsets.symmetric(
-                                    horizontal: 10, vertical: 12),
-                            singleLineLabel: !stackButtons,
                             onPressed:
                                 _opening || _hiding || _currentUrl == null
                                     ? null
@@ -1582,51 +1584,27 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
                                 : assignment.isExam
                                     ? '在学习通内查看$_itemLabel'
                                     : '在学习通内打开作业',
-                          );
-                          final secondaryBtn = JournalSecondaryButton(
+                          ),
+                          const SizedBox(height: 8),
+                          JournalSecondaryButton(
                             buttonKey:
                                 const ValueKey('assignment-detail-open-web'),
                             height: 48,
                             outlined: true,
-                            padding: stackButtons
-                                ? null
-                                : const EdgeInsets.symmetric(
-                                    horizontal: 10, vertical: 12),
-                            singleLineLabel: !stackButtons,
                             onPressed:
                                 _opening || _hiding || _currentUrl == null
                                     ? null
                                     : _openWeb,
                             icon: Icons.open_in_browser_rounded,
-                            label: _opening ? '正在请求浏览器…' : '打开$_itemLabel网页',
-                          );
-                          if (stackButtons) {
-                            return Column(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: [
-                                primaryBtn,
-                                const SizedBox(height: 10),
-                                secondaryBtn,
-                              ],
-                            );
-                          }
-                          return IntrinsicHeight(
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: [
-                                Expanded(child: primaryBtn),
-                                const SizedBox(width: 10),
-                                Expanded(child: secondaryBtn),
-                              ],
-                            ),
-                          );
-                        },
+                            label: _opening ? '正在请求浏览器…' : '用浏览器打开',
+                          ),
+                        ],
                       ),
                       const SizedBox(height: 8),
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 4),
                         child: Text(
-                          '将在学习通内打开$_itemLabel网页；浏览器打开可能需要另行登录，返回可刷新核对状态。',
+                          '用浏览器打开可能需要另行登录，返回可刷新核对状态。',
                           style: journal.metadata.copyWith(
                             fontSize: 12.5,
                             height: 1.45,
@@ -1648,6 +1626,31 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
                         _DetailActionNotice(
                           key: const ValueKey('assignment-open-result'),
                           message: _actionMessage!,
+                          actions: _openFailedFallback && _currentUrl != null
+                              ? [
+                                  OutlinedButton.icon(
+                                    key: const ValueKey(
+                                        'assignment-open-fallback-web'),
+                                    onPressed:
+                                        _opening || _hiding ? null : _openWeb,
+                                    icon: const Icon(
+                                      Icons.open_in_browser_rounded,
+                                      size: 16,
+                                    ),
+                                    label: const Text('用浏览器打开'),
+                                  ),
+                                  TextButton.icon(
+                                    key: const ValueKey(
+                                        'assignment-open-fallback-copy'),
+                                    onPressed: _hiding ? null : _copyLink,
+                                    icon: const Icon(
+                                      Icons.copy_outlined,
+                                      size: 16,
+                                    ),
+                                    label: const Text('复制链接'),
+                                  ),
+                                ]
+                              : const [],
                         ),
                       ],
                       const SizedBox(height: 16),
@@ -1688,6 +1691,9 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
                                     ? Icons.undo_rounded
                                     : Icons.check_circle_outline_rounded,
                                 label: localDoneOnly ? '撤销本机完成标记' : '标记为本机已完成',
+                                subtitle: localDoneOnly
+                                    ? '已暂停本机提醒并退顶，撤销后恢复'
+                                    : '仅在本机记录，学习通提交状态不变',
                               ),
                             ),
                           if (!isHidden)
@@ -1815,28 +1821,50 @@ class _AssignmentDetailScreenState extends State<AssignmentDetailScreen>
 enum _DetailNoticeTarget { opening, records, restore, pin, manual }
 
 class _DetailActionNotice extends StatelessWidget {
-  const _DetailActionNotice({super.key, required this.message});
+  const _DetailActionNotice({
+    super.key,
+    required this.message,
+    this.actions = const <Widget>[],
+  });
 
   final String message;
+  final List<Widget> actions;
 
   @override
-  Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-        decoration: BoxDecoration(
-          color: Journal.of(context).sage.withValues(alpha: 0.65),
-          borderRadius: BorderRadius.circular(10),
-        ),
-        child: Semantics(
-          liveRegion: true,
-          child: Text(
-            message,
-            style: Journal.of(context).metadata.copyWith(
-                  color: Journal.of(context).ink,
-                  fontWeight: FontWeight.w600,
-                ),
+  Widget build(BuildContext context) {
+    final journal = Journal.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+      decoration: BoxDecoration(
+        color: journal.sage.withValues(alpha: 0.65),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Semantics(
+            liveRegion: true,
+            child: Text(
+              message,
+              style: journal.metadata.copyWith(
+                color: journal.ink,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
           ),
-        ),
-      );
+          if (actions.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 6,
+              children: actions,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
 }
 
 class _DetailToolButton extends StatelessWidget {
@@ -1845,61 +1873,80 @@ class _DetailToolButton extends StatelessWidget {
     required this.onPressed,
     required this.icon,
     required this.label,
+    this.subtitle,
     this.iconSize = 18,
   });
 
   final VoidCallback? onPressed;
   final IconData icon;
   final String label;
+  final String? subtitle;
   final double iconSize;
 
   @override
-  Widget build(BuildContext context) => SizedBox(
-        width: double.infinity,
-        child: TextButton(
-          style: TextButton.styleFrom(
-            alignment: Alignment.centerLeft,
-            minimumSize: const Size(0, 48),
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-            foregroundColor: Journal.of(context).ink,
-            tapTargetSize: MaterialTapTargetSize.padded,
-          ),
-          onPressed: onPressed,
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Padding(
-                padding: const EdgeInsets.only(top: 2),
-                child: Icon(icon, size: iconSize),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  label,
-                  style: Journal.of(context).metadata.copyWith(
-                        color: onPressed == null
-                            ? Journal.of(context).muted
-                            : Journal.of(context).ink,
-                        fontWeight: FontWeight.w500,
+  Widget build(BuildContext context) {
+    final journal = Journal.of(context);
+    return SizedBox(
+      width: double.infinity,
+      child: TextButton(
+        style: TextButton.styleFrom(
+          alignment: Alignment.centerLeft,
+          minimumSize: const Size(0, 48),
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+          foregroundColor: journal.ink,
+          tapTargetSize: MaterialTapTargetSize.padded,
+        ),
+        onPressed: onPressed,
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Icon(icon, size: iconSize),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    label,
+                    style: journal.metadata.copyWith(
+                      color: onPressed == null ? journal.muted : journal.ink,
+                      fontWeight: FontWeight.w500,
+                      height: 1.35,
+                    ),
+                  ),
+                  if (subtitle != null) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle!,
+                      style: journal.metadata.copyWith(
+                        fontSize: 12,
+                        color:
+                            onPressed == null ? journal.muted : journal.subtle,
                         height: 1.35,
                       ),
-                ),
+                    ),
+                  ],
+                ],
               ),
-              const SizedBox(width: 4),
-              Padding(
-                padding: const EdgeInsets.only(top: 1),
-                child: Icon(
-                  Icons.chevron_right_rounded,
-                  size: 18,
-                  color: onPressed == null
-                      ? Journal.of(context).ruleStrong
-                      : Journal.of(context).muted,
-                ),
+            ),
+            const SizedBox(width: 4),
+            Padding(
+              padding: const EdgeInsets.only(top: 1),
+              child: Icon(
+                Icons.chevron_right_rounded,
+                size: 18,
+                color: onPressed == null ? journal.ruleStrong : journal.muted,
               ),
-            ],
-          ),
+            ),
+          ],
         ),
-      );
+      ),
+    );
+  }
 }
 
 class _ExamDetailRow extends StatelessWidget {

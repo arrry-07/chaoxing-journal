@@ -940,14 +940,9 @@ void main() {
         final openRect = tester.getRect(open);
         final webRect = tester.getRect(web);
         expect(webRect.width, closeTo(openRect.width, 1.0));
-        if (scale <= 1.0) {
-          expect(webRect.height, closeTo(openRect.height, 0.5));
-          expect(webRect.top, closeTo(openRect.top, 0.5));
-        } else {
-          expect(openRect.height, greaterThanOrEqualTo(48));
-          expect(webRect.height, greaterThanOrEqualTo(48));
-          expect(webRect.top, greaterThan(openRect.bottom));
-        }
+        expect(openRect.height, greaterThanOrEqualTo(48));
+        expect(webRect.height, greaterThanOrEqualTo(48));
+        expect(webRect.top, greaterThan(openRect.bottom));
       }
     }
 
@@ -1203,6 +1198,7 @@ void main() {
         find.byKey(const ValueKey('assignment-detail-local-complete'));
     expect(toggleBtn, findsOneWidget);
     expect(find.text('标记为本机已完成'), findsOneWidget);
+    expect(find.text('仅在本机记录，学习通提交状态不变'), findsOneWidget);
     await tester.ensureVisible(toggleBtn);
     await tester.tap(toggleBtn);
     await tester.pumpAndSettle();
@@ -1210,6 +1206,7 @@ void main() {
     expect(store.isLocallyCompleted(work), isTrue);
     expect(find.text('本机标记'), findsOneWidget);
     expect(find.text('撤销本机完成标记'), findsOneWidget);
+    expect(find.text('已暂停本机提醒并退顶，撤销后恢复'), findsOneWidget);
 
     await tester.ensureVisible(toggleBtn);
     await tester.tap(toggleBtn);
@@ -1217,6 +1214,7 @@ void main() {
     expect(store.isLocallyCompleted(work), isFalse);
     expect(find.text('本机标记'), findsNothing);
     expect(find.text('标记为本机已完成'), findsOneWidget);
+    expect(find.text('仅在本机记录，学习通提交状态不变'), findsOneWidget);
 
     // Mark local completed again, then official server confirms submitted -> official wins!
     await tester.tap(toggleBtn);

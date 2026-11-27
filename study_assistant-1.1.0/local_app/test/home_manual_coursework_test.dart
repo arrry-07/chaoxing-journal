@@ -173,6 +173,8 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('home-add-manual')));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextFormField).at(0), '新手动待办');
+    await tester.tap(find.byKey(const ValueKey('manual-more-options-toggle')));
+    await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextFormField).at(1), '高等数学');
     await tester.tap(find.text('保存个人安排'));
     await tester.pumpAndSettle();
@@ -622,6 +624,8 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    await tester.tap(find.byKey(const ValueKey('manual-more-options-toggle')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('从我的课程选择'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('高等数学').last);
