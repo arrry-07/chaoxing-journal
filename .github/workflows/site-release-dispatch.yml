@@ -46,12 +46,12 @@ jobs:
           prerelease = os.environ.get("RELEASE_PRERELEASE", "").lower()
           release_url = os.environ.get("RELEASE_URL", "")
 
-          if not token:
-              print("[SKIP] SITE_DISPATCH_TOKEN is not configured; skipping arrry-07/chaoxing-journal-site dispatch.")
-              sys.exit(0)
           if draft == "true" or prerelease == "true":
               print("[SKIP] Draft or prerelease is not dispatched to the site.")
               sys.exit(0)
+          if not token:
+              print("[FAIL] SITE_DISPATCH_TOKEN is not configured; site dispatch was not sent.")
+              sys.exit(1)
           if re.fullmatch(r"v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)", tag) is None:
               print(f"[FAIL] Invalid formal release tag: {tag!r}")
               sys.exit(1)

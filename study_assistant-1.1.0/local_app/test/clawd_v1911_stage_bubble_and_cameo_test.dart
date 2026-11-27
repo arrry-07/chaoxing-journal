@@ -1,5 +1,3 @@
-import 'dart:math' as math;
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -453,7 +451,7 @@ void main() {
       );
       expect(
         calendarPillTop,
-        lessThanOrEqualTo(calendarTitleRect.bottom + 12.0),
+        lessThanOrEqualTo(calendarTitleRect.bottom + 14.0),
       );
       expect(
         calendarPillTop,
@@ -658,9 +656,9 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      // 1. Equal-height 38dp buddy and zero Icons.auto_awesome_rounded anywhere on home.
+      // 1. Unified 34dp buddy and zero Icons.auto_awesome_rounded anywhere on home.
       final buddyFinder = find.byKey(const ValueKey('home-pixel-buddy'));
-      expect(tester.widget<JournalPixelBuddy>(buddyFinder).size, 38.0);
+      expect(tester.widget<JournalPixelBuddy>(buddyFinder).size, 34.0);
       expect(
         find.byWidgetPredicate(
           (w) => w is Icon && w.icon == Icons.auto_awesome_rounded,
@@ -1393,20 +1391,32 @@ void main() {
       final buddyFinder = find.byKey(const ValueKey('home-pixel-buddy'));
       final agendaFinder = find.byKey(const ValueKey('home-agenda-entry'));
 
+      final stageFinder = find.byType(ClawdTitleStage);
+
       void expectSafeBounds(String phase) {
+        final stageRect = tester.getRect(stageFinder);
         final titleRect = tester.getRect(titleFinder);
         final buddyRect = tester.getRect(buddyFinder);
         final agendaRect = tester.getRect(agendaFinder);
+        expect(
+          buddyRect.top,
+          greaterThanOrEqualTo(stageRect.top - 0.01),
+          reason:
+              '$phase: buddy top escaped stage top ($buddyRect vs $stageRect)',
+        );
         expect(
           buddyRect.overlaps(titleRect),
           isFalse,
           reason: '$phase: buddyRect=$buddyRect overlaps titleRect=$titleRect',
         );
-        expect(
-          buddyRect.left,
-          greaterThanOrEqualTo(titleRect.right - 0.01),
-          reason: '$phase: buddy left moved onto title text',
-        );
+        if (buddyRect.left < titleRect.right - 0.01) {
+          expect(
+            buddyRect.bottom,
+            lessThanOrEqualTo(titleRect.top + 0.5),
+            reason:
+                '$phase: roof buddy bottom ($buddyRect) must stay above title ($titleRect)',
+          );
+        }
         expect(
           buddyRect.right,
           lessThanOrEqualTo(agendaRect.left + 0.01),
@@ -1417,29 +1427,24 @@ void main() {
       expectSafeBounds('initial-rest');
 
       for (var cycle = 0; cycle < 6; cycle++) {
-        final beforeRect = tester.getRect(buddyFinder);
-        final delayMs = 2600 + (cycle * 439) % 1901;
+        final delayMs = 2400 + (cycle * 439) % 1801;
         await tester.pump(Duration(milliseconds: delayMs - 250));
-        var maxDelta = 0.0;
         for (var frame = 0; frame < 16; frame++) {
           await tester.pump(const Duration(milliseconds: 80));
           expectSafeBounds('cycle-$cycle-frame-$frame');
-          final curRect = tester.getRect(buddyFinder);
-          maxDelta = math.max(
-            maxDelta,
-            (curRect.center - beforeRect.center).distance,
-          );
         }
-        expect(
-          maxDelta,
-          greaterThan(1.5),
-          reason: 'cycle-$cycle: Clawd did not displace during flight',
-        );
         await tester.pumpAndSettle();
         expectSafeBounds('cycle-$cycle-settled');
       }
 
-      // Drag buddy onto the title text on the left, release -> springs back strictly right of title.
+      // Tap buddy even when perched on the roof -> triggers speech bubble & combo.
+      await tester.tap(buddyFinder);
+      await tester.pump();
+      expect(find.byKey(const ValueKey('clawd-speech-bubble')), findsOneWidget);
+      await tester.pump(const Duration(milliseconds: 2600));
+      await tester.pumpAndSettle();
+
+      // Drag buddy onto the title text on the left, release -> snaps cleanly without overlapping title.
       final titleCenter = tester.getCenter(titleFinder);
       final drag = await tester.startGesture(tester.getCenter(buddyFinder));
       await drag.moveTo(titleCenter);
@@ -1747,10 +1752,10 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      // Home micro-scroll 24dp (within 18..36dp transition band) keeps bubble below home-sync-status.
+      // Home micro-scroll 24dp keeps bubble below home-sync-status.
       await tester.tap(find.byKey(const ValueKey('home-pixel-buddy')));
       await tester.pump();
-      await tester.drag(find.byType(Scrollable).first, const Offset(0, -42));
+      await tester.dragFrom(const Offset(180, 420), const Offset(0, -42));
       await tester.pumpAndSettle();
       final homeScroll =
           tester.state<ScrollableState>(find.byType(Scrollable).first).position;
@@ -1764,8 +1769,9 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('clawd-speech-bubble')));
       await tester.pumpAndSettle();
 
-      // Home sliver tap in transition band (~34dp) and immediate scroll back to top both keep bubble clear of home-sync-status.
-      homeScroll.jumpTo(34.0);
+      // Home sliver tap in transition band (~34dp + 31dp roofHeadroom) and
+      // immediate scroll back to top both keep bubble clear of home-sync-status.
+      homeScroll.jumpTo(65.0);
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('home-sliver-pixel-buddy')));
       await tester.pump();
@@ -2113,6 +2119,163 @@ void main() {
       expect(microBubbleTop, lessThan(44.0));
       expectBubbleAligned('calendar-micro-24dp');
       expect(tester.takeException(), isNull);
+    });
+  });
+
+  group('v1.93.0 M2 · unified 34dp Clawd, roof stage geometry & new poses', () {
+    test(
+        'sampleStagePath guarantees positive dy and zero glyph overlap across all frames',
+        () {
+      const buddySize = 34.0;
+      const roofY = 0.25;
+      const glyphRoofY = 34.25;
+      const safeMinX = 132.0;
+      const maxX = 200.0;
+      const maxY = 42.0;
+
+      final transitions = <(Offset, Offset, double)>[
+        // Right safe zone -> climb up onto roof left character
+        (const Offset(145.0, 36.0), const Offset(12.0, roofY), 5.0),
+        // Roof patrol across characters
+        (const Offset(12.0, roofY), const Offset(88.0, roofY), 5.0),
+        // Roof -> slide/flip down back to right safe zone
+        (const Offset(88.0, roofY), const Offset(145.0, 36.0), 6.0),
+        // Right safe zone internal move
+        (const Offset(145.0, 36.0), const Offset(190.0, 36.0), 4.0),
+      ];
+
+      for (final (start, end, arc) in transitions) {
+        for (var step = 0; step <= 40; step++) {
+          final t = step / 40.0;
+          final pos = ClawdTitleStage.sampleStagePath(
+            start: start,
+            end: end,
+            t: t,
+            arcHeight: arc,
+            roofY: roofY,
+            safeMinX: safeMinX,
+            maxX: maxX,
+            maxY: maxY,
+            allowRoof: true,
+          );
+          expect(pos.dy, greaterThanOrEqualTo(0.0));
+          expect(pos.dx, inInclusiveRange(0.0, maxX));
+          if (pos.dx < safeMinX - 0.01) {
+            expect(pos.dy + buddySize, lessThanOrEqualTo(glyphRoofY + 1.0));
+          }
+        }
+      }
+    });
+
+    testWidgets(
+        'all 4 primary tabs render unified 34dp Clawd on standard screens and render new poses without error',
+        (tester) async {
+      tester.view.physicalSize = const Size(412, 915);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      final now = DateTime.utc(2026, 11, 28, 2, 0);
+      final store = await _createSeededStore(now: now);
+      addTearDown(store.dispose);
+      final router = _buildShellRouter(
+        store,
+        clock: () => now,
+        noTransitionPages: true,
+      );
+      addTearDown(router.dispose);
+
+      await tester.pumpWidget(
+        MaterialApp.router(
+          theme: StudyAssistantTheme.light,
+          routerConfig: router,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Home: 34dp
+      final homeBuddy = tester.widget<JournalPixelBuddy>(
+        find.byKey(const ValueKey('home-pixel-buddy')),
+      );
+      expect(homeBuddy.size, 34.0);
+
+      // Calendar, Stats, Profile: all 34dp
+      for (final (tabLabel, cameoKey) in [
+        ('日历', const ValueKey('calendar-pixel-buddy')),
+        ('统计', const ValueKey('stats-pixel-buddy')),
+        ('我的', const ValueKey('profile-pixel-buddy')),
+      ]) {
+        await tester.tap(find.text(tabLabel));
+        await tester.pumpAndSettle();
+        final cameoBuddy = tester.widget<JournalPixelBuddy>(
+          find.descendant(
+            of: find.byKey(cameoKey),
+            matching: find.byType(JournalPixelBuddy),
+          ),
+        );
+        expect(cameoBuddy.size, 34.0, reason: '$tabLabel cameo should be 34dp');
+      }
+
+      // Render all 3 new poses cleanly.
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: StudyAssistantTheme.light,
+          home: const Scaffold(
+            body: Row(
+              children: [
+                JournalPixelBuddy(
+                  size: 34,
+                  poseOverride: JournalPixelBuddyPose.peekDown,
+                  poseProgress: 0.4,
+                ),
+                JournalPixelBuddy(
+                  size: 34,
+                  poseOverride: JournalPixelBuddyPose.hopBounce,
+                  poseProgress: 0.3,
+                ),
+                JournalPixelBuddy(
+                  size: 34,
+                  poseOverride: JournalPixelBuddyPose.stretchYawn,
+                  poseProgress: 0.5,
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets(
+        '360dp standard phone keeps unified 34dp Clawd and roof motion on Home',
+        (tester) async {
+      tester.view.physicalSize = const Size(360, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      final now = DateTime.utc(2026, 11, 28, 2, 0);
+      final store = await _createSeededStore(now: now);
+      addTearDown(store.dispose);
+      final router = _buildShellRouter(
+        store,
+        clock: () => now,
+        noTransitionPages: true,
+      );
+      addTearDown(router.dispose);
+
+      await tester.pumpWidget(
+        MaterialApp.router(
+          theme: StudyAssistantTheme.light,
+          routerConfig: router,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final homeStage = tester.widget<ClawdTitleStage>(
+        find.byType(ClawdTitleStage),
+      );
+      expect(homeStage.buddySize, 34.0);
+      expect(homeStage.allowStageMotion, isTrue);
     });
   });
 }

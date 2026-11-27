@@ -713,7 +713,7 @@ extension _AssignmentStoreSync on AssignmentStore {
 
   Future<void> _importAssignmentsFromHtml(String html) async {
     await _run(() async {
-      final incoming = ChaoxingAssignmentParser.parseWorkHtml(
+      final incoming = await ChaoxingAssignmentParser.parseWorkHtmlAsync(
         html,
         fallbackCourseName: '学习通课程',
         sourcePrefix: 'manual',

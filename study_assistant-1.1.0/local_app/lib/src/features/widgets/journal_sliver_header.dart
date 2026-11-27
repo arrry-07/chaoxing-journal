@@ -13,6 +13,7 @@ class JournalSliverHeader extends StatelessWidget {
     required this.actions,
     this.titleTrailing,
     this.statusContent,
+    this.scrollThresholdOffset = 0.0,
   });
 
   final String title;
@@ -20,11 +21,13 @@ class JournalSliverHeader extends StatelessWidget {
   final List<Widget> actions;
   final Widget? titleTrailing;
   final Widget? statusContent;
+  final double scrollThresholdOffset;
 
   @override
   Widget build(BuildContext context) {
     final journal = Journal.of(context);
-    final progress = ((scrollOffset - 18.0) / 36.0).clamp(0.0, 1.0);
+    final progress = ((scrollOffset - (18.0 + scrollThresholdOffset)) / 36.0)
+        .clamp(0.0, 1.0);
     if (progress <= 0.01) {
       return const SizedBox.shrink();
     }

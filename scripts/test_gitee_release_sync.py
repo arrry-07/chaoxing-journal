@@ -425,6 +425,302 @@ class RetentionTests(unittest.TestCase):
 
         self.assertEqual(previous.tag, "v1.7.5")
 
+    def test_upload_missing_creates_release_uploads_apk_and_verifies_download(
+        self,
+    ) -> None:
+        release = artifact("1.93.0", 136)
+        calls: list[str] = []
+
+        class FakeGitee:
+            def __init__(self) -> None:
+                self.created = False
+
+            def find_release(self, tag: str) -> sync.GiteeRelease | None:
+                if not self.created:
+                    return None
+                return sync.GiteeRelease(
+                    release_id=99,
+                    tag=tag,
+                    assets=({"name": release.apk_name},),
+                    body=release.notes,
+                )
+
+            def create_release(
+                self, item: sync.ReleaseArtifact
+            ) -> sync.GiteeRelease:
+                calls.append(f"create:{item.tag}")
+                self.created = True
+                return sync.GiteeRelease(release_id=99, tag=item.tag, assets=())
+
+            def upload_apk(
+                self, gitee_release: sync.GiteeRelease, apk_path: Path
+            ) -> None:
+                calls.append(f"upload:{gitee_release.release_id}:{apk_path.name}")
+
+        with tempfile.TemporaryDirectory() as directory:
+            apk = Path(directory) / release.apk_name
+            apk.write_bytes(b"apk-bytes")
+            with mock.patch.object(sync, "_download_public_apk") as download:
+                verified = sync.verify_gitee_release(
+                    FakeGitee(),  # type: ignore[arg-type]
+                    mock.sentinel.client,  # type: ignore[arg-type]
+                    release,
+                    full_download=True,
+                    work_dir=Path(directory),
+                    upload_missing=True,
+                    apk_path=apk,
+                )
+
+        self.assertEqual(
+            calls,
+            ["create:v1.93.0", f"upload:99:{release.apk_name}"],
+        )
+        self.assertEqual(verified.release_id, 99)
+        download.assert_called_once()
+
+    def test_upload_missing_skips_idempotently_when_matching_apk_exists(
+        self,
+    ) -> None:
+        release = artifact("1.93.0", 136)
+        upload_called = False
+
+        class FakeGitee:
+            def find_release(self, tag: str) -> sync.GiteeRelease:
+                return sync.GiteeRelease(
+                    release_id=99,
+                    tag=tag,
+                    assets=({"name": release.apk_name},),
+                )
+
+            def upload_apk(self, *_args: object) -> None:
+                nonlocal upload_called
+                upload_called = True
+
+        with tempfile.TemporaryDirectory() as directory:
+            apk = Path(directory) / release.apk_name
+            apk.write_bytes(b"apk-bytes")
+            with mock.patch.object(sync, "_download_public_apk") as download:
+                sync.verify_gitee_release(
+                    FakeGitee(),  # type: ignore[arg-type]
+                    mock.sentinel.client,  # type: ignore[arg-type]
+                    release,
+                    full_download=True,
+                    work_dir=Path(directory),
+                    upload_missing=True,
+                    apk_path=apk,
+                )
+
+        self.assertFalse(upload_called)
+        download.assert_called_once()
+
+    def test_upload_missing_blocks_wrong_or_multiple_apk_assets(self) -> None:
+        release = artifact("1.93.0", 136)
+
+        class WrongAssetGitee:
+            def find_release(self, tag: str) -> sync.GiteeRelease:
+                return sync.GiteeRelease(
+                    release_id=99,
+                    tag=tag,
+                    assets=({"name": "wrong.apk"},),
+                )
+
+        class MultiAssetGitee:
+            def find_release(self, tag: str) -> sync.GiteeRelease:
+                return sync.GiteeRelease(
+                    release_id=99,
+                    tag=tag,
+                    assets=(
+                        {"name": release.apk_name},
+                        {"name": "extra.apk"},
+                    ),
+                )
+
+        with tempfile.TemporaryDirectory() as directory:
+            apk = Path(directory) / release.apk_name
+            apk.write_bytes(b"apk-bytes")
+            with self.assertRaisesRegex(
+                sync.SyncError, "Gitee release APK identity did not match"
+            ):
+                sync.verify_gitee_release(
+                    WrongAssetGitee(),  # type: ignore[arg-type]
+                    mock.sentinel.client,  # type: ignore[arg-type]
+                    release,
+                    full_download=True,
+                    work_dir=Path(directory),
+                    upload_missing=True,
+                    apk_path=apk,
+                )
+            with self.assertRaisesRegex(
+                sync.SyncError, "Gitee release contained multiple APK assets"
+            ):
+                sync.verify_gitee_release(
+                    MultiAssetGitee(),  # type: ignore[arg-type]
+                    mock.sentinel.client,  # type: ignore[arg-type]
+                    release,
+                    full_download=True,
+                    work_dir=Path(directory),
+                    upload_missing=True,
+                    apk_path=apk,
+                )
+
+    def test_gitee_upload_retries_transient_502_and_redacts_token(self) -> None:
+        client = sync.HttpClient(github_token="", gitee_token="super-secret-token")
+        with tempfile.TemporaryDirectory() as directory:
+            apk = Path(directory) / "test.apk"
+            apk.write_bytes(b"apk")
+            outcomes = [
+                subprocess.CompletedProcess([], 22, "bad gateway\n502 0 0", ""),
+                subprocess.CompletedProcess([], 0, '{"id": 42}\n201 3 100', ""),
+            ]
+            with mock.patch.object(
+                sync.shutil, "which", return_value="/usr/bin/curl"
+            ), mock.patch.object(
+                sync.subprocess, "run", side_effect=outcomes
+            ) as run, mock.patch.object(sync.time, "sleep") as sleep:
+                result = client.gitee_upload(
+                    "/repos/owner/repo/releases/1/attach_files",
+                    file_path=apk,
+                )
+
+        self.assertEqual(result, {"id": 42})
+        self.assertEqual(run.call_count, 2)
+        sleep.assert_called_once()
+
+    def test_prune_allows_unmirrored_github_only_stable_release(self) -> None:
+        class FakeGitee:
+            def __init__(self) -> None:
+                self.deleted: list[str] = []
+
+            def list_releases(self) -> list[sync.GiteeRelease]:
+                return [
+                    sync.GiteeRelease(
+                        1, "v1.93.0", ({"name": "chaoxing-journal-1.93.0.apk"},)
+                    ),
+                    sync.GiteeRelease(
+                        2, "v1.90.0", ({"name": "chaoxing-journal-1.90.0.apk"},)
+                    ),
+                    sync.GiteeRelease(
+                        3, "v1.8.28", ({"name": "chaoxing-journal-1.8.28.apk"},)
+                    ),
+                    sync.GiteeRelease(
+                        4, "v1.8.20", ({"name": "chaoxing-journal-1.8.20.apk"},)
+                    ),
+                ]
+
+            def delete_release(self, release: sync.GiteeRelease) -> None:
+                self.deleted.append(release.tag)
+
+        gitee = FakeGitee()
+        deleted = sync.prune_gitee_releases(
+            gitee,  # type: ignore[arg-type]
+            stable_tag="v1.92.0",
+            manual_tag="v1.93.0",
+            limit=3,
+            require_stable=False,
+        )
+        self.assertEqual(deleted, ["v1.8.20"])
+        self.assertEqual(gitee.deleted, ["v1.8.20"])
+
+    def test_gitee_upload_retries_http_000_connection_failure(self) -> None:
+        client = sync.HttpClient(github_token="", gitee_token="secret-token")
+        with tempfile.TemporaryDirectory() as directory:
+            apk = Path(directory) / "test.apk"
+            apk.write_bytes(b"apk")
+            outcomes = [
+                subprocess.CompletedProcess([], 35, "\n000 0 0", "ssl error"),
+                subprocess.CompletedProcess([], 0, '{"id": 7}\n201 3 100', ""),
+            ]
+            with mock.patch.object(
+                sync.shutil, "which", return_value="/usr/bin/curl"
+            ), mock.patch.object(
+                sync.subprocess, "run", side_effect=outcomes
+            ) as run, mock.patch.object(sync.time, "sleep") as sleep:
+                result = client.gitee_upload(
+                    "/repos/owner/repo/releases/1/attach_files",
+                    file_path=apk,
+                )
+        self.assertEqual(result, {"id": 7})
+        self.assertEqual(run.call_count, 2)
+        sleep.assert_called_once()
+
+    def test_upload_missing_does_not_double_post_when_list_lags(self) -> None:
+        release = artifact("1.93.0", 136)
+        uploads: list[str] = []
+
+        class LaggingGitee:
+            def __init__(self) -> None:
+                self.created = False
+
+            def find_release(self, tag: str) -> sync.GiteeRelease | None:
+                if not self.created:
+                    return None
+                # Simulate eventual consistency lag where assets is still empty
+                return sync.GiteeRelease(release_id=99, tag=tag, assets=())
+
+            def create_release(
+                self, item: sync.ReleaseArtifact
+            ) -> sync.GiteeRelease:
+                self.created = True
+                return sync.GiteeRelease(release_id=99, tag=item.tag, assets=())
+
+            def upload_apk(
+                self, gitee_release: sync.GiteeRelease, apk_path: Path
+            ) -> None:
+                uploads.append(f"{gitee_release.release_id}:{apk_path.name}")
+
+        with tempfile.TemporaryDirectory() as directory:
+            apk = Path(directory) / release.apk_name
+            apk.write_bytes(b"apk-bytes")
+            with mock.patch.object(sync, "_download_public_apk") as download:
+                sync.verify_gitee_release(
+                    LaggingGitee(),  # type: ignore[arg-type]
+                    mock.sentinel.client,  # type: ignore[arg-type]
+                    release,
+                    full_download=True,
+                    work_dir=Path(directory),
+                    upload_missing=True,
+                    apk_path=apk,
+                )
+        self.assertEqual(uploads, [f"99:{release.apk_name}"])
+        download.assert_called_once()
+
+    def test_verify_gitee_artifacts_downloads_both_stable_and_manual_when_requested(
+        self,
+    ) -> None:
+        releases = [
+            artifact("1.92.0", 132),
+            artifact("1.93.0", 136),
+        ]
+
+        class FakeGitee:
+            def find_release(self, tag: str) -> sync.GiteeRelease:
+                rel = next(item for item in releases if item.tag == tag)
+                return sync.GiteeRelease(
+                    release_id=7,
+                    tag=tag,
+                    assets=({"name": rel.apk_name},),
+                )
+
+        with tempfile.TemporaryDirectory() as directory:
+            with mock.patch.object(sync, "_download_public_apk") as download:
+                sync.verify_gitee_artifacts(
+                    FakeGitee(),  # type: ignore[arg-type]
+                    mock.sentinel.client,  # type: ignore[arg-type]
+                    releases,
+                    latest_tag="v1.93.0",
+                    work_dir=Path(directory),
+                    full_download_tags={"v1.92.0", "v1.93.0"},
+                )
+        downloaded = sorted(call.args[1].tag for call in download.call_args_list)
+        self.assertEqual(downloaded, ["v1.92.0", "v1.93.0"])
+
+    def test_same_release_identity_ignores_notes_whitespace_differences(
+        self,
+    ) -> None:
+        a = artifact("1.93.0", 136)
+        b = sync.replace(a, notes=a.notes + "\n")
+        self.assertTrue(sync._same_release_identity(a, b))
+
 
 class IndexTests(unittest.TestCase):
     def test_unmirrored_index_uses_github_primary_without_backup(self) -> None:

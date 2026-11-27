@@ -116,7 +116,7 @@ void main() {
     ));
     await tester.pumpAndSettle();
     expect(
-      _renderedStyle(tester, find.text('设置')).fontFamily,
+      _renderedStyle(tester, find.text('外观与交互')).fontFamily,
       Journal.bodyFamily,
     );
   });

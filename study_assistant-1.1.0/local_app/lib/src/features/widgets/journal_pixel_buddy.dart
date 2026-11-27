@@ -41,6 +41,9 @@ enum JournalPixelBuddyPose {
   napZzz,
   climbEdge,
   hangSlipFlip,
+  peekDown,
+  hopBounce,
+  stretchYawn,
   petSquint,
   grabbedFlail,
   tsunderePuff,
@@ -67,6 +70,9 @@ enum _BuddyActionKind {
   napZzz,
   climbEdge,
   hangSlipFlip,
+  peekDown,
+  hopBounce,
+  stretchYawn,
   petSquint,
   grabbedFlail,
   tsunderePuff,
@@ -338,16 +344,22 @@ class _JournalPixelBuddyState extends State<JournalPixelBuddy>
         ? const <_BuddyActionKind>[
             _BuddyActionKind.idleBreathe,
             _BuddyActionKind.idleDoubleBlink,
+            _BuddyActionKind.peekDown,
+            _BuddyActionKind.hopBounce,
             _BuddyActionKind.idlePeek,
             _BuddyActionKind.idleSteps,
+            _BuddyActionKind.stretchYawn,
             _BuddyActionKind.idleWave,
             _BuddyActionKind.idleAllClearStar,
           ]
         : const <_BuddyActionKind>[
             _BuddyActionKind.idleBreathe,
             _BuddyActionKind.idleDoubleBlink,
+            _BuddyActionKind.peekDown,
+            _BuddyActionKind.hopBounce,
             _BuddyActionKind.idlePeek,
             _BuddyActionKind.idleSteps,
+            _BuddyActionKind.stretchYawn,
             _BuddyActionKind.idleWave,
           ];
     final kind = pool[_idleStep % pool.length];
@@ -366,6 +378,9 @@ class _JournalPixelBuddyState extends State<JournalPixelBuddy>
         JournalPixelBuddyPose.napZzz => _BuddyActionKind.napZzz,
         JournalPixelBuddyPose.climbEdge => _BuddyActionKind.climbEdge,
         JournalPixelBuddyPose.hangSlipFlip => _BuddyActionKind.hangSlipFlip,
+        JournalPixelBuddyPose.peekDown => _BuddyActionKind.peekDown,
+        JournalPixelBuddyPose.hopBounce => _BuddyActionKind.hopBounce,
+        JournalPixelBuddyPose.stretchYawn => _BuddyActionKind.stretchYawn,
         JournalPixelBuddyPose.petSquint => _BuddyActionKind.petSquint,
         JournalPixelBuddyPose.grabbedFlail => _BuddyActionKind.grabbedFlail,
         JournalPixelBuddyPose.tsunderePuff => _BuddyActionKind.tsunderePuff,
@@ -392,6 +407,9 @@ class _JournalPixelBuddyState extends State<JournalPixelBuddy>
         _BuddyActionKind.napZzz => const Duration(milliseconds: 850),
         _BuddyActionKind.climbEdge => const Duration(milliseconds: 700),
         _BuddyActionKind.hangSlipFlip => const Duration(milliseconds: 820),
+        _BuddyActionKind.peekDown => const Duration(milliseconds: 760),
+        _BuddyActionKind.hopBounce => const Duration(milliseconds: 640),
+        _BuddyActionKind.stretchYawn => const Duration(milliseconds: 820),
         _BuddyActionKind.petSquint => const Duration(milliseconds: 620),
         _BuddyActionKind.grabbedFlail => const Duration(milliseconds: 560),
         _BuddyActionKind.tsunderePuff => const Duration(milliseconds: 520),
@@ -526,16 +544,10 @@ class _JournalPixelBuddyState extends State<JournalPixelBuddy>
     );
 
     if (!widget.handleGestures) {
-      return ConstrainedBox(
-        constraints: BoxConstraints(
-          minWidth: minHitWidth,
-          minHeight: minHitHeight,
-        ),
-        child: Center(
-          widthFactor: 1.0,
-          heightFactor: 1.0,
-          child: paintBox,
-        ),
+      return Center(
+        widthFactor: 1.0,
+        heightFactor: 1.0,
+        child: paintBox,
       );
     }
 
@@ -630,6 +642,7 @@ class _JournalPixelBuddyPainter extends CustomPainter {
     var dx = 0;
     var dy = 0;
     var eyeDx = 0;
+    var eyeDy = 0;
     var leftArmRow = 5;
     var rightArmRow = 5;
     var leg1Row = 9; // col 3
@@ -757,19 +770,68 @@ class _JournalPixelBuddyPainter extends CustomPainter {
           }
           dy = step == 0 ? 0 : -1;
         case _BuddyActionKind.hangSlipFlip:
-          if (t < 0.32) {
+          if (t < 0.26) {
+            final ht = t / 0.26;
             leftArmRow = 2;
             rightArmRow = 2;
-            hopPx = 0.6 * cell * (t / 0.32);
-          } else if (t < 0.80) {
-            final ft = (t - 0.32) / 0.48;
+            eyeDx = peekSign >= 0 ? 1 : -1;
+            hopPx = 0.45 * cell * ht;
+          } else if (t < 0.78) {
+            final ft = (t - 0.26) / 0.52;
             rotationRad = 2 * math.pi * ft;
-            hopPx = -0.9 * cell * math.sin(math.pi * ft);
+            hopPx = -0.95 * cell * math.sin(math.pi * ft);
           } else {
-            final rt = (t - 0.80) / 0.20;
+            final rt = (t - 0.78) / 0.22;
             final s = math.sin(math.pi * rt);
-            scaleX = 1.0 + 0.08 * s;
-            scaleY = 1.0 - 0.10 * s;
+            scaleX = 1.0 + 0.10 * s;
+            scaleY = 1.0 - 0.12 * s;
+          }
+        case _BuddyActionKind.peekDown:
+          dy = 1;
+          eyeDy = 1;
+          leftArmRow = 7;
+          rightArmRow = 7;
+          scaleX = 1.04;
+          scaleY = 0.94;
+          if (t >= 0.18 && t < 0.48) {
+            eyeDx = -1;
+          } else if (t >= 0.52 && t <= 0.84) {
+            eyeDx = 1;
+          }
+        case _BuddyActionKind.hopBounce:
+          if (t < 0.50) {
+            final ht = t / 0.50;
+            hopPx = -1.65 * cell * math.sin(math.pi * ht);
+            final s = math.sin(math.pi * ht);
+            scaleX = 1.0 - 0.05 * s;
+            scaleY = 1.0 + 0.07 * s;
+          } else {
+            final ht = (t - 0.50) / 0.50;
+            hopPx = -1.10 * cell * math.sin(math.pi * ht);
+            final s = math.sin(math.pi * ht);
+            scaleX = 1.0 + 0.05 * (1.0 - s);
+            scaleY = 1.0 - 0.05 * (1.0 - s);
+          }
+          if (t >= 0.08 && t <= 0.90) {
+            leftArmRow = 3;
+            rightArmRow = 3;
+          }
+        case _BuddyActionKind.stretchYawn:
+          if (t < 0.58) {
+            final st = math.sin(math.pi * (t / 0.58) * 0.5);
+            scaleX = 1.0 - 0.08 * st;
+            scaleY = 1.0 + 0.12 * st;
+            leftArmRow = 2;
+            rightArmRow = 2;
+            bothEyesSquint = t >= 0.18;
+          } else {
+            final rt = (t - 0.58) / 0.42;
+            final s = math.sin(math.pi * rt);
+            scaleX = 1.0 + 0.05 * s;
+            scaleY = 1.0 - 0.05 * s;
+            leftArmRow = 4;
+            rightArmRow = 4;
+            bothEyesSquint = rt < 0.35;
           }
         case _BuddyActionKind.petSquint:
           final s = math.sin(math.pi * t);
@@ -906,11 +968,11 @@ class _JournalPixelBuddyPainter extends CustomPainter {
       drawLeg(10, leg4Row);
     }
 
-    // Symmetrical 1x2 eyes at cols 4 and 9, rows 4..5 (shifted by eyeDx on peek).
+    // Symmetrical 1x2 eyes at cols 4 and 9, rows 4..5 (shifted by eyeDx/eyeDy).
     final leftEyeCol = 4 + dx + eyeDx;
     final rightEyeCol = 9 + dx + eyeDx;
-    final eyeTopRow = 4 + dy;
-    final eyeBottomRow = 5 + dy;
+    final eyeTopRow = 4 + dy + eyeDy;
+    final eyeBottomRow = 5 + dy + eyeDy;
 
     if (bothEyesSquint) {
       drawSquintEye(leftEyeCol, eyeBottomRow);

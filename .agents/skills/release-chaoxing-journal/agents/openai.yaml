@@ -1,0 +1,7 @@
+interface:
+  display_name: "学习通课业手记发版"
+  short_description: "学习通课业手记 APK、GitHub 与 Gitee 发布验收"
+  default_prompt: "Use $release-chaoxing-journal to plan and verify the next 学习通课业手记 release."
+
+policy:
+  allow_implicit_invocation: true

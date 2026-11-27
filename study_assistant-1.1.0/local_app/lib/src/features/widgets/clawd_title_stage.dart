@@ -1,9 +1,11 @@
 import 'dart:async';
 import 'dart:math' as math;
+import 'dart:ui' show lerpDouble;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/physics.dart';
 
+import '../../app/journal.dart';
 import '../../app/journal_motion.dart';
 import '../../services/clawd_companion_controller.dart';
 import 'clawd_speech_bubble.dart';
@@ -15,32 +17,39 @@ class ClawdStageAnchor {
     required this.centerX,
     required this.bottomY,
     required this.safeWidth,
-  });
+    double? stageBottomY,
+  }) : stageBottomY = stageBottomY ?? bottomY;
 
   final double centerX;
   final double bottomY;
   final double safeWidth;
+  final double stageBottomY;
 
   @override
   bool operator ==(Object other) =>
       other is ClawdStageAnchor &&
       (other.centerX - centerX).abs() < 0.25 &&
       (other.bottomY - bottomY).abs() < 0.25 &&
-      (other.safeWidth - safeWidth).abs() < 0.25;
+      (other.safeWidth - safeWidth).abs() < 0.25 &&
+      (other.stageBottomY - stageBottomY).abs() < 0.25;
 
   @override
   int get hashCode => Object.hash(
         centerX.round(),
         bottomY.round(),
         safeWidth.round(),
+        stageBottomY.round(),
       );
 }
 
 enum _StageChoreoKind {
-  patrolTop,
+  climbRoof,
+  patrolRoof,
+  peekDown,
+  hopBounce,
+  stretchYawn,
   sitDangle,
   napZzz,
-  climbEdge,
   hangSlipFlip,
   returnRest,
 }
@@ -60,6 +69,102 @@ class ClawdTitleStage extends StatefulWidget {
     this.renderBubbleInline = false,
     this.moodOverride,
   });
+
+  static double resolvedBuddySize(BuildContext context, {double? maxWidth}) {
+    if (JournalLayout.isLargeText(context)) return 24.0;
+    final width = maxWidth ?? MediaQuery.sizeOf(context).width;
+    if (width < 350.0) return 30.0;
+    return 34.0;
+  }
+
+  static double roofHeadroomFor({
+    required bool allowStageMotion,
+    required double buddySize,
+  }) {
+    if (!allowStageMotion) return 0.0;
+    return buddySize >= 32.0 ? 31.0 : 28.0;
+  }
+
+  /// Samples an L-shaped outer-contour stage path so Clawd never crosses
+  /// through title glyphs or leaves the positive-coordinate hit box (`dy >= 0`).
+  static Offset sampleStagePath({
+    required Offset start,
+    required Offset end,
+    required double t,
+    required double arcHeight,
+    required double roofY,
+    required double safeMinX,
+    required double maxX,
+    required double maxY,
+    required bool allowRoof,
+  }) {
+    final clampedT = t.clamp(0.0, 1.0);
+    final effectiveRoofY = math.max(0.0, roofY);
+    final effectiveMaxY = math.max(effectiveRoofY, maxY);
+    final effectiveSafeMinX = safeMinX.clamp(0.0, maxX).toDouble();
+
+    Offset clampSafe(Offset raw) {
+      final minX = allowRoof ? 0.0 : effectiveSafeMinX;
+      final x = raw.dx.clamp(minX, maxX).toDouble();
+      final inGlyphZone = allowRoof && x < effectiveSafeMinX - 0.01;
+      final yUpper = inGlyphZone ? effectiveRoofY : effectiveMaxY;
+      final y = raw.dy.clamp(0.0, math.max(0.0, yUpper)).toDouble();
+      return Offset(x, y);
+    }
+
+    final startOnRoof = allowRoof && start.dx < effectiveSafeMinX - 0.5;
+    final endOnRoof = allowRoof && end.dx < effectiveSafeMinX - 0.5;
+
+    if (!startOnRoof && endOnRoof) {
+      const climbSplit = 0.42;
+      if (clampedT <= climbSplit) {
+        final u = JournalMotion.easeOut.transform(clampedT / climbSplit);
+        final x = lerpDouble(
+          math.max(start.dx, effectiveSafeMinX),
+          effectiveSafeMinX,
+          u,
+        )!;
+        final y = lerpDouble(start.dy, effectiveRoofY, u)!;
+        return clampSafe(Offset(x, y));
+      }
+      final segT = (clampedT - climbSplit) / (1.0 - climbSplit);
+      final u = JournalMotion.easeOut.transform(segT);
+      final x = lerpDouble(effectiveSafeMinX, end.dx, u)!;
+      final arc = -arcHeight * math.sin(math.pi * segT);
+      return clampSafe(Offset(x, effectiveRoofY + arc));
+    }
+
+    if (startOnRoof && !endOnRoof) {
+      const slideSplit = 0.45;
+      if (clampedT <= slideSplit) {
+        final segT = clampedT / slideSplit;
+        final u = JournalMotion.easeOut.transform(segT);
+        final x = lerpDouble(start.dx, effectiveSafeMinX, u)!;
+        final arc = -(arcHeight * 0.45) * math.sin(math.pi * segT);
+        return clampSafe(Offset(x, effectiveRoofY + arc));
+      }
+      final segT = (clampedT - slideSplit) / (1.0 - slideSplit);
+      final u = JournalMotion.easeOut.transform(segT);
+      final x = lerpDouble(
+        effectiveSafeMinX,
+        math.max(end.dx, effectiveSafeMinX),
+        u,
+      )!;
+      final y = lerpDouble(effectiveRoofY, end.dy, u)!;
+      final arc = -arcHeight * math.sin(math.pi * segT);
+      return clampSafe(Offset(x, y + arc));
+    }
+
+    final eased = JournalMotion.easeOut.transform(clampedT);
+    final pos = Offset.lerp(start, end, eased)!;
+    final arc = -arcHeight * math.sin(math.pi * clampedT);
+    if (!startOnRoof && !endOnRoof) {
+      return clampSafe(
+        Offset(math.max(pos.dx, effectiveSafeMinX), pos.dy + arc),
+      );
+    }
+    return clampSafe(Offset(pos.dx, math.min(effectiveRoofY, pos.dy + arc)));
+  }
 
   final String title;
   final TextStyle titleStyle;
@@ -105,6 +210,10 @@ class _ClawdTitleStageState extends State<ClawdTitleStage>
   Offset _dropEnd = Offset.zero;
   Offset _restPos = Offset.zero;
   Rect _glyphRect = Rect.zero;
+  double _roofHeadroom = 0.0;
+  double _roofY = 0.0;
+  double _glyphRoofY = 0.0;
+  List<double> _roofCharCentersX = const [];
   double _stageWidth = 200.0;
   double _stageBaseHeight = 44.0;
   bool _hasLayout = false;
@@ -112,6 +221,9 @@ class _ClawdTitleStageState extends State<ClawdTitleStage>
   bool _appResumed = true;
   bool _tickerEnabled = true;
   bool _reducedMotion = false;
+
+  bool get _hasRoofTrack =>
+      widget.showBuddy && widget.allowStageMotion && _roofHeadroom > 0.0;
 
   bool get _canRunChoreography =>
       mounted &&
@@ -237,7 +349,7 @@ class _ClawdTitleStageState extends State<ClawdTitleStage>
         _dropController.isAnimating) {
       return;
     }
-    final delayMs = 2600 + (_choreoStep * 439) % 1901;
+    final delayMs = 2400 + (_choreoStep * 439) % 1801;
     _patrolTimer = Timer(Duration(milliseconds: delayMs), _runNextChoreo);
   }
 
@@ -251,6 +363,28 @@ class _ClawdTitleStageState extends State<ClawdTitleStage>
   double _safeMaxY() =>
       math.max(_restPos.dy, _stageBaseHeight - widget.buddySize);
 
+  Offset _clampSafePosition(Offset raw) {
+    final maxX = math.max(0.0, _stageWidth - widget.buddySize);
+    final safeMinX = _safeMinX(maxX);
+    final minX = _hasRoofTrack ? 0.0 : safeMinX;
+    final x = raw.dx.clamp(minX, maxX).toDouble();
+    final inGlyphZone = _hasRoofTrack && x < safeMinX - 0.01;
+    final maxY = inGlyphZone ? _roofY : _safeMaxY();
+    final y = raw.dy.clamp(0.0, math.max(0.0, maxY)).toDouble();
+    return Offset(x, y);
+  }
+
+  List<Offset> _roofLandingSpots(double maxX) {
+    if (!_hasRoofTrack || _roofCharCentersX.isEmpty) return const [];
+    return [
+      for (final cx in _roofCharCentersX)
+        Offset(
+          (cx - widget.buddySize * 0.5).clamp(0.0, maxX).toDouble(),
+          _roofY,
+        ),
+    ];
+  }
+
   void _runNextChoreo() {
     _patrolTimer = null;
     if (!_canRunChoreography || !_hasLayout) return;
@@ -258,60 +392,97 @@ class _ClawdTitleStageState extends State<ClawdTitleStage>
     final step = _choreoStep++;
     final maxX = math.max(0.0, _stageWidth - widget.buddySize);
     final safeMinX = _safeMinX(maxX);
-    final restX = _restPos.dx.clamp(safeMinX, maxX);
+    final restX = _restPos.dx.clamp(safeMinX, maxX).toDouble();
     final farRightX = maxX;
     final midRightX = ((restX + farRightX) * 0.5).clamp(safeMinX, maxX);
-    final highY = (_restPos.dy - 4.0).clamp(-4.0, _restPos.dy);
-    final lowY = (_restPos.dy + 2.0).clamp(_restPos.dy, _safeMaxY());
-    final clampedStart = Offset(
-      _currentPos.dx.clamp(safeMinX, maxX),
-      _currentPos.dy.clamp(-6.0, lowY),
-    );
+    final roofSpots = _roofLandingSpots(maxX);
+    final hasRoofSpots = roofSpots.isNotEmpty;
+    final startPos = _clampSafePosition(_currentPos);
 
-    final cycle = step % 6;
+    Offset spotAt(int idx) => roofSpots[idx.clamp(0, roofSpots.length - 1)];
+
+    final cycle = step % 9;
     switch (cycle) {
       case 0:
-        _activeChoreo = _StageChoreoKind.patrolTop;
-        _choreoStart = clampedStart;
-        _choreoEnd = Offset(step.isEven ? farRightX : midRightX, _restPos.dy);
-        _choreoArcHeight = 6.0;
-        _activeFacing = _choreoEnd.dx >= _choreoStart.dx ? 1 : -1;
-        _choreoController.duration = const Duration(milliseconds: 560);
+        if (hasRoofSpots) {
+          _activeChoreo = _StageChoreoKind.climbRoof;
+          _choreoStart = startPos;
+          _choreoEnd = spotAt(roofSpots.length - 1);
+          _choreoArcHeight = 5.0;
+          _activeFacing = -1;
+          _choreoController.duration = const Duration(milliseconds: 780);
+        } else {
+          _activeChoreo = _StageChoreoKind.hopBounce;
+          _choreoStart = startPos;
+          _choreoEnd = Offset(midRightX, _restPos.dy);
+          _choreoArcHeight = 5.0;
+          _activeFacing = 1;
+          _choreoController.duration = const Duration(milliseconds: 640);
+        }
       case 1:
-        _activeChoreo = _StageChoreoKind.sitDangle;
-        _choreoStart = clampedStart;
-        _choreoEnd = Offset(farRightX, highY);
+        _activeChoreo = _StageChoreoKind.patrolRoof;
+        _choreoStart = startPos;
+        _choreoEnd = hasRoofSpots
+            ? spotAt(step.isEven ? 1 : 0)
+            : Offset(farRightX, _restPos.dy);
         _choreoArcHeight = 5.0;
-        _activeFacing = 1;
-        _choreoController.duration = const Duration(milliseconds: 760);
+        _activeFacing = _choreoEnd.dx >= _choreoStart.dx ? 1 : -1;
+        _choreoController.duration = const Duration(milliseconds: 640);
       case 2:
-        _activeChoreo = _StageChoreoKind.napZzz;
-        _choreoStart = clampedStart;
-        _choreoEnd = Offset(midRightX, _restPos.dy);
-        _choreoArcHeight = 3.0;
+        _activeChoreo = _StageChoreoKind.peekDown;
+        _choreoStart = startPos;
+        _choreoEnd = hasRoofSpots
+            ? spotAt(math.min(2, roofSpots.length - 1))
+            : Offset(midRightX, _restPos.dy);
+        _choreoArcHeight = 2.0;
         _activeFacing = 1;
-        _choreoController.duration = const Duration(milliseconds: 860);
+        _choreoController.duration = const Duration(milliseconds: 780);
       case 3:
-        _activeChoreo = _StageChoreoKind.climbEdge;
-        _activeFacing = -1;
-        _choreoStart = clampedStart;
-        _choreoEnd = Offset(safeMinX, highY);
+        _activeChoreo = _StageChoreoKind.hopBounce;
+        _choreoStart = startPos;
+        _choreoEnd = hasRoofSpots
+            ? spotAt((step ~/ 2) % roofSpots.length)
+            : Offset(restX, _restPos.dy);
         _choreoArcHeight = 4.0;
-        _choreoController.duration = const Duration(milliseconds: 720);
+        _activeFacing = _choreoEnd.dx >= _choreoStart.dx ? 1 : -1;
+        _choreoController.duration = const Duration(milliseconds: 660);
       case 4:
-        _activeChoreo = _StageChoreoKind.hangSlipFlip;
-        _choreoStart = clampedStart;
-        _choreoEnd = Offset(restX, _restPos.dy);
-        _choreoArcHeight = 7.0;
+        _activeChoreo = _StageChoreoKind.stretchYawn;
+        _choreoStart = startPos;
+        _choreoEnd = startPos;
+        _choreoArcHeight = 0.0;
         _activeFacing = 1;
         _choreoController.duration = const Duration(milliseconds: 820);
-      default:
-        _activeChoreo = _StageChoreoKind.returnRest;
-        _choreoStart = clampedStart;
+      case 5:
+        _activeChoreo = _StageChoreoKind.sitDangle;
+        _choreoStart = startPos;
+        _choreoEnd = hasRoofSpots
+            ? spotAt(roofSpots.length - 1)
+            : Offset(farRightX, _restPos.dy);
+        _choreoArcHeight = 3.0;
+        _activeFacing = 1;
+        _choreoController.duration = const Duration(milliseconds: 760);
+      case 6:
+        _activeChoreo = _StageChoreoKind.hangSlipFlip;
+        _choreoStart = startPos;
         _choreoEnd = Offset(restX, _restPos.dy);
         _choreoArcHeight = 6.0;
+        _activeFacing = 1;
+        _choreoController.duration = const Duration(milliseconds: 860);
+      case 7:
+        _activeChoreo = _StageChoreoKind.napZzz;
+        _choreoStart = startPos;
+        _choreoEnd = Offset(midRightX, _restPos.dy);
+        _choreoArcHeight = 2.0;
+        _activeFacing = 1;
+        _choreoController.duration = const Duration(milliseconds: 860);
+      default:
+        _activeChoreo = _StageChoreoKind.returnRest;
+        _choreoStart = startPos;
+        _choreoEnd = Offset(restX, _restPos.dy);
+        _choreoArcHeight = 4.0;
         _activeFacing = _choreoEnd.dx >= _choreoStart.dx ? 1 : -1;
-        _choreoController.duration = const Duration(milliseconds: 500);
+        _choreoController.duration = const Duration(milliseconds: 520);
     }
 
     _choreoController.forward(from: 0.0);
@@ -321,15 +492,19 @@ class _ClawdTitleStageState extends State<ClawdTitleStage>
     if (!mounted) return;
     final maxX = math.max(0.0, _stageWidth - widget.buddySize);
     final safeMinX = _safeMinX(maxX);
-    final t = _choreoController.value.clamp(0.0, 1.0);
-    final eased = JournalMotion.easeOut.transform(t);
-    final pos = Offset.lerp(_choreoStart, _choreoEnd, eased)!;
-    final arc = -_choreoArcHeight * math.sin(math.pi * t);
+    final nextPos = ClawdTitleStage.sampleStagePath(
+      start: _choreoStart,
+      end: _choreoEnd,
+      t: _choreoController.value,
+      arcHeight: _choreoArcHeight,
+      roofY: _roofY,
+      safeMinX: safeMinX,
+      maxX: maxX,
+      maxY: _safeMaxY(),
+      allowRoof: _hasRoofTrack,
+    );
     setState(() {
-      _currentPos = Offset(
-        pos.dx.clamp(safeMinX, maxX),
-        (pos.dy + arc).clamp(-6.0, _safeMaxY() + 2.0),
-      );
+      _currentPos = nextPos;
     });
     _publishAnchorNow();
   }
@@ -338,7 +513,7 @@ class _ClawdTitleStageState extends State<ClawdTitleStage>
     if (status != AnimationStatus.completed || !mounted) return;
     setState(() {
       _activeChoreo = null;
-      _currentPos = _choreoEnd;
+      _currentPos = _clampSafePosition(_choreoEnd);
     });
     _publishAnchorNow();
     _schedulePatrolIfNeeded();
@@ -346,13 +521,33 @@ class _ClawdTitleStageState extends State<ClawdTitleStage>
 
   void _onDropTick() {
     if (!mounted) return;
-    final t = _dropController.value;
     final maxX = math.max(0.0, _stageWidth - widget.buddySize);
-    setState(() {
-      _currentPos = Offset(
-        (_dragStart.dx + (_dropEnd.dx - _dragStart.dx) * t).clamp(0.0, maxX),
-        (_dragStart.dy + (_dropEnd.dy - _dragStart.dy) * t).clamp(-10.0, 28.0),
+    final safeMinX = _safeMinX(maxX);
+    final t = _dropController.value;
+    final startOnRoof = _hasRoofTrack && _dragStart.dx < safeMinX - 0.5;
+    final endOnRoof = _hasRoofTrack && _dropEnd.dx < safeMinX - 0.5;
+    final Offset nextPos;
+    if (startOnRoof != endOnRoof) {
+      nextPos = ClawdTitleStage.sampleStagePath(
+        start: _dragStart,
+        end: _dropEnd,
+        t: t.clamp(0.0, 1.0),
+        arcHeight: 3.0,
+        roofY: _roofY,
+        safeMinX: safeMinX,
+        maxX: maxX,
+        maxY: _safeMaxY(),
+        allowRoof: _hasRoofTrack,
       );
+    } else {
+      final raw = Offset(
+        _dragStart.dx + (_dropEnd.dx - _dragStart.dx) * t,
+        _dragStart.dy + (_dropEnd.dy - _dragStart.dy) * t,
+      );
+      nextPos = _clampSafePosition(raw);
+    }
+    setState(() {
+      _currentPos = nextPos;
     });
     _publishAnchorNow();
   }
@@ -360,7 +555,7 @@ class _ClawdTitleStageState extends State<ClawdTitleStage>
   void _onDropStatus(AnimationStatus status) {
     if (status != AnimationStatus.completed || !mounted) return;
     setState(() {
-      _currentPos = _dropEnd;
+      _currentPos = _clampSafePosition(_dropEnd);
     });
     _publishAnchorNow();
     widget.controller.landFromGrab();
@@ -409,12 +604,8 @@ class _ClawdTitleStageState extends State<ClawdTitleStage>
 
   void _handlePanUpdate(DragUpdateDetails details) {
     if (!_isDragging) return;
-    final maxX = math.max(0.0, _stageWidth - widget.buddySize);
     setState(() {
-      _currentPos = Offset(
-        (_currentPos.dx + details.delta.dx).clamp(0.0, maxX),
-        (_currentPos.dy + details.delta.dy).clamp(-10.0, 26.0),
-      );
+      _currentPos = _clampSafePosition(_currentPos + details.delta);
     });
     _publishAnchorNow();
   }
@@ -423,17 +614,15 @@ class _ClawdTitleStageState extends State<ClawdTitleStage>
     if (!_isDragging) return;
     final maxX = math.max(0.0, _stageWidth - widget.buddySize);
     final safeMinX = _safeMinX(maxX);
-    final restX = _restPos.dx.clamp(safeMinX, maxX);
-    final midX = ((restX + maxX) * 0.5).clamp(safeMinX, maxX);
-    final highY = (_restPos.dy - 4.0).clamp(-4.0, _restPos.dy);
+    final restX = _restPos.dx.clamp(safeMinX, maxX).toDouble();
+    final midX = ((restX + maxX) * 0.5).clamp(safeMinX, maxX).toDouble();
 
     final candidates = <Offset>[
+      ..._roofLandingSpots(maxX),
       Offset(safeMinX, _restPos.dy),
       Offset(restX, _restPos.dy),
       Offset(midX, _restPos.dy),
       Offset(maxX, _restPos.dy),
-      Offset(restX, highY),
-      Offset(maxX, highY),
     ];
     var best = _restPos;
     var bestDist = double.infinity;
@@ -448,7 +637,7 @@ class _ClawdTitleStageState extends State<ClawdTitleStage>
     setState(() {
       _isDragging = false;
       _dragStart = _currentPos;
-      _dropEnd = best;
+      _dropEnd = _clampSafePosition(best);
     });
     _dropController.animateWith(
       SpringSimulation(
@@ -479,10 +668,13 @@ class _ClawdTitleStageState extends State<ClawdTitleStage>
     if (_isPetting) return JournalPixelBuddyPose.petSquint;
     if (_activeChoreo != null) {
       return switch (_activeChoreo!) {
-        _StageChoreoKind.patrolTop => JournalPixelBuddyPose.normal,
+        _StageChoreoKind.climbRoof => JournalPixelBuddyPose.climbEdge,
+        _StageChoreoKind.patrolRoof => JournalPixelBuddyPose.hopBounce,
+        _StageChoreoKind.peekDown => JournalPixelBuddyPose.peekDown,
+        _StageChoreoKind.hopBounce => JournalPixelBuddyPose.hopBounce,
+        _StageChoreoKind.stretchYawn => JournalPixelBuddyPose.stretchYawn,
         _StageChoreoKind.sitDangle => JournalPixelBuddyPose.sitDangle,
         _StageChoreoKind.napZzz => JournalPixelBuddyPose.napZzz,
-        _StageChoreoKind.climbEdge => JournalPixelBuddyPose.climbEdge,
         _StageChoreoKind.hangSlipFlip => JournalPixelBuddyPose.hangSlipFlip,
         _StageChoreoKind.returnRest => JournalPixelBuddyPose.normal,
       };
@@ -497,6 +689,7 @@ class _ClawdTitleStageState extends State<ClawdTitleStage>
       centerX: _currentPos.dx + widget.buddySize * 0.5,
       bottomY: _currentPos.dy + widget.buddySize,
       safeWidth: _stageWidth,
+      stageBottomY: _stageBaseHeight,
     );
     if (notifier.value != next) {
       notifier.value = next;
@@ -510,6 +703,7 @@ class _ClawdTitleStageState extends State<ClawdTitleStage>
       centerX: _currentPos.dx + widget.buddySize * 0.5,
       bottomY: _currentPos.dy + widget.buddySize,
       safeWidth: _stageWidth,
+      stageBottomY: _stageBaseHeight,
     );
     if (notifier.value == next) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -555,33 +749,80 @@ class _ClawdTitleStageState extends State<ClawdTitleStage>
         )..layout();
         final rawW = tp.width.ceilToDouble();
         final rawH = tp.height;
-        tp.dispose();
-
         final scale =
             rawW > availableTitleW && rawW > 0 ? availableTitleW / rawW : 1.0;
+
+        final charCenters = <double>[];
+        if (widget.title.isNotEmpty) {
+          for (var i = 0; i < widget.title.length; i++) {
+            final boxes = tp.getBoxesForSelection(
+              TextSelection(baseOffset: i, extentOffset: i + 1),
+            );
+            if (boxes.isNotEmpty) {
+              final box = boxes.first;
+              charCenters.add(((box.left + box.right) * 0.5) * scale);
+            }
+          }
+          if (charCenters.isEmpty && rawW > 0) {
+            final stepW = (rawW * scale) / widget.title.length;
+            for (var i = 0; i < widget.title.length; i++) {
+              charCenters.add((i + 0.5) * stepW);
+            }
+          }
+        }
+        tp.dispose();
+
         final renderedTitleW = rawW * scale;
         final renderedTitleH = rawH * scale;
-        final baseH = math.max(
+        final textBandHeight = math.max(
           renderedTitleH,
           widget.showBuddy ? math.max(widget.buddySize, 44.0) : 0.0,
         );
-        final titleTop = (baseH - renderedTitleH) * 0.5;
+        final titleOffsetInBand = (textBandHeight - renderedTitleH) * 0.5;
+        final allowRoof = widget.showBuddy && widget.allowStageMotion;
+        final baseRoofHeadroom = ClawdTitleStage.roofHeadroomFor(
+          allowStageMotion: allowRoof,
+          buddySize: widget.buddySize,
+        );
+        final effectiveRoofHeadroom = allowRoof
+            ? math.max(
+                baseRoofHeadroom,
+                widget.buddySize - titleOffsetInBand,
+              )
+            : 0.0;
+        final stageHeight = effectiveRoofHeadroom + textBandHeight;
+        final titleTop = effectiveRoofHeadroom + titleOffsetInBand;
+        final nextGlyphRoofY = titleTop;
+        final nextRoofY = allowRoof
+            ? (nextGlyphRoofY - widget.buddySize)
+                .clamp(0.0, math.max(0.0, titleTop))
+                .toDouble()
+            : 0.0;
         final nextGlyphRect =
             Rect.fromLTWH(0.0, titleTop, renderedTitleW, renderedTitleH);
         final restLeadGap = math.max(6.0, _hitHalfPad + 1.0);
         final nextRestPos = Offset(
           (renderedTitleW + restLeadGap)
-              .clamp(0.0, math.max(0.0, maxW - widget.buddySize)),
-          (baseH - widget.buddySize) * 0.5,
+              .clamp(0.0, math.max(0.0, maxW - widget.buddySize))
+              .toDouble(),
+          effectiveRoofHeadroom + (textBandHeight - widget.buddySize) * 0.5,
         );
 
         final geometryChanged = !_hasLayout ||
             (_stageWidth - maxW).abs() > 0.5 ||
+            (_stageBaseHeight - stageHeight).abs() > 0.5 ||
             (_restPos - nextRestPos).distance > 0.5;
         _stageWidth = maxW;
-        _stageBaseHeight = baseH;
+        _stageBaseHeight = stageHeight;
+        _roofHeadroom = effectiveRoofHeadroom;
+        _glyphRoofY = nextGlyphRoofY;
+        _roofY = nextRoofY;
+        _roofCharCentersX = charCenters;
         _glyphRect = nextGlyphRect;
         _restPos = nextRestPos;
+
+        assert(!allowRoof ||
+            (_roofY >= 0.0 && _roofY + widget.buddySize <= _glyphRoofY + 1.0));
 
         if (!_hasLayout ||
             !widget.allowStageMotion ||
@@ -592,6 +833,8 @@ class _ClawdTitleStageState extends State<ClawdTitleStage>
                 geometryChanged)) {
           _currentPos = nextRestPos;
           _hasLayout = true;
+        } else {
+          _currentPos = _clampSafePosition(_currentPos);
         }
         _publishAnchorPostFrame();
 
@@ -600,7 +843,9 @@ class _ClawdTitleStageState extends State<ClawdTitleStage>
         final hitLeft = (_currentPos.dx + (widget.buddySize - hitW) * 0.5)
             .clamp(0.0, math.max(0.0, maxW - hitW))
             .toDouble();
-        final hitTop = _currentPos.dy + (widget.buddySize - hitH) * 0.5;
+        final hitTop = (_currentPos.dy + (widget.buddySize - hitH) * 0.5)
+            .clamp(0.0, math.max(0.0, _stageBaseHeight - hitH))
+            .toDouble();
 
         final pose = _resolvePose();
         final poseProgress =
@@ -623,16 +868,21 @@ class _ClawdTitleStageState extends State<ClawdTitleStage>
           height: _stageBaseHeight,
           child: Stack(
             clipBehavior: Clip.none,
-            alignment: Alignment.centerLeft,
+            alignment: Alignment.topLeft,
             children: [
-              Align(
-                alignment: Alignment.centerLeft,
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(maxWidth: availableTitleW),
-                  child: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    alignment: Alignment.centerLeft,
-                    child: Text(widget.title, style: widget.titleStyle),
+              Positioned(
+                left: 0.0,
+                top: effectiveRoofHeadroom,
+                height: textBandHeight,
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(maxWidth: availableTitleW),
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(widget.title, style: widget.titleStyle),
+                    ),
                   ),
                 ),
               ),
@@ -665,22 +915,32 @@ class _ClawdTitleStageState extends State<ClawdTitleStage>
                           : null,
                       onPanCancel:
                           enableStageGestures ? _handlePanEndOrCancel : null,
-                      child: Center(
-                        child: JournalPixelBuddy(
-                          key: const ValueKey('home-pixel-buddy'),
-                          mood: widget.moodOverride ?? widget.controller.mood,
-                          size: widget.buddySize,
-                          syncTickListenable: widget.controller.syncTick,
-                          displayPrefs: widget.controller.displayPrefs,
-                          celebratePulse: widget.controller.celebratePulse,
-                          allowTapCombo: widget.interactive,
-                          poseOverride: pose,
-                          posePulse: widget.controller.transientPulse,
-                          poseProgress: poseProgress,
-                          facingSign: _activeFacing,
-                          enableIdleActions: false,
-                          handleGestures: false,
-                        ),
+                      child: Stack(
+                        clipBehavior: Clip.none,
+                        children: [
+                          Positioned(
+                            left: _currentPos.dx - hitLeft,
+                            top: _currentPos.dy - hitTop,
+                            width: widget.buddySize,
+                            height: widget.buddySize,
+                            child: JournalPixelBuddy(
+                              key: const ValueKey('home-pixel-buddy'),
+                              mood:
+                                  widget.moodOverride ?? widget.controller.mood,
+                              size: widget.buddySize,
+                              syncTickListenable: widget.controller.syncTick,
+                              displayPrefs: widget.controller.displayPrefs,
+                              celebratePulse: widget.controller.celebratePulse,
+                              allowTapCombo: widget.interactive,
+                              poseOverride: pose,
+                              posePulse: widget.controller.transientPulse,
+                              poseProgress: poseProgress,
+                              facingSign: _activeFacing,
+                              enableIdleActions: false,
+                              handleGestures: false,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ),
@@ -689,7 +949,9 @@ class _ClawdTitleStageState extends State<ClawdTitleStage>
                 Positioned(
                   left: 0.0,
                   right: 0.0,
-                  top: _currentPos.dy + widget.buddySize + 4.0,
+                  top: math.max(
+                          _currentPos.dy + widget.buddySize, _stageBaseHeight) +
+                      4.0,
                   height: 120.0,
                   child: ClawdAnchoredSpeechBubble(
                     bubbleKey: const ValueKey('clawd-speech-bubble'),
@@ -725,8 +987,7 @@ class ClawdTabCameo extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final effectiveSize = size ??
-        (MediaQuery.textScalerOf(context).scale(14) >= 19.5 ? 20.0 : 25.0);
+    final effectiveSize = size ?? ClawdTitleStage.resolvedBuddySize(context);
     return AnimatedBuilder(
       animation: controller,
       builder: (context, _) {

@@ -32,7 +32,7 @@ class GiteeWorkflowTests(unittest.TestCase):
         self.assertIn("type: boolean", self.text)
         self.assertIn("default: false", self.text)
 
-    def test_release_event_indexes_the_published_tag(self) -> None:
+    def test_release_event_runs_two_step_index_then_auto_mirror(self) -> None:
         self.assertIn(
             "MODE: ${{ github.event_name == 'release' && 'index' "
             "|| inputs.mode || 'index' }}",
@@ -47,15 +47,26 @@ class GiteeWorkflowTests(unittest.TestCase):
             "PROMOTE_STABLE: ${{ github.event_name != 'release' && inputs.promote_stable == true }}",
             self.text,
         )
+        index_pos = self.text.index("Publish baseline Gitee index on release")
+        sdk_pos = self.text.index("Install APK verification tools")
+        mirror_pos = self.text.index(
+            "Mirror latest APK to Gitee and switch primary URL"
+        )
+        self.assertLess(index_pos, sdk_pos)
+        self.assertLess(sdk_pos, mirror_pos)
+        self.assertIn("--mode latest", self.text)
+        self.assertIn("--upload-missing", self.text)
 
-    def test_index_mode_skips_android_apk_tools(self) -> None:
+    def test_android_apk_tools_installed_for_release_and_non_index_dispatch(
+        self,
+    ) -> None:
         self.assertIn(
-            "if: ${{ github.event_name != 'release' && inputs.mode != 'index' }}",
+            "if: ${{ github.event_name == 'release' || inputs.mode != 'index' }}",
             self.text,
         )
         self.assertIn('if [[ "$MODE" != "index" ]]', self.text)
         self.assertIn(
-            'args+=(--aapt "$AAPT" --apksigner "$APKSIGNER")',
+            'args+=(--upload-missing --aapt "$AAPT" --apksigner "$APKSIGNER")',
             self.text,
         )
 
@@ -104,7 +115,10 @@ class GiteeWorkflowTests(unittest.TestCase):
             'build-tools/36.0.0/apksigner"',
             self.text,
         )
-        self.assertIn('args+=(--aapt "$AAPT" --apksigner "$APKSIGNER")', self.text)
+        self.assertIn(
+            'args+=(--upload-missing --aapt "$AAPT" --apksigner "$APKSIGNER")',
+            self.text,
+        )
 
 
 if __name__ == "__main__":

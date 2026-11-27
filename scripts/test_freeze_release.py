@@ -193,10 +193,20 @@ class FreezeReleaseTests(unittest.TestCase):
         self.assertEqual(0, check.returncode, check.stderr)
         self.assertIn("Current formal release: 1.8.31+124", check.stdout)
         self.assertIn("Update level: patch (formal release", check.stdout)
+        app = repo / "study_assistant-1.1.0/local_app"
+        self.assertIn("# formal-release: 1.8.31+124", _read(app / "pubspec.yaml"))
+        inferred = _run(FREEZE, "--check", "--root", str(repo))
+        self.assertEqual(0, inferred.returncode, inferred.stderr)
+        self.assertIn("Current formal release: 1.8.31+124", inferred.stdout)
         metadata = _run(
             repo / "study_assistant-1.1.0/local_app/tool/check_release_metadata.py"
         )
         self.assertEqual(0, metadata.returncode, metadata.stderr)
+        next_dev = _run(
+            FREEZE, "--apply", "--mode", "dev", "--version", "1.8.32+125", "--root", str(repo),
+        )
+        self.assertEqual(0, next_dev.returncode, next_dev.stderr)
+        self.assertNotIn("# formal-release:", _read(app / "pubspec.yaml"))
 
     def test_apply_dev_version_updates_only_app_identity(self) -> None:
         repo = self._repo()

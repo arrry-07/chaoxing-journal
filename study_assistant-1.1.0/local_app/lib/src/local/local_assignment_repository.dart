@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:isolate';
 import 'dart:math';
 import 'package:crypto/crypto.dart';
 
@@ -20,6 +22,100 @@ import '../services/reminder_rule_store.dart';
 import '../services/background_reminder_gateway.dart';
 import '../services/background_check_settings.dart';
 import '../services/coursework_deadline.dart';
+
+const int _kRepoIsolateJsonThreshold = 32 * 1024;
+
+int _estimateJsonChars(Object? node,
+    {int limit = _kRepoIsolateJsonThreshold + 1}) {
+  var total = 0;
+  void visit(Object? value) {
+    if (total >= limit) return;
+    if (value == null) {
+      total += 4;
+    } else if (value is String) {
+      total += value.length + 2;
+    } else if (value is num || value is bool) {
+      total += 8;
+    } else if (value is List) {
+      total += 2;
+      for (final item in value) {
+        visit(item);
+        if (total >= limit) return;
+      }
+    } else if (value is Map) {
+      total += 2;
+      for (final entry in value.entries) {
+        total += entry.key.toString().length + 4;
+        visit(entry.value);
+        if (total >= limit) return;
+      }
+    } else {
+      total += 16;
+    }
+  }
+
+  visit(node);
+  return total;
+}
+
+String _encodeAndVerifyNotebookStatic(Map<String, dynamic> payload) {
+  final raw = jsonEncode(payload);
+  StudyNotebook.decode(raw);
+  return raw;
+}
+
+String _encodeAndVerifyPersonalStatic(Map<String, dynamic> payload) {
+  final raw = jsonEncode(payload);
+  PersonalWorkspace.decode(raw);
+  return raw;
+}
+
+String _encodeAndVerifyNoticesStatic(Map<String, dynamic> payload) {
+  final raw = jsonEncode(payload);
+  CourseNoticeCollection.decode(raw);
+  return raw;
+}
+
+String _encodeAndVerifyChaptersStatic(Map<String, dynamic> payload) {
+  final raw = jsonEncode(payload);
+  CourseChapterCatalog.decode(raw);
+  return raw;
+}
+
+String _encodeJournalStatic(Map<String, dynamic> payload) {
+  final raw = jsonEncode(payload);
+  final decoded = jsonDecode(raw);
+  if (decoded is! Map<String, dynamic> ||
+      decoded['records'] is! List ||
+      decoded['hidden'] is! List) {
+    throw const FormatException('本机课业记录写前校验失败');
+  }
+  return raw;
+}
+
+bool _isFakeAsyncWidgetTestZone() {
+  var inDebugOrTest = false;
+  assert(() {
+    inDebugOrTest = true;
+    return true;
+  }());
+  if (!inDebugOrTest) return false;
+  final probe = Timer(Duration.zero, () {});
+  final isFake = probe.runtimeType.toString().contains('Fake');
+  probe.cancel();
+  return isFake;
+}
+
+Future<String> _encodeVerifiedPayload(
+  Map<String, dynamic> payload,
+  String Function(Map<String, dynamic>) encodeAndVerify,
+) {
+  if (!_isFakeAsyncWidgetTestZone() &&
+      _estimateJsonChars(payload) > _kRepoIsolateJsonThreshold) {
+    return Isolate.run(() => encodeAndVerify(payload));
+  }
+  return Future<String>.value(encodeAndVerify(payload));
+}
 
 /// A journal or course write could not be confirmed against durable storage.
 ///
@@ -62,6 +158,7 @@ class LocalAssignmentRepository {
   bool crossEngineLockEnabled = false;
   int _identityConflictCount = 0;
   Set<String> _identityConflictSources = {};
+  final Map<String, String> _lastVerifiedRawByKey = <String, String>{};
 
   /// Ambiguous identities retained by the most recent successful merge.
   int get identityConflictCount => _identityConflictCount;
@@ -550,9 +647,13 @@ class LocalAssignmentRepository {
           StudyNotebook.decode,
           '部分个人待办与学期归档无法读取，原始数据已保留备份；空记录仅为临时显示，请勿覆盖原数据。',
         );
-        final raw = value.encode();
-        StudyNotebook.decode(raw);
+        final raw = await _encodeVerifiedPayload(
+          value.toJson(),
+          _encodeAndVerifyNotebookStatic,
+        );
+        _checkOwner(p, account);
         await _require(p.setString(_notebookKey, raw));
+        _lastVerifiedRawByKey[_notebookKey] = raw;
       });
 
   Future<PersonalWorkspace> loadPersonalWorkspace() => _serialized(() async {
@@ -575,9 +676,13 @@ class LocalAssignmentRepository {
           PersonalWorkspace.decode,
           '部分个人计划与记录无法读取，原始数据已保留备份；空记录仅为临时显示，请勿覆盖原数据。',
         );
-        final raw = value.encode();
-        PersonalWorkspace.decode(raw);
+        final raw = await _encodeVerifiedPayload(
+          value.toJson(),
+          _encodeAndVerifyPersonalStatic,
+        );
+        _checkOwner(p, account);
         await _require(p.setString(_personalKey, raw));
+        _lastVerifiedRawByKey[_personalKey] = raw;
       });
 
   Future<CourseNoticeCollection> loadCourseNotices() => _serialized(() async {
@@ -602,8 +707,11 @@ class LocalAssignmentRepository {
           CourseNoticeCollection.decode,
           '部分课程通知缓存无法读取，原始数据已保留备份；空记录仅为临时显示，请重新同步获取。',
         );
-        final raw = value.encode();
-        CourseNoticeCollection.decode(raw);
+        final raw = await _encodeVerifiedPayload(
+          value.toJson(),
+          _encodeAndVerifyNoticesStatic,
+        );
+        _checkOwner(p, account);
         await _writeVerified(p, _noticesKey, raw, '课程通知保存失败');
       });
 
@@ -628,8 +736,11 @@ class LocalAssignmentRepository {
           CourseChapterCatalog.decode,
           '部分章节进度缓存无法读取，原始数据已保留备份；空记录仅为临时显示，请重新手动读取。',
         );
-        final raw = value.encode();
-        CourseChapterCatalog.decode(raw);
+        final raw = await _encodeVerifiedPayload(
+          value.toJson(),
+          _encodeAndVerifyChaptersStatic,
+        );
+        _checkOwner(p, account);
         await _writeVerified(p, _chaptersKey, raw, '章节进度保存失败');
       });
 
@@ -641,13 +752,20 @@ class LocalAssignmentRepository {
     String warning,
   ) async {
     final raw = prefs.getString(key);
-    if (raw == null) return fallback();
+    if (raw == null) {
+      _lastVerifiedRawByKey.remove(key);
+      return fallback();
+    }
     try {
-      return decode(raw);
+      final parsed = decode(raw);
+      _lastVerifiedRawByKey[key] = raw;
+      return parsed;
     } on FormatException {
+      _lastVerifiedRawByKey.remove(key);
       await _backupDamagedValue(prefs, key, raw, warning);
       return fallback();
     } on TypeError {
+      _lastVerifiedRawByKey.remove(key);
       await _backupDamagedValue(prefs, key, raw, warning);
       return fallback();
     }
@@ -660,12 +778,19 @@ class LocalAssignmentRepository {
     String warning,
   ) async {
     final raw = prefs.getString(key);
-    if (raw == null) return;
+    if (raw == null) {
+      _lastVerifiedRawByKey.remove(key);
+      return;
+    }
+    if (_lastVerifiedRawByKey[key] == raw) return;
     try {
       decode(raw);
+      _lastVerifiedRawByKey[key] = raw;
     } on FormatException {
+      _lastVerifiedRawByKey.remove(key);
       await _backupDamagedValue(prefs, key, raw, warning);
     } on TypeError {
+      _lastVerifiedRawByKey.remove(key);
       await _backupDamagedValue(prefs, key, raw, warning);
     }
   }
@@ -927,8 +1052,10 @@ class LocalAssignmentRepository {
             await writeCourseTermPreferencesInPrefs(prefs, mergedTerms);
           }
           await _require(prefs.remove(_switchKey));
+          _lastVerifiedRawByKey.clear();
           return true;
         } catch (_) {
+          _lastVerifiedRawByKey.clear();
           await _restoreScope(prefs, before);
           await _require(prefs.remove(_switchKey));
           rethrow;
@@ -940,6 +1067,7 @@ class LocalAssignmentRepository {
   Future<void> activateAccount(String account, {String? previousAccount}) =>
       _serialized(() async {
         recoveryWarning = null;
+        _lastVerifiedRawByKey.clear();
         final prefs = await SharedPreferences.getInstance();
         final pending = prefs.getString(_switchKey);
         if (pending != null) {
@@ -974,9 +1102,11 @@ class LocalAssignmentRepository {
         try {
           await _restoreScope(prefs, after);
           await _require(prefs.remove(_switchKey));
+          _lastVerifiedRawByKey.clear();
         } catch (_) {
           // Keep the checkpoint if rollback itself fails; next activation will
           // retry it before exposing or merging any active records.
+          _lastVerifiedRawByKey.clear();
           await _restoreScope(prefs, before);
           await _require(prefs.remove(_switchKey));
           rethrow;
@@ -991,7 +1121,7 @@ class LocalAssignmentRepository {
   /// exception. A failure may still have reached the platform, so treating the
   /// first error as "nothing was written" would either lose a durable value or
   /// leave the in-process cache showing data that will vanish on restart.
-  static Future<void> _writeVerified(
+  Future<void> _writeVerified(
     SharedPreferences prefs,
     String key,
     String value,
@@ -999,11 +1129,15 @@ class LocalAssignmentRepository {
   ) async {
     Object? writeError;
     try {
-      if (await prefs.setString(key, value)) return;
+      if (await prefs.setString(key, value)) {
+        _lastVerifiedRawByKey[key] = value;
+        return;
+      }
       writeError = '原生写入未确认';
     } catch (error) {
       writeError = error;
     }
+    _lastVerifiedRawByKey.remove(key);
     try {
       await prefs.reload();
     } catch (reloadError) {
@@ -1021,6 +1155,7 @@ class LocalAssignmentRepository {
     if (durable == value) {
       // The platform reported an error, but the value is durable. Reporting a
       // rollback here would contradict the data the next read will return.
+      _lastVerifiedRawByKey[key] = value;
       return;
     }
     throw LocalStorageWriteException('$failureMessage，原记录已保留：$writeError');
@@ -1203,7 +1338,11 @@ class LocalAssignmentRepository {
         if (completeSync && state.identityConflictCount == 0) {
           state.lastSync = DateTime.now();
         }
-        await _save(state);
+        await _save(
+          state,
+          canCommit: canCommit,
+          rejectedMessage: '账号会话已变化，旧同步结果已拒绝提交',
+        );
         _identityConflictCount = state.identityConflictCount;
         _identityConflictSources = {...state.identityConflictSources};
         return state.pending;
@@ -1240,7 +1379,11 @@ class LocalAssignmentRepository {
         } else {
           state.hidden.removeAll(existing);
         }
-        await _save(state);
+        await _save(
+          state,
+          canCommit: canCommit,
+          rejectedMessage: '账号会话已变化，旧隐藏结果已拒绝提交',
+        );
         return state.pending;
       });
 
@@ -1254,6 +1397,7 @@ class LocalAssignmentRepository {
   }
 
   Future<void> clear() => _serialized(() async {
+        _lastVerifiedRawByKey.clear();
         final prefs = await SharedPreferences.getInstance();
         for (final key in {
           'sync_attempt_at',
@@ -1423,12 +1567,23 @@ class LocalAssignmentRepository {
     _recoveryStatusByKey[dataKey] = warning;
   }
 
-  Future<void> _save(_Journal state) async {
+  Future<void> _save(
+    _Journal state, {
+    Future<bool> Function()? canCommit,
+    String rejectedMessage = '账号会话已变化，旧写入已拒绝提交',
+  }) async {
     final prefs = await SharedPreferences.getInstance();
+    final raw = await _encodeVerifiedPayload(
+      state.toJson(),
+      _encodeJournalStatic,
+    );
+    if (canCommit != null && !await canCommit()) {
+      throw StaleSessionWriteException(rejectedMessage);
+    }
     await _writeVerified(
       prefs,
       _key,
-      jsonEncode(state.toJson()),
+      raw,
       '未能保存本机作业记录',
     );
   }

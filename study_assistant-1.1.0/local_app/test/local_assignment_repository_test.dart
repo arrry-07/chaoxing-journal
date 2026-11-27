@@ -8,6 +8,7 @@ import 'package:study_assistant_mobile/src/local/local_assignment_repository.dar
 import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/models/course.dart';
 import 'package:study_assistant_mobile/src/models/pinned_assignments.dart';
+import 'package:study_assistant_mobile/src/models/study_notebook.dart';
 
 void main() {
   test('local pins follow the active account and clear with local data',
@@ -465,6 +466,83 @@ void main() {
       final reloaded = await repository.loadCourses(account: 'alice');
       expect(reloaded.single.teacherNames, ['赵老师', '钱老师']);
       expect(reloaded.single.folderName, '2026年秋');
+    });
+
+    test(
+        'M5 verified raw cache skips redundant decode, preserves damaged backup on external corruption, clears on account switch/clear, and saves >32KiB snapshots via Isolate.run',
+        () async {
+      SharedPreferences.setMockInitialValues({});
+      final repository = LocalAssignmentRepository();
+      await repository.activateAccount('alice');
+
+      // 1) > 32 KiB notebook + personal workspace + journal roundtrip via real Isolate.run
+      final entryNote = '备考笔记' * 250;
+      final largeNotebook = StudyNotebook(
+        entries: List.generate(
+          40,
+          (i) => ManualEntry(
+            id: 'manual-large-$i',
+            title: '大型待办快照测试$i',
+            kind: 'todo',
+            note: entryNote,
+          ),
+        ),
+      );
+      expect(largeNotebook.encode().length, greaterThan(32 * 1024));
+      await repository.saveNotebook(largeNotebook, 'alice');
+      final loadedNotebook = await repository.loadNotebook();
+      expect(loadedNotebook.entries, hasLength(40));
+      expect(loadedNotebook.entries.first.note, entryNote);
+
+      // Subsequent save with identical verified raw hits cache cleanly.
+      await repository.saveNotebook(loadedNotebook, 'alice');
+      expect(repository.recoveryWarning, isNull);
+
+      // 2) External corruption of the same key MUST bypass cache and trigger _backupDamagedValue.
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('notebook_v1', '{corrupted-json');
+      await repository.saveNotebook(StudyNotebook(), 'alice');
+      expect(prefs.getString('notebook_v1_recovery_backup'), '{corrupted-json');
+      expect(repository.recoveryWarning, isNotNull);
+
+      // 3) Large >32KiB journal mergeAndSave via Isolate.run
+      final largeAssignments = List.generate(
+        80,
+        (i) => Assignment(
+          id: 'cx:large:$i',
+          courseName: '计算机网络',
+          title: '第$i次大作业',
+          deadlineAt: DateTime(2026, 5, 20, 18),
+          requirementsText: '详细要求内容' * 120,
+          status: 'pending',
+          lastSyncedAt: DateTime(2026, 5, 10),
+        ),
+      );
+      await repository.mergeAndSave(largeAssignments);
+      final loadedJournal = await repository.loadJournal();
+      expect(loadedJournal, hasLength(80));
+
+      // 4) Post-encode canCommit re-check aborts stale large snapshot write
+      //    after Isolate.run encoding completes.
+      var checks = 0;
+      await expectLater(
+        repository.mergeAndSave(
+          largeAssignments,
+          canCommit: () async {
+            checks++;
+            return checks == 1;
+          },
+        ),
+        throwsA(isA<StaleSessionWriteException>()),
+      );
+      expect(checks, 2);
+
+      // 5) Account switch & clear invalidate verified raw cache safely.
+      await repository.activateAccount('bob');
+      expect((await repository.loadNotebook()).entries, isEmpty);
+      await repository.clear();
+      await repository.activateAccount('alice');
+      expect((await repository.loadNotebook()).entries, isEmpty);
     });
   });
 }

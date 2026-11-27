@@ -160,8 +160,9 @@ extension _ExamCollection on ChaoxingLocalClient {
                   requestKind: '课程考试',
                   verificationProbe: courseProbe);
           if (!current()) return const [];
-          final parsed = ChaoxingExamParser.phone(
+          final parsed = await ChaoxingExamParser.phoneAsync(
               response?.data?.toString() ?? '', course);
+          if (!current()) return const [];
           if (parsed == null) throw StateError('examPhoneSchema');
           if (parsed.rows.any((r) => !seen.add(r.id))) {
             throw StateError('examRepeatedPage');
@@ -259,8 +260,9 @@ extension _ExamCollection on ChaoxingLocalClient {
                 generation: generation,
                 verificationProbe: courseProbe);
             if (!current()) return const [];
-            final parsed = ChaoxingExamParser.coursePc(
+            final parsed = await ChaoxingExamParser.coursePcAsync(
                 response?.data?.toString() ?? '', course);
+            if (!current()) return const [];
             if (parsed == null ||
                 (expectedTotal != null && parsed.total != expectedTotal)) {
               throw StateError('examPcSchema');
@@ -362,8 +364,9 @@ extension _ExamCollection on ChaoxingLocalClient {
                   {'start': '${page * 12}'}),
               generation: generation);
           if (!current()) return const [];
-          final parsed =
-              ChaoxingExamParser.account(response?.data?.toString() ?? '');
+          final parsed = await ChaoxingExamParser.accountAsync(
+              response?.data?.toString() ?? '');
+          if (!current()) return const [];
           if (parsed == null || (total != null && total != parsed.total)) {
             throw StateError('accountExamSchema');
           }
@@ -455,13 +458,20 @@ extension _ExamCollection on ChaoxingLocalClient {
               verificationProbe:
                   Uri.parse('https://notice.chaoxing.com/pc/notice/myNotice'));
           if (!current()) return const [];
-          final decodedPayload = _decodeJsonPayload(response?.data);
-          final parsed = ChaoxingExamParser.notices(decodedPayload);
+          final rawNoticeData = response?.data;
+          final rawNoticeLen =
+              rawNoticeData is String ? rawNoticeData.length : 0;
+          final parsed = await ChaoxingExamParser.noticesAsync(
+            rawNoticeData,
+            rawLengthHint: rawNoticeLen,
+          );
+          if (!current()) return const [];
           if (parsed == null) throw StateError('examNoticeSchema');
           for (final a in parsed.rows) {
             if (ids.add(a.id)) notices.add(a);
           }
           if (collectCourseNotices && page < 5) {
+            final decodedPayload = _decodeJsonPayload(rawNoticeData);
             final parsedCourseNotices = ChaoxingNoticeParser.parsePage(
               decodedPayload,
               courses: noticeCatalog ?? refs,

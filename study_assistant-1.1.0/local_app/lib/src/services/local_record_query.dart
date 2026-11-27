@@ -12,7 +12,7 @@ enum StatsTimeRange {
   next30Days;
 
   String get label => switch (this) {
-        StatsTimeRange.all => '全部',
+        StatsTimeRange.all => '不限时间',
         StatsTimeRange.next7Days => '未来 7 天',
         StatsTimeRange.next30Days => '未来 30 天',
       };
@@ -299,6 +299,12 @@ class LocalRecordQuery {
     LocalCourseworkState coursework = const LocalCourseworkState.empty(),
   }) {
     if (status == LocalRecordStatusFilter.all) return true;
+    if (!AssignmentStatistics.isCountedInOverview(
+      a,
+      coursework: coursework,
+    )) {
+      return false;
+    }
     final bucket =
         AssignmentStatistics.classify(a, now, coursework: coursework);
     return switch (status) {

@@ -391,17 +391,21 @@ void main() {
 
       await _pumpHome(tester, store, now: now);
 
-      // Initial render keeps single '课业手记' title Text, equal-height 32dp buddy at 360dp, and >=44dp hit target.
+      // Initial render keeps single '课业手记' title Text, unified 34dp buddy at 360dp, and >=44dp hit target.
       expect(find.text('课业手记'), findsOneWidget);
       final titleBuddyFinder = find.byKey(const ValueKey('home-pixel-buddy'));
       expect(titleBuddyFinder, findsOneWidget);
       final titleBuddy = tester.widget<JournalPixelBuddy>(titleBuddyFinder);
-      expect(titleBuddy.size, 32.0);
+      expect(titleBuddy.size, 34.0);
       expect(titleBuddy.mood, JournalPixelBuddyMood.dueToday);
+      final hitDetector = find.ancestor(
+        of: titleBuddyFinder,
+        matching: find.byType(GestureDetector),
+      );
       expect(
-          tester.getSize(titleBuddyFinder).height, greaterThanOrEqualTo(44.0));
+          tester.getSize(hitDetector.first).height, greaterThanOrEqualTo(44.0));
       expect(
-          tester.getRect(titleBuddyFinder).height, greaterThanOrEqualTo(44.0));
+          tester.getRect(hitDetector.first).height, greaterThanOrEqualTo(44.0));
       expect(
         find.byKey(const ValueKey('home-sliver-pixel-buddy')),
         findsNothing,

@@ -139,6 +139,42 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
   bool _tickerEnabled = true;
   bool _isCurrentRoute = true;
   bool _reducedMotion = false;
+  (
+    double?,
+    String?,
+    FontWeight?,
+    double?,
+    TextScaler,
+    TextDirection
+  )? _sliverTitleWidthKey;
+  double? _sliverTitleWidth;
+
+  double _measureSliverTitleWidth(BuildContext context, TextStyle style) {
+    final textScaler = MediaQuery.textScalerOf(context);
+    final textDirection = Directionality.of(context);
+    final key = (
+      style.fontSize,
+      style.fontFamily,
+      style.fontWeight,
+      style.letterSpacing,
+      textScaler,
+      textDirection,
+    );
+    if (_sliverTitleWidthKey == key && _sliverTitleWidth != null) {
+      return _sliverTitleWidth!;
+    }
+    final tp = TextPainter(
+      text: TextSpan(text: '课业手记', style: style),
+      textDirection: textDirection,
+      textScaler: textScaler,
+      maxLines: 1,
+    )..layout();
+    final width = tp.width;
+    tp.dispose();
+    _sliverTitleWidthKey = key;
+    _sliverTitleWidth = width;
+    return width;
+  }
 
   bool get _isBusy =>
       _refreshing ||
@@ -1062,6 +1098,8 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
     required bool busy,
     required bool syncErrorOrPending,
     required int headerActionsCount,
+    required double topPadding,
+    required double roofHeadroom,
   }) =>
       Positioned.fill(
         child: AnimatedBuilder(
@@ -1084,14 +1122,16 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
             final offset = _scrollOffset.value;
             final actualOffset = _bubbleScrollOffset.value;
             final anchor = _stageAnchor.value;
+            final anchorBottom = math.max(anchor.bottomY, anchor.stageBottomY);
             final fallbackBottomAtZero =
-                math.max(114.0, 14.0 + anchor.bottomY + 58.0);
+                math.max(114.0, topPadding + anchorBottom + 58.0);
             final statusBottom =
                 (_syncStatusBottomAtZero.value ?? fallbackBottomAtZero) -
                     actualOffset;
-            final sliverVisible = showSliverBuddy && offset >= 30.6;
-            final sliverShowing =
-                sliverVisible && (bubble.fromSliver || offset >= 54.0);
+            final sliverVisible =
+                showSliverBuddy && offset >= 30.6 + roofHeadroom;
+            final sliverShowing = sliverVisible &&
+                (bubble.fromSliver || offset >= 54.0 + roofHeadroom);
             final screenWidth = MediaQuery.sizeOf(context).width;
             final double top;
             final double minLeft;
@@ -1103,21 +1143,15 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
               safeRight = screenWidth - 18.0 - headerActionsCount * 48.0 - 8.0;
               final availableWidth = math.max(36.0, safeRight - minLeft);
               maxWidth = math.min(210.0, availableWidth);
-              final tp = TextPainter(
-                text: TextSpan(
-                  text: '课业手记',
-                  style: journal.pageTitle.copyWith(fontSize: 19.5),
-                ),
-                textDirection: Directionality.of(context),
-                textScaler: MediaQuery.textScalerOf(context),
-                maxLines: 1,
-              )..layout();
               final titleAvailable = math.max(
                 12.0,
                 screenWidth - 36.0 - headerActionsCount * 48.0 - 5.0 - 26.0,
               );
-              final titleW = math.min(tp.width, titleAvailable);
-              tp.dispose();
+              final measuredTitleWidth = _measureSliverTitleWidth(
+                context,
+                journal.pageTitle.copyWith(fontSize: 19.5),
+              );
+              final titleW = math.min(measuredTitleWidth, titleAvailable);
               final rawBuddyCenter = 18.0 + titleW + 5.0 + 13.0;
               anchorX = rawBuddyCenter.clamp(
                 minLeft + 13.0,
@@ -1132,7 +1166,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                 math.max(36.0, anchor.safeWidth),
               );
               anchorX = 16.0 + anchor.centerX;
-              final stageBottom = 14.0 - actualOffset + anchor.bottomY;
+              final stageBottom = topPadding - actualOffset + anchorBottom;
               top = math.max(
                 8.0,
                 math.max(stageBottom + 2.0, statusBottom + 2.0),
@@ -1330,6 +1364,22 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
           ),
         );
 
+        final screenWidth = MediaQuery.sizeOf(context).width;
+        final contentWidth = math.max(0.0, screenWidth - 32.0);
+        final largeText = JournalLayout.isLargeText(context);
+        final allowHomeRoofMotion = showPixelBuddy &&
+            !reduceMotion &&
+            recoveryScope == null &&
+            !largeText &&
+            screenWidth >= 350.0 &&
+            contentWidth >= 316.0;
+        final homeBuddySize = ClawdTitleStage.resolvedBuddySize(context);
+        final homeRoofHeadroom = ClawdTitleStage.roofHeadroomFor(
+          allowStageMotion: allowHomeRoofMotion,
+          buddySize: homeBuddySize,
+        );
+        final homeTopPadding = homeRoofHeadroom > 0.0 ? 6.0 : 14.0;
+
         final listView = HomeTimelineList(
           scrollController: _scrollController,
           store: store,
@@ -1337,6 +1387,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
           recoveryQueryParameter: AssignmentRecoveryScope.queryParameter,
           recoveryQueryValue: recoveryScope?.queryValue,
           headerBlock: headerBlock,
+          topPadding: homeTopPadding,
           catalogAssignments: data.catalogAssignments,
           displayAssignments: data.displayAssignments,
           displayIndex: data.displayIndex,
@@ -1442,6 +1493,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                   builder: (context, _) => JournalSliverHeader(
                     title: '课业手记',
                     scrollOffset: offset,
+                    scrollThresholdOffset: homeRoofHeadroom,
                     titleTrailing: showSliverBuddy
                         ? JournalPixelBuddy(
                             key: const ValueKey('home-sliver-pixel-buddy'),
@@ -1474,6 +1526,8 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
               busy: busy,
               syncErrorOrPending: syncErrorOrPending,
               headerActionsCount: headerActions.length,
+              topPadding: homeTopPadding,
+              roofHeadroom: homeRoofHeadroom,
             ),
           ],
         );

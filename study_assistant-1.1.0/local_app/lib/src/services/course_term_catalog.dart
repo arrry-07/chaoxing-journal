@@ -1540,6 +1540,101 @@ class CourseTermCatalog {
         entry.term!.academicYearStart == currentTerm.academicYearStart;
   }
 
+  ({AcademicTerm? term, bool allPastUnresolved, bool allPastSameAcademicYear})
+      _resolveUnkeyedTerm(Assignment a) {
+    DateTime? trustedInstant;
+    if (a.isExam && a.exam != null) {
+      final exam = a.exam!;
+      trustedInstant = (exam.startTrusted ? exam.startAt : null) ??
+          (exam.endTrusted ? exam.endAt : null) ??
+          exam.noticeStartAt ??
+          exam.noticeEndAt;
+    }
+    trustedInstant ??= (a.timelineTrusted ? a.timelineAt : null) ??
+        (a.deadlineTrusted ? a.deadlineAt : null) ??
+        a.publishedAt;
+    if (trustedInstant != null) {
+      return (
+        term: AcademicTerm.fromInstant(trustedInstant),
+        allPastUnresolved: false,
+        allPastSameAcademicYear: false,
+      );
+    }
+
+    final fromText = AcademicTerm.tryParseCourseName(a.title) ??
+        AcademicTerm.tryParseCourseName(a.courseName) ??
+        AcademicTerm.tryParseCourseName(a.deadlineRawText) ??
+        AcademicTerm.tryParseCourseName(a.requirementsText);
+    if (fromText != null) {
+      return (
+        term: fromText,
+        allPastUnresolved: false,
+        allPastSameAcademicYear: false,
+      );
+    }
+
+    final normalizedName = a.courseName.trim();
+    if (normalizedName.isEmpty) {
+      return (
+        term: null,
+        allPastUnresolved: false,
+        allPastSameAcademicYear: false,
+      );
+    }
+    final matched = <CourseTermEntry>[
+      for (final entry in _entriesByCourseKey.values)
+        if (!entry.isBlocked && entry.courseName.trim() == normalizedName)
+          entry,
+    ];
+    if (matched.isEmpty) {
+      return (
+        term: null,
+        allPastUnresolved: false,
+        allPastSameAcademicYear: false,
+      );
+    }
+    final allPast = matched.every(
+      (entry) =>
+          entry.state == CourseCatalogState.archived ||
+          (entry.term != null && entry.term! < currentTerm),
+    );
+    if (!allPast) {
+      return (
+        term: null,
+        allPastUnresolved: false,
+        allPastSameAcademicYear: false,
+      );
+    }
+    final terms = <AcademicTerm>{
+      for (final entry in matched)
+        if (entry.term != null) entry.term!,
+    };
+    if (terms.length == 1 && matched.every((entry) => entry.term != null)) {
+      return (
+        term: terms.first,
+        allPastUnresolved: false,
+        allPastSameAcademicYear: false,
+      );
+    }
+    final sameAcademicYear = terms.isNotEmpty &&
+        terms
+            .every((t) => t.academicYearStart == currentTerm.academicYearStart);
+    return (
+      term: null,
+      allPastUnresolved: true,
+      allPastSameAcademicYear: sameAcademicYear,
+    );
+  }
+
+  bool _matchesInferredTerm(AcademicTerm term, CourseTermScope scope) =>
+      switch (scope) {
+        CourseTermScope.allTerms => true,
+        CourseTermScope.currentTerm => term >= currentTerm,
+        CourseTermScope.currentAcademicYear =>
+          term.academicYearStart == currentTerm.academicYearStart,
+        CourseTermScope.pastTerms => term < currentTerm,
+      };
+
   bool matchesAssignmentInStatsScope(Assignment a, CourseTermScope scope) {
     final courseKey = a.courseKey;
     if (courseKey != null &&
@@ -1547,6 +1642,20 @@ class CourseTermCatalog {
       return false;
     }
     if (courseKey == null) {
+      if (scope == CourseTermScope.allTerms) return true;
+      final resolved = _resolveUnkeyedTerm(a);
+      if (resolved.term != null) {
+        return _matchesInferredTerm(resolved.term!, scope);
+      }
+      if (resolved.allPastUnresolved) {
+        return switch (scope) {
+          CourseTermScope.allTerms => true,
+          CourseTermScope.currentTerm => false,
+          CourseTermScope.currentAcademicYear =>
+            resolved.allPastSameAcademicYear,
+          CourseTermScope.pastTerms => true,
+        };
+      }
       return scope != CourseTermScope.pastTerms;
     }
     final entry = _entriesByCourseKey[courseKey];

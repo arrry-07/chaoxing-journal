@@ -259,11 +259,14 @@ class _CourseListScreenState extends State<CourseListScreen> {
             for (final c in visibleCourses)
               if (termCatalog.entryFor(c.key)?.isUngrouped ?? false) c.key,
           ];
-          final autoPromoEntries = termCatalog.autoBlockedPromoEntries.toList()
-            ..sort((a, b) => compareNaturalPinyin(a.courseName, b.courseName));
-          final manualBlockedEntries = termCatalog.manuallyBlockedEntries
-              .toList()
-            ..sort((a, b) => compareNaturalPinyin(a.courseName, b.courseName));
+          final autoPromoEntries = sortByNaturalPinyin(
+            termCatalog.autoBlockedPromoEntries,
+            (entry) => entry.courseName,
+          );
+          final manualBlockedEntries = sortByNaturalPinyin(
+            termCatalog.manuallyBlockedEntries,
+            (entry) => entry.courseName,
+          );
           final nameCounts = <String, int>{};
           for (final c in visibleCourses) {
             final trimmed = c.name.trim();

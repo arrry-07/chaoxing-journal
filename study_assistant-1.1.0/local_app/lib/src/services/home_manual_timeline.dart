@@ -166,16 +166,21 @@ class HomeManualTimeline {
               keepVisibleIds.contains(manualEntries[index].id),
         ),
     ];
-    if (order == HomeSortOrder.grouped) return items;
-    items.sort((left, right) => _compare(
-          left,
-          right,
-          order,
-          now,
-          prioritizeStartOnly,
-          coursework,
-        ));
-    return items;
+    if (order == HomeSortOrder.grouped || items.length <= 1) return items;
+    final nearLimit = now.add(const Duration(days: 7));
+    final prepared = [
+      for (final item in items)
+        _PreparedTimelineItem(
+          item,
+          order: order,
+          now: now,
+          nearLimit: nearLimit,
+          prioritizeStartOnly: prioritizeStartOnly,
+          coursework: coursework,
+        ),
+    ];
+    prepared.sort((left, right) => _comparePrepared(left, right, order));
+    return [for (final entry in prepared) entry.item];
   }
 
   static bool _matchesType(ManualEntry entry, AssignmentTypeFilter type) =>
@@ -214,78 +219,57 @@ class HomeManualTimeline {
     };
   }
 
-  static int _compare(
-    HomeTimelineItem left,
-    HomeTimelineItem right,
+  static int _comparePrepared(
+    _PreparedTimelineItem left,
+    _PreparedTimelineItem right,
     HomeSortOrder order,
-    DateTime now,
-    bool prioritizeStartOnly,
-    LocalCourseworkState coursework,
   ) {
     if (order == HomeSortOrder.title) {
       // Name-only ordering still keeps untrusted and overdue records in their
       // bucket rank, matching AssignmentQuery.sortHome.
-      final group = AssignmentQuery.nameGroupRank(
-        left.bucketAt(now, coursework: coursework),
-      ).compareTo(AssignmentQuery.nameGroupRank(
-        right.bucketAt(now, coursework: coursework),
-      ));
+      final group = AssignmentQuery.nameGroupRank(left.bucket)
+          .compareTo(AssignmentQuery.nameGroupRank(right.bucket));
       if (group != 0) return group;
-      return _compareNameKeys(left, right, courseFirst: false);
+      return _comparePreparedNameKeys(left, right, courseFirst: false);
     }
     if (order == HomeSortOrder.courseName) {
-      final course = AssignmentQuery.compareNaturalPinyin(
-        left.displayCourse,
-        right.displayCourse,
-      );
+      final course = left.courseNameKey.compareTo(right.courseNameKey);
       if (course != 0) return course;
-      final time = _compareAscending(left.displayAt, right.displayAt);
+      final time = _compareAscending(left.item.displayAt, right.item.displayAt);
       if (time != 0) return time;
-      return _compareNameKeys(left, right, courseFirst: true);
+      return _comparePreparedNameKeys(left, right, courseFirst: true);
     }
 
-    final leftTier = _homeTier(
-      left,
-      order,
-      now,
-      prioritizeStartOnly,
-      coursework,
-    );
-    final rightTier = _homeTier(
-      right,
-      order,
-      now,
-      prioritizeStartOnly,
-      coursework,
-    );
-    final tier = leftTier.compareTo(rightTier);
+    final tier = left.homeTier.compareTo(right.homeTier);
     if (tier != 0) return tier;
-    final leftTime =
-        leftTier == 1 ? left.assignment?.availableFromAt : left.displayAt;
-    final rightTime =
-        rightTier == 1 ? right.assignment?.availableFromAt : right.displayAt;
+    final leftTime = left.homeTier == 1
+        ? left.item.assignment?.availableFromAt
+        : left.item.displayAt;
+    final rightTime = right.homeTier == 1
+        ? right.item.assignment?.availableFromAt
+        : right.item.displayAt;
     if (leftTime == null && rightTime != null) return 1;
     if (rightTime == null && leftTime != null) return -1;
     if (leftTime != null && rightTime != null) {
       final time = leftTime.compareTo(rightTime);
       if (time != 0) {
-        final reverse = leftTier == 4
+        final reverse = left.homeTier == 4
             ? order == HomeSortOrder.deadlineAsc
             : order == HomeSortOrder.deadlineDesc;
         return reverse ? -time : time;
       }
     }
-    return _compareNameKeys(left, right, courseFirst: true);
+    return _comparePreparedNameKeys(left, right, courseFirst: true);
   }
 
   static int _homeTier(
     HomeTimelineItem item,
+    AssignmentDeadlineBucket bucket,
     HomeSortOrder order,
     DateTime now,
+    DateTime nearLimit,
     bool prioritizeStartOnly,
-    LocalCourseworkState coursework,
   ) {
-    final bucket = item.bucketAt(now, coursework: coursework);
     if (bucket == AssignmentDeadlineBucket.overdue ||
         _isElapsedNotice(item, now)) {
       return 4;
@@ -294,7 +278,7 @@ class HomeManualTimeline {
     if (time != null) {
       return prioritizeStartOnly &&
               order == HomeSortOrder.deadlineAsc &&
-              time.isAfter(now.add(const Duration(days: 7)))
+              time.isAfter(nearLimit)
           ? 2
           : 0;
     }
@@ -332,34 +316,24 @@ class HomeManualTimeline {
       assignment.availableFromAt != null ||
       (assignment.availableFromText?.trim().isNotEmpty ?? false);
 
-  static int _compareNameKeys(
-    HomeTimelineItem left,
-    HomeTimelineItem right, {
+  static int _comparePreparedNameKeys(
+    _PreparedTimelineItem left,
+    _PreparedTimelineItem right, {
     required bool courseFirst,
   }) {
     final first = courseFirst
-        ? AssignmentQuery.compareNaturalPinyin(
-            left.displayCourse,
-            right.displayCourse,
-          )
-        : AssignmentQuery.compareNaturalPinyin(left.title, right.title);
+        ? left.courseNameKey.compareTo(right.courseNameKey)
+        : left.titleKey.compareTo(right.titleKey);
     if (first != 0) return first;
     final second = courseFirst
-        ? AssignmentQuery.compareNaturalPinyin(left.title, right.title)
-        : AssignmentQuery.compareNaturalPinyin(
-            left.displayCourse,
-            right.displayCourse,
-          );
+        ? left.titleKey.compareTo(right.titleKey)
+        : left.courseNameKey.compareTo(right.courseNameKey);
     if (second != 0) return second;
-    final courseKey = AssignmentQuery.compareNaturalPinyin(
-      left.courseKey,
-      right.courseKey,
-    );
+    final courseKey = left.courseIdKey.compareTo(right.courseIdKey);
     if (courseKey != 0) return courseKey;
-    final itemId =
-        AssignmentQuery.compareNaturalPinyin(left.itemId, right.itemId);
+    final itemId = left.itemIdKey.compareTo(right.itemIdKey);
     if (itemId != 0) return itemId;
-    return left.sortIndex.compareTo(right.sortIndex);
+    return left.item.sortIndex.compareTo(right.item.sortIndex);
   }
 
   static int _compareAscending(DateTime? left, DateTime? right) {
@@ -368,4 +342,32 @@ class HomeManualTimeline {
     if (left == null && right == null) return 0;
     return left!.compareTo(right!);
   }
+}
+
+class _PreparedTimelineItem {
+  _PreparedTimelineItem(
+    this.item, {
+    required HomeSortOrder order,
+    required DateTime now,
+    required DateTime nearLimit,
+    required bool prioritizeStartOnly,
+    required LocalCourseworkState coursework,
+  }) : bucket = item.bucketAt(now, coursework: coursework) {
+    homeTier = HomeManualTimeline._homeTier(
+      item,
+      bucket,
+      order,
+      now,
+      nearLimit,
+      prioritizeStartOnly,
+    );
+  }
+
+  final HomeTimelineItem item;
+  final AssignmentDeadlineBucket bucket;
+  late final int homeTier;
+  late final NaturalSortKey courseNameKey = NaturalSortKey(item.displayCourse);
+  late final NaturalSortKey titleKey = NaturalSortKey(item.title);
+  late final NaturalSortKey courseIdKey = NaturalSortKey(item.courseKey);
+  late final NaturalSortKey itemIdKey = NaturalSortKey(item.itemId);
 }

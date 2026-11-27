@@ -37,6 +37,23 @@ class AssignmentStatistics {
     }
   }
 
+  /// Whether a record is counted in the Stats overview completion ratio and
+  /// status buckets. Pure broadcast exam notices (`exam.noticeOnly`) that have
+  /// not been marked completed stay visible in Local Records ("全部状态") while
+  /// being excluded from overview completion denominators and status buckets.
+  static bool isCountedInOverview(
+    Assignment a, {
+    LocalCourseworkState coursework = const LocalCourseworkState.empty(),
+  }) {
+    if (CourseworkDeadline.isEffectivelyCompleted(a, coursework)) {
+      return true;
+    }
+    if (a.isExam && a.exam != null && a.exam!.noticeOnly) {
+      return false;
+    }
+    return true;
+  }
+
   /// Whether a record needs active student follow-up inside the per-course
   /// "各课程待处理" list.
   ///

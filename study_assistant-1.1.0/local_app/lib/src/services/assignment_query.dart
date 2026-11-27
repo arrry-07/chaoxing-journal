@@ -1,3 +1,5 @@
+import 'dart:collection';
+
 import 'package:lpinyin/lpinyin.dart';
 
 import '../local/chaoxing_exam_parser.dart';
@@ -11,81 +13,145 @@ import 'exam_wall_time.dart';
 export '../models/home_filters.dart'
     show AssignmentDeadlineFilter, AssignmentTypeFilter, HomeSortOrder;
 
-class _NaturalKey {
-  _NaturalKey(String value)
+class NaturalSortKey {
+  NaturalSortKey(String value)
       : raw = value.trim(),
         folded = _fold(value);
 
   final String raw;
   final String folded;
 
+  static const int _maxFoldCacheEntries = 1024;
+  static final LinkedHashMap<String, String> _foldCache =
+      LinkedHashMap<String, String>();
+
   static String _fold(String value) {
     final trimmed = value.trim();
     if (trimmed.isEmpty) return '';
-    return PinyinHelper.getPinyinE(
+    final cached = _foldCache.remove(trimmed);
+    if (cached != null) {
+      _foldCache[trimmed] = cached;
+      return cached;
+    }
+    final computed = PinyinHelper.getPinyinE(
       trimmed,
       separator: '',
       defPinyin: '#',
       format: PinyinFormat.WITHOUT_TONE,
     ).toLowerCase();
+    if (_foldCache.length >= _maxFoldCacheEntries) {
+      _foldCache.remove(_foldCache.keys.first);
+    }
+    _foldCache[trimmed] = computed;
+    return computed;
   }
+
+  int compareTo(NaturalSortKey other) => _compareKey(this, other);
 }
 
 int _compareNatural(String left, String right) {
-  final a = left.runes.toList(growable: false);
-  final b = right.runes.toList(growable: false);
+  final aLen = left.length;
+  final bLen = right.length;
   var i = 0;
   var j = 0;
-  while (i < a.length && j < b.length) {
-    final aDigit = a[i] >= 0x30 && a[i] <= 0x39;
-    final bDigit = b[j] >= 0x30 && b[j] <= 0x39;
+  while (i < aLen && j < bLen) {
+    final au = left.codeUnitAt(i);
+    final bu = right.codeUnitAt(j);
+    final aDigit = au >= 0x30 && au <= 0x39;
+    final bDigit = bu >= 0x30 && bu <= 0x39;
     if (aDigit && bDigit) {
       final aStart = i;
       final bStart = j;
-      while (i < a.length && a[i] >= 0x30 && a[i] <= 0x39) {
+      while (i < aLen) {
+        final c = left.codeUnitAt(i);
+        if (c < 0x30 || c > 0x39) break;
         i++;
       }
-      while (j < b.length && b[j] >= 0x30 && b[j] <= 0x39) {
+      while (j < bLen) {
+        final c = right.codeUnitAt(j);
+        if (c < 0x30 || c > 0x39) break;
         j++;
       }
-      final aRun = a.sublist(aStart, i);
-      final bRun = b.sublist(bStart, j);
-      var aSignificant = 0;
-      while (aSignificant + 1 < aRun.length && aRun[aSignificant] == 0x30) {
+      final aEnd = i;
+      final bEnd = j;
+      var aSignificant = aStart;
+      while (aSignificant + 1 < aEnd && left.codeUnitAt(aSignificant) == 0x30) {
         aSignificant++;
       }
-      var bSignificant = 0;
-      while (bSignificant + 1 < bRun.length && bRun[bSignificant] == 0x30) {
+      var bSignificant = bStart;
+      while (
+          bSignificant + 1 < bEnd && right.codeUnitAt(bSignificant) == 0x30) {
         bSignificant++;
       }
-      final aLength = aRun.length - aSignificant;
-      final bLength = bRun.length - bSignificant;
+      final aLength = aEnd - aSignificant;
+      final bLength = bEnd - bSignificant;
       if (aLength != bLength) return aLength.compareTo(bLength);
       for (var offset = 0; offset < aLength; offset++) {
-        final comparison =
-            aRun[aSignificant + offset].compareTo(bRun[bSignificant + offset]);
+        final comparison = left
+            .codeUnitAt(aSignificant + offset)
+            .compareTo(right.codeUnitAt(bSignificant + offset));
         if (comparison != 0) return comparison;
       }
-      if (aRun.length != bRun.length) {
-        return aRun.length.compareTo(bRun.length);
+      final aRunLength = aEnd - aStart;
+      final bRunLength = bEnd - bStart;
+      if (aRunLength != bRunLength) {
+        return aRunLength.compareTo(bRunLength);
       }
       continue;
     }
-    if (a[i] != b[j]) return a[i].compareTo(b[j]);
-    i++;
-    j++;
+
+    var aCode = au;
+    var aStep = 1;
+    if (au >= 0xD800 && au <= 0xDBFF && i + 1 < aLen) {
+      final low = left.codeUnitAt(i + 1);
+      if (low >= 0xDC00 && low <= 0xDFFF) {
+        aCode = 0x10000 + ((au - 0xD800) << 10) + (low - 0xDC00);
+        aStep = 2;
+      }
+    }
+    var bCode = bu;
+    var bStep = 1;
+    if (bu >= 0xD800 && bu <= 0xDBFF && j + 1 < bLen) {
+      final low = right.codeUnitAt(j + 1);
+      if (low >= 0xDC00 && low <= 0xDFFF) {
+        bCode = 0x10000 + ((bu - 0xD800) << 10) + (low - 0xDC00);
+        bStep = 2;
+      }
+    }
+    if (aCode != bCode) return aCode.compareTo(bCode);
+    i += aStep;
+    j += bStep;
   }
-  return (a.length - i).compareTo(b.length - j);
+  if (i < aLen) return 1;
+  if (j < bLen) return -1;
+  return 0;
 }
 
-int _compareKey(_NaturalKey left, _NaturalKey right) {
+int _compareKey(NaturalSortKey left, NaturalSortKey right) {
   final folded = _compareNatural(left.folded, right.folded);
   if (folded != 0) return folded;
   return _compareNatural(left.raw, right.raw);
 }
 
 int compareNaturalPinyin(String a, String b) =>
-    _compareKey(_NaturalKey(a), _NaturalKey(b));
+    _compareKey(NaturalSortKey(a), NaturalSortKey(b));
+
+List<T> sortByNaturalPinyin<T>(
+  Iterable<T> items,
+  String Function(T item) textOf,
+) {
+  final list = items.toList(growable: false);
+  if (list.length <= 1) return list;
+  final wrapped = [
+    for (var i = 0; i < list.length; i++)
+      (item: list[i], key: NaturalSortKey(textOf(list[i])), index: i),
+  ];
+  wrapped.sort((left, right) {
+    final cmp = left.key.compareTo(right.key);
+    return cmp != 0 ? cmp : left.index.compareTo(right.index);
+  });
+  return [for (final entry in wrapped) entry.item];
+}
 
 int _nameGroupRank(AssignmentDeadlineBucket bucket) => switch (bucket) {
       AssignmentDeadlineBucket.notExpiredWithDeadline ||
@@ -114,11 +180,7 @@ class _PreparedAssignment {
             assignment.exam?.endTrusted == false &&
             !assignment.isCompleted &&
             displayAt != null &&
-            !(displayEndAt ?? displayAt).isAfter(now),
-        course = _NaturalKey(assignment.courseName),
-        title = _NaturalKey(assignment.title),
-        courseKey = _NaturalKey(assignment.courseKey ?? ''),
-        id = _NaturalKey(assignment.id);
+            !(displayEndAt ?? displayAt).isAfter(now);
 
   final Assignment assignment;
   final int index;
@@ -126,10 +188,11 @@ class _PreparedAssignment {
   final DateTime? displayAt;
   final DateTime _nearLimit;
   final bool elapsedNotice;
-  final _NaturalKey course;
-  final _NaturalKey title;
-  final _NaturalKey courseKey;
-  final _NaturalKey id;
+  late final NaturalSortKey course = NaturalSortKey(assignment.courseName);
+  late final NaturalSortKey title = NaturalSortKey(assignment.title);
+  late final NaturalSortKey courseKey =
+      NaturalSortKey(assignment.courseKey ?? '');
+  late final NaturalSortKey id = NaturalSortKey(assignment.id);
 
   int compareNameKeys(_PreparedAssignment other, HomeSortOrder order) {
     final name = order == HomeSortOrder.courseName
@@ -271,7 +334,7 @@ class AssignmentQuery {
 
   /// Public natural-order comparison for mixed home timeline consumers.
   static int compareNaturalPinyin(String left, String right) =>
-      _compareKey(_NaturalKey(left), _NaturalKey(right));
+      _compareKey(NaturalSortKey(left), NaturalSortKey(right));
 
   /// Deadline-bucket rank used by name-only home orderings.
   static int nameGroupRank(AssignmentDeadlineBucket bucket) =>

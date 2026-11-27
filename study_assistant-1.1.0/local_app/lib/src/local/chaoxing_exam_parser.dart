@@ -1,13 +1,269 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:isolate';
 import 'package:crypto/crypto.dart';
 import '../models/assignment.dart';
 import 'chaoxing_api_parser.dart';
 import 'chaoxing_param_helper.dart';
 
+const int _kExamIsolateThreshold = 32 * 1024;
+
+({List<Assignment> rows, bool more})? _parseExamPhoneIsolateEntry(
+  String html,
+  String courseId,
+  String clazzId,
+  String courseName,
+  int nowMs,
+) =>
+    ChaoxingExamParser.phone(
+      html,
+      ChaoxingCourseRef(
+        courseId: courseId,
+        clazzId: clazzId,
+        courseName: courseName,
+      ),
+      now: DateTime.fromMillisecondsSinceEpoch(nowMs),
+    );
+
+({List<Assignment> rows, int total, int skipped, int observed})?
+    _parseExamCoursePcIsolateEntry(
+  String html,
+  String courseId,
+  String clazzId,
+  String courseName,
+  int nowMs,
+) =>
+        ChaoxingExamParser.coursePc(
+          html,
+          ChaoxingCourseRef(
+            courseId: courseId,
+            clazzId: clazzId,
+            courseName: courseName,
+          ),
+          now: DateTime.fromMillisecondsSinceEpoch(nowMs),
+        );
+
+({List<Assignment> rows, int total, int skippedWithoutId})?
+    _parseExamAccountIsolateEntry(String html, int nowMs) =>
+        ChaoxingExamParser.account(
+          html,
+          now: DateTime.fromMillisecondsSinceEpoch(nowMs),
+        );
+
+({List<Assignment> rows, String? cursor})? _parseExamNoticesIsolateEntry(
+  dynamic payload,
+  int nowMs,
+) =>
+    ChaoxingExamParser.notices(
+      payload,
+      now: DateTime.fromMillisecondsSinceEpoch(nowMs),
+    );
+
 /// List-only parsing. Scores, paper links and question content are discarded.
 class ChaoxingExamParser {
+  static const int isolateParseThreshold = _kExamIsolateThreshold;
+
+  static final RegExp _numericEntityRegex =
+      RegExp(r'&#(x[0-9a-fA-F]+|[0-9]+);');
+  static final RegExp _scriptOrStyleRegex =
+      RegExp(r'<(script|style)\b[^>]*>[\s\S]*?</\1>', caseSensitive: false);
+  static final RegExp _htmlTagRegex = RegExp(r'<[^>]*>');
+  static final RegExp _whitespaceRegex = RegExp(r'\s+');
+  static final RegExp _chinaTimeRegex = RegExp(
+    r'(\d{4})[-/年](\d{1,2})[-/月](\d{1,2})日?\s+(\d{1,2})[:：](\d{2})(?:[:：](\d{2}))?(?![\d:：])',
+  );
+  static final RegExp _timesRegex = RegExp(
+    r'\d{4}[-/年]\d{1,2}[-/月]\d{1,2}日?\s+\d{1,2}[:：]\d{2}(?:[:：]\d{2})?(?![\d:：])',
+  );
+  static final RegExp _cancelledRegex = RegExp(r'已取消|考试取消');
+  static final RegExp _scheduledRegex = RegExp(r'未开始|未开考');
+  static final RegExp _inProgressRegex = RegExp(r'进行中|考试中');
+  static final RegExp _endedRegex = RegExp(r'已结束|已过期');
+  static final RegExp _trRowRegex =
+      RegExp(r'<tr\b([^>]*)>(.*?)</tr>', caseSensitive: false, dotAll: true);
+  static final RegExp _tdCellRegex =
+      RegExp(r'<td\b[^>]*>(.*?)</td>', caseSensitive: false, dotAll: true);
+  static final RegExp _digitsOnlyRegex = RegExp(r'^\d+$');
+  static final RegExp _blankTipsRegex = RegExp(
+    r'<p\b[^>]*class=["\x27][^"\x27]*blankTips[^"\x27]*["\x27][^>]*>\s*您好，本课程下暂未收到考试',
+  );
+  static final RegExp _haveMoreRegex = RegExp(r'\bhavemore\s*=\s*true');
+  static final RegExp _pcTotalRegex =
+      RegExp(r'Math\.ceil\(\s*(\d+)\s*/\s*9\s*\)');
+  static final RegExp _pcEmptyHintRegex = RegExp(r'暂无内容|暂无考试');
+  static final RegExp _pcLookLiRegex = RegExp(
+    r'<li\b[^>]*class=["\x27][^"\x27]*\blookLi\b',
+    caseSensitive: false,
+  );
+  static final RegExp _liRowRegex =
+      RegExp(r'<li\b([^>]*)>(.*?)</li>', caseSensitive: false, dotAll: true);
+  static final RegExp _goTestRegex =
+      RegExp(r'goTest\(\s*["\x27](\d+)["\x27]\s*,\s*["\x27](\d+)["\x27]');
+  static final RegExp _anchorTagRegex =
+      RegExp(r'<a\b([^>]*)>', caseSensitive: false);
+  static final RegExp _notAllowLookPaperRegex =
+      RegExp(r'notAllowLookPaperWin|不允许查看');
+  static final RegExp _strongTagRegex =
+      RegExp(r'<strong\b[^>]*>([^<]*)', caseSensitive: false);
+  static final RegExp _safeAccountIdRegex = RegExp(r'^[0-9A-Za-z_-]+$');
+  static final RegExp _onclickAttrRegex = RegExp(
+    r'''\bonclick\s*=\s*(?:"([^"]*)"|'([^']*)')''',
+    caseSensitive: false,
+    dotAll: true,
+  );
+  static final RegExp _goCallRegex = RegExp(
+    r'''\bgo\s*\(\s*(['"])(.*?)\1\s*,\s*(?:['"]([^'"]*)['"]|([A-Za-z0-9_]+))\s*\)''',
+    caseSensitive: false,
+    dotAll: true,
+  );
+  static final RegExp _dataTableRegex =
+      RegExp(r'class=["\x27][^"\x27]*dataTable');
+  static final RegExp _accountTotalRegex =
+      RegExp(r'Math\.ceil\(\s*(\d+)\s*/\s*12\s*\)');
+  static final RegExp _explicitExamIdRegex = RegExp(
+    r'(?:[?&]|data-)(?:examId|testPaperId)\s*=\s*["\x27]?(\d+)\b',
+    caseSensitive: false,
+  );
+  static final RegExp _examAnnouncementRegex =
+      RegExp(r'(?:考试|补考|缓考).{0,8}(?:安排|通知|时间)|(?:安排|通知).{0,8}考试');
+  static final RegExp _controlCharsRegex = RegExp(r'[\x00-\x20\x7f]');
+  static final RegExp _rangeSeparatorRegex = RegExp(r'\s*(?:至|到|~|～|—|--)\s*');
+  static final RegExp _noticeSendTimeRegex = RegExp(
+    r'^(20\d{2}[-/年]\d{1,2}[-/月]\d{1,2}日?)(?:\s+(\d{1,2}[:：]\d{2}(?:[:：]\d{2})?))?$',
+  );
+  static final RegExp _noticeTitleDateRegex =
+      RegExp(r'(?<!\d)(20\d{2})(\d{2})(\d{2})(?:\d{4}(?:\d{2})?)?(?!\d)');
+  static final RegExp _yearlessNoticeTimeRegex = RegExp(
+    r'^\d{1,2}[-/月]\d{1,2}日?\s+\d{1,2}[:：]\d{2}(?:[:：]\d{2})?$',
+  );
+  static final RegExp _blockBreakTagRegex =
+      RegExp(r'<br\b[^>]*>|</(?:p|div|tr|li)>', caseSensitive: false);
+  static final RegExp _horizontalSpacesRegex = RegExp(r'[ \t]+');
+  static final RegExp _durationRegex = RegExp(
+    r'^\s*(\d+)\s*(?:分钟|分|min(?:utes?)?)?\s*$',
+    caseSensitive: false,
+  );
+  static final RegExp _noticeLinkRegex = RegExp(
+    r'''(?:https?://|/examApi/intoexamorwork\?)[^\s<>"'，。；！？）]+''',
+    caseSensitive: false,
+  );
+  static final RegExp _positiveIntRegex = RegExp(r'^[1-9]\d*$');
+  static final RegExp _testRelationInfoRegex =
+      RegExp(r'\bTestRelationInfo\s*=\s*\{');
+  static final RegExp _monthDayTimeRegex = RegExp(
+    r'^(\d{1,2})[-/月](\d{1,2})日?\s+(\d{1,2})[:：](\d{2})(?:[:：](\d{2}))?$',
+  );
+
+  static const int _maxDynamicRegexCache = 64;
+  static final Map<String, RegExp> _attrRegexCache = {};
+  static final Map<String, RegExp> _fieldRegexCache = {};
+
+  static bool _isFakeAsyncWidgetTestZone() {
+    var inDebugOrTest = false;
+    assert(() {
+      inDebugOrTest = true;
+      return true;
+    }());
+    if (!inDebugOrTest) return false;
+    final probe = Timer(Duration.zero, () {});
+    final isFake = probe.runtimeType.toString().contains('Fake');
+    probe.cancel();
+    return isFake;
+  }
+
+  static Future<({List<Assignment> rows, bool more})?> phoneAsync(
+    String html,
+    ChaoxingCourseRef course, {
+    DateTime? now,
+  }) {
+    final at = now ?? DateTime.now();
+    if (html.length <= isolateParseThreshold || _isFakeAsyncWidgetTestZone()) {
+      return Future<({List<Assignment> rows, bool more})?>.value(
+        phone(html, course, now: at),
+      );
+    }
+    final courseId = course.courseId;
+    final clazzId = course.clazzId;
+    final courseName = course.courseName;
+    final nowMs = at.millisecondsSinceEpoch;
+    return Isolate.run(
+      () => _parseExamPhoneIsolateEntry(
+        html,
+        courseId,
+        clazzId,
+        courseName,
+        nowMs,
+      ),
+    );
+  }
+
+  static Future<
+          ({List<Assignment> rows, int total, int skipped, int observed})?>
+      coursePcAsync(
+    String html,
+    ChaoxingCourseRef course, {
+    DateTime? now,
+  }) {
+    final at = now ?? DateTime.now();
+    if (html.length <= isolateParseThreshold || _isFakeAsyncWidgetTestZone()) {
+      return Future<
+          ({
+            List<Assignment> rows,
+            int total,
+            int skipped,
+            int observed,
+          })?>.value(coursePc(html, course, now: at));
+    }
+    final courseId = course.courseId;
+    final clazzId = course.clazzId;
+    final courseName = course.courseName;
+    final nowMs = at.millisecondsSinceEpoch;
+    return Isolate.run(
+      () => _parseExamCoursePcIsolateEntry(
+        html,
+        courseId,
+        clazzId,
+        courseName,
+        nowMs,
+      ),
+    );
+  }
+
+  static Future<({List<Assignment> rows, int total, int skippedWithoutId})?>
+      accountAsync(String html, {DateTime? now}) {
+    final at = now ?? DateTime.now();
+    if (html.length <= isolateParseThreshold || _isFakeAsyncWidgetTestZone()) {
+      return Future<
+          ({
+            List<Assignment> rows,
+            int total,
+            int skippedWithoutId,
+          })?>.value(account(html, now: at));
+    }
+    final nowMs = at.millisecondsSinceEpoch;
+    return Isolate.run(() => _parseExamAccountIsolateEntry(html, nowMs));
+  }
+
+  static Future<({List<Assignment> rows, String? cursor})?> noticesAsync(
+    dynamic payload, {
+    DateTime? now,
+    int? rawLengthHint,
+  }) {
+    final at = now ?? DateTime.now();
+    final shouldIsolate = !_isFakeAsyncWidgetTestZone() &&
+        ((rawLengthHint ?? 0) > isolateParseThreshold ||
+            (payload is String && payload.length > isolateParseThreshold));
+    if (!shouldIsolate) {
+      return Future<({List<Assignment> rows, String? cursor})?>.value(
+        notices(payload, now: at),
+      );
+    }
+    final nowMs = at.millisecondsSinceEpoch;
+    return Isolate.run(() => _parseExamNoticesIsolateEntry(payload, nowMs));
+  }
+
   static String entities(String raw) => raw
-      .replaceAllMapped(RegExp(r'&#(x[0-9a-fA-F]+|[0-9]+);'), (m) {
+      .replaceAllMapped(_numericEntityRegex, (m) {
         final token = m[1]!;
         final code = int.tryParse(
             token.startsWith('x') ? token.substring(1) : token,
@@ -20,27 +276,34 @@ class ChaoxingExamParser {
       .replaceAll('&apos;', "'")
       .replaceAll('&amp;', '&');
   static String text(String raw) => raw
-      .replaceAll(
-          RegExp(r'<(script|style)\b[^>]*>[\s\S]*?</\1>', caseSensitive: false),
-          '')
-      .replaceAll(RegExp(r'<[^>]*>'), ' ')
+      .replaceAll(_scriptOrStyleRegex, '')
+      .replaceAll(_htmlTagRegex, ' ')
       .replaceAll('&nbsp;', ' ')
       .replaceAll('&amp;', '&')
       .replaceAll('&lt;', '<')
       .replaceAll('&gt;', '>')
       .replaceAll('&quot;', '"')
       .replaceAll('&#39;', "'")
-      .replaceAll(RegExp(r'\s+'), ' ')
+      .replaceAll(_whitespaceRegex, ' ')
       .trim();
-  static String? attr(String raw, String key) =>
-      RegExp('\\b$key\\s*=\\s*(["\x27])(.*?)\\1',
-              caseSensitive: false, dotAll: true)
-          .firstMatch(raw)?[2]
-          ?.replaceAll('&amp;', '&');
+  static String? attr(String raw, String key) {
+    var pattern = _attrRegexCache[key];
+    if (pattern == null) {
+      if (_attrRegexCache.length >= _maxDynamicRegexCache) {
+        _attrRegexCache.remove(_attrRegexCache.keys.first);
+      }
+      pattern = RegExp(
+        '\\b$key\\s*=\\s*(["\x27])(.*?)\\1',
+        caseSensitive: false,
+        dotAll: true,
+      );
+      _attrRegexCache[key] = pattern;
+    }
+    return pattern.firstMatch(raw)?[2]?.replaceAll('&amp;', '&');
+  }
+
   static DateTime? chinaTime(String raw) {
-    final m = RegExp(
-            r'(\d{4})[-/年](\d{1,2})[-/月](\d{1,2})日?\s+(\d{1,2})[:：](\d{2})(?:[:：](\d{2}))?(?![\d:：])')
-        .firstMatch(raw);
+    final m = _chinaTimeRegex.firstMatch(raw);
     if (m == null) return null;
     final n = [for (var i = 1; i <= 6; i++) int.parse(m[i] ?? '0')];
     final wall = DateTime.utc(n[0], n[1], n[2], n[3], n[4], n[5]);
@@ -55,14 +318,13 @@ class ChaoxingExamParser {
     return wall.subtract(const Duration(hours: 8)).toLocal();
   }
 
-  static List<DateTime> times(String raw) => RegExp(
-          r'\d{4}[-/年]\d{1,2}[-/月]\d{1,2}日?\s+\d{1,2}[:：]\d{2}(?:[:：]\d{2})?(?![\d:：])')
+  static List<DateTime> times(String raw) => _timesRegex
       .allMatches(text(raw))
       .map((m) => chinaTime(m[0]!))
       .whereType<DateTime>()
       .toList();
   static String personalStatus(String raw) {
-    final v = text(raw).replaceAll(RegExp(r'\s+'), '');
+    final v = text(raw).replaceAll(_whitespaceRegex, '');
     if (const {'完成', '已完成', '已交卷', '已提交', '待批阅', '已批阅', '已批改'}.contains(v)) {
       return 'submitted';
     }
@@ -85,13 +347,13 @@ class ChaoxingExamParser {
 
   static String lifecycle(
       String raw, DateTime? start, DateTime? end, DateTime now) {
-    if (RegExp(r'已取消|考试取消').hasMatch(raw)) return 'cancelled';
+    if (_cancelledRegex.hasMatch(raw)) return 'cancelled';
     if (end != null && !end.isAfter(now)) return 'ended';
     if (start != null && start.isAfter(now)) return 'scheduled';
     if (start != null && end != null) return 'inProgress';
-    if (RegExp(r'未开始|未开考').hasMatch(raw)) return 'scheduled';
-    if (RegExp(r'进行中|考试中').hasMatch(raw)) return 'inProgress';
-    if (RegExp(r'已结束|已过期').hasMatch(raw)) return 'ended';
+    if (_scheduledRegex.hasMatch(raw)) return 'scheduled';
+    if (_inProgressRegex.hasMatch(raw)) return 'inProgress';
+    if (_endedRegex.hasMatch(raw)) return 'ended';
     return 'unknown';
   }
 
@@ -154,17 +416,12 @@ class ChaoxingExamParser {
       {DateTime? now}) {
     final rows = <Assignment>[];
     final seen = <String>{};
-    for (final m in RegExp(r'<tr\b([^>]*)>(.*?)</tr>',
-            caseSensitive: false, dotAll: true)
-        .allMatches(html)) {
+    for (final m in _trRowRegex.allMatches(html)) {
       final data = attr(m[1]!, 'data');
       if (data == null) continue;
       final u = Uri.tryParse(data);
       final id = u?.queryParameters['taskrefId'];
-      final cells =
-          RegExp(r'<td\b[^>]*>(.*?)</td>', caseSensitive: false, dotAll: true)
-              .allMatches(m[2]!)
-              .toList();
+      final cells = _tdCellRegex.allMatches(m[2]!).toList();
       if (u == null ||
           u.path != '/exam/phone/task-exam' ||
           (u.hasAuthority && !u.host.endsWith('.chaoxing.com')) ||
@@ -175,7 +432,7 @@ class ChaoxingExamParser {
                   u, ChaoxingParamHelper.examClazzIdKeys) !=
               course.clazzId ||
           id == null ||
-          !RegExp(r'^\d+$').hasMatch(id) ||
+          !_digitsOnlyRegex.hasMatch(id) ||
           cells.length < 3 ||
           !seen.add(id)) {
         return null;
@@ -192,12 +449,10 @@ class ChaoxingExamParser {
           stateText: text(cells[2][1]!),
           now: now));
     }
-    if (rows.isEmpty &&
-        !RegExp(r'<p\b[^>]*class=["\x27][^"\x27]*blankTips[^"\x27]*["\x27][^>]*>\s*您好，本课程下暂未收到考试')
-            .hasMatch(html)) {
+    if (rows.isEmpty && !_blankTipsRegex.hasMatch(html)) {
       return null;
     }
-    return (rows: rows, more: RegExp(r'\bhavemore\s*=\s*true').hasMatch(html));
+    return (rows: rows, more: _haveMoreRegex.hasMatch(html));
   }
 
   /// PC rows are accepted only with matching hidden course/class identities.
@@ -211,13 +466,10 @@ class ChaoxingExamParser {
             course.clazzId) {
       return null;
     }
-    final totalMatch =
-        RegExp(r'Math\.ceil\(\s*(\d+)\s*/\s*9\s*\)').firstMatch(html);
+    final totalMatch = _pcTotalRegex.firstMatch(html);
     if (totalMatch == null) {
-      final hasEmptyHint = RegExp(r'暂无内容|暂无考试').hasMatch(text(html));
-      final hasLookLi = RegExp(r'<li\b[^>]*class=["\x27][^"\x27]*\blookLi\b',
-              caseSensitive: false)
-          .hasMatch(html);
+      final hasEmptyHint = _pcEmptyHintRegex.hasMatch(text(html));
+      final hasLookLi = _pcLookLiRegex.hasMatch(html);
       if (hasEmptyHint && !hasLookLi) {
         return (rows: <Assignment>[], total: 0, skipped: 0, observed: 0);
       }
@@ -228,16 +480,12 @@ class ChaoxingExamParser {
     var skipped = 0;
     var observed = 0;
     final metadata = _listMetadata(html);
-    for (final m in RegExp(r'<li\b([^>]*)>(.*?)</li>',
-            caseSensitive: false, dotAll: true)
-        .allMatches(html)) {
+    for (final m in _liRowRegex.allMatches(html)) {
       if (!(attr(m[1]!, 'class') ?? '').split(' ').contains('lookLi')) continue;
       observed++;
       final row = entities(m[2]!);
-      final call =
-          RegExp(r'goTest\(\s*["\x27](\d+)["\x27]\s*,\s*["\x27](\d+)["\x27]')
-              .firstMatch(row);
-      final titleMatch = RegExp(r'<a\b([^>]*)>', caseSensitive: false)
+      final call = _goTestRegex.firstMatch(row);
+      final titleMatch = _anchorTagRegex
           .allMatches(row)
           .map((a) => attr(a[1]!, 'title'))
           .whereType<String>()
@@ -248,7 +496,7 @@ class ChaoxingExamParser {
         // the phone list. Keep them as a known skipped supplement only.
         if (titleMatch != null &&
             text(titleMatch).isNotEmpty &&
-            RegExp(r'notAllowLookPaperWin|不允许查看').hasMatch(row)) {
+            _notAllowLookPaperRegex.hasMatch(row)) {
           skipped++;
           continue;
         }
@@ -257,7 +505,7 @@ class ChaoxingExamParser {
       if (call[1] != course.courseId) return null;
       if (titleMatch == null || text(titleMatch).isEmpty) return null;
       final ts = times(row);
-      final states = RegExp(r'<strong\b[^>]*>([^<]*)', caseSensitive: false)
+      final states = _strongTagRegex
           .allMatches(row)
           .map((s) => text(s[1]!))
           .where((s) => s.isNotEmpty)
@@ -289,23 +537,18 @@ class ChaoxingExamParser {
   }
 
   static bool _safeAccountIdentity(String value) =>
-      RegExp(r'^[0-9A-Za-z_-]+$').hasMatch(value);
+      _safeAccountIdRegex.hasMatch(value);
 
   static ({String courseId, String clazzId, String examId})?
       _accountCourseIdentityFromGo(String html) {
-    final attributes = RegExp(r'''\bonclick\s*=\s*(?:"([^"]*)"|'([^']*)')''',
-            caseSensitive: false, dotAll: true)
+    final attributes = _onclickAttrRegex
         .allMatches(html)
         .map((match) => entities(match[1] ?? match[2] ?? ''))
         .where((value) => value.isNotEmpty)
         .toList();
     if (attributes.isEmpty) return null;
 
-    final calls = RegExp(
-            r'''\bgo\s*\(\s*(['"])(.*?)\1\s*,\s*(?:['"]([^'"]*)['"]|([A-Za-z0-9_]+))\s*\)''',
-            caseSensitive: false, dotAll: true)
-        .allMatches(attributes.join(' '))
-        .toList();
+    final calls = _goCallRegex.allMatches(attributes.join(' ')).toList();
 
     Uri? transferUri(String raw) {
       var uri = Uri.tryParse(raw);
@@ -378,7 +621,7 @@ class ChaoxingExamParser {
         examId == null ||
         !_safeAccountIdentity(courseId) ||
         !_safeAccountIdentity(classId) ||
-        !RegExp(r'^\d+$').hasMatch(examId) ||
+        !_digitsOnlyRegex.hasMatch(examId) ||
         courseId != moocId ||
         classId != clazzId) {
       return null;
@@ -478,18 +721,15 @@ class ChaoxingExamParser {
   static ({List<Assignment> rows, int total, int skippedWithoutId})? account(
       String html,
       {DateTime? now}) {
-    if (!RegExp(r'class=["\x27][^"\x27]*dataTable').hasMatch(html) ||
-        !text(html).contains('作答状态')) {
+    if (!_dataTableRegex.hasMatch(html) || !text(html).contains('作答状态')) {
       return null;
     }
-    final dataRows =
-        RegExp(r'<tr\b([^>]*)>(.*?)</tr>', dotAll: true, caseSensitive: false)
-            .allMatches(html)
-            .where((row) =>
-                (attr(row[1]!, 'class') ?? '').split(' ').contains('dataTr'))
-            .toList();
-    final count =
-        RegExp(r'Math\.ceil\(\s*(\d+)\s*/\s*12\s*\)').firstMatch(html);
+    final dataRows = _trRowRegex
+        .allMatches(html)
+        .where((row) =>
+            (attr(row[1]!, 'class') ?? '').split(' ').contains('dataTr'))
+        .toList();
+    final count = _accountTotalRegex.firstMatch(html);
     if (count == null) {
       if (dataRows.isEmpty) {
         return (rows: <Assignment>[], total: 0, skippedWithoutId: 0);
@@ -501,10 +741,7 @@ class ChaoxingExamParser {
     var skippedWithoutId = 0;
     for (final row in dataRows) {
       final cells =
-          RegExp(r'<td\b[^>]*>(.*?)</td>', dotAll: true, caseSensitive: false)
-              .allMatches(row[2]!)
-              .map((m) => text(m[1]!))
-              .toList();
+          _tdCellRegex.allMatches(row[2]!).map((m) => text(m[1]!)).toList();
       if (cells.length < 8) {
         return null;
       }
@@ -512,21 +749,18 @@ class ChaoxingExamParser {
       // otherwise skip the unidentifiable historical row rather than guessing.
       var id = attr(row[1]!, 'data-examid');
       String? courseId, clazzId;
-      if (id == null || !RegExp(r'^\d+$').hasMatch(id)) {
+      if (id == null || !_digitsOnlyRegex.hasMatch(id)) {
         final identity = _accountCourseIdentityFromGo(row[0]!);
         if (identity != null) {
           id = identity.examId;
           courseId = identity.courseId;
           clazzId = identity.clazzId;
         } else {
-          final explicitId = RegExp(
-                  r'(?:[?&]|data-)(?:examId|testPaperId)\s*=\s*["\x27]?(\d+)\b',
-                  caseSensitive: false)
-              .firstMatch(row[2]!);
+          final explicitId = _explicitExamIdRegex.firstMatch(row[2]!);
           id = explicitId?[1];
         }
       }
-      if (id == null || !RegExp(r'^\d+$').hasMatch(id)) {
+      if (id == null || !_digitsOnlyRegex.hasMatch(id)) {
         skippedWithoutId++;
         continue;
       }
@@ -549,8 +783,17 @@ class ChaoxingExamParser {
 
   static ({List<Assignment> rows, String? cursor})? notices(dynamic payload,
       {DateTime? now}) {
-    if (payload is! Map || payload['status'] != true) return null;
-    final box = payload['notices'];
+    final decoded = payload is String
+        ? () {
+            try {
+              return jsonDecode(payload);
+            } catch (_) {
+              return null;
+            }
+          }()
+        : payload;
+    if (decoded is! Map || decoded['status'] != true) return null;
+    final box = decoded['notices'];
     if (box == null) return (rows: <Assignment>[], cursor: null);
     if (box is! Map || box['list'] is! List) return null;
     final rows = <Assignment>[];
@@ -566,9 +809,7 @@ class ChaoxingExamParser {
           .join('\n');
       final card = _examCard(item['attachment']);
       final examTitle = _field(body, '考试名称|试卷名称');
-      final isAnnouncement =
-          RegExp(r'(?:考试|补考|缓考).{0,8}(?:安排|通知|时间)|(?:安排|通知).{0,8}考试')
-              .hasMatch(title);
+      final isAnnouncement = _examAnnouncementRegex.hasMatch(title);
       // Mentioning exam discipline or registration alone is not an exam event.
       if (card == null && examTitle == null && !isAnnouncement) continue;
       final rawId = item['uuid'];
@@ -576,7 +817,7 @@ class ChaoxingExamParser {
           rawId.isEmpty ||
           rawId.length > 512 ||
           rawId.trim() != rawId ||
-          RegExp(r'[\x00-\x20\x7f]').hasMatch(rawId)) {
+          _controlCharsRegex.hasMatch(rawId)) {
         return null;
       }
       // The platform's uuid is an opaque compound resource reference, not
@@ -597,7 +838,7 @@ class ChaoxingExamParser {
       final beijingNow = syncTime.toUtc().add(const Duration(hours: 8));
       final published = _noticePublishedAt(item, syncTime);
       if (start == null && end == null) {
-        final parts = range?.split(RegExp(r'\s*(?:至|到|~|～|—|--)\s*'));
+        final parts = range?.split(_rangeSeparatorRegex);
         if (parts?.length == 2) {
           rawStart ??= parts![0];
           rawEnd ??= parts![1];
@@ -658,9 +899,7 @@ class ChaoxingExamParser {
       Map<dynamic, dynamic> item, DateTime now) {
     final raw = item['sendTime'];
     if (raw is! String) return null;
-    final match = RegExp(
-            r'^(20\d{2}[-/年]\d{1,2}[-/月]\d{1,2}日?)(?:\s+(\d{1,2}[:：]\d{2}(?:[:：]\d{2})?))?$')
-        .firstMatch(raw.trim());
+    final match = _noticeSendTimeRegex.firstMatch(raw.trim());
     if (match == null) return null;
     final time = chinaTime('${match[1]} ${match[2] ?? '00:00'}');
     return time != null && !time.isAfter(now) ? time : null;
@@ -669,10 +908,8 @@ class ChaoxingExamParser {
   static Set<DateTime> _noticeTitleDates(
       List<String> titles, DateTime beijingNow) {
     final dates = <DateTime>{};
-    final pattern =
-        RegExp(r'(?<!\d)(20\d{2})(\d{2})(\d{2})(?:\d{4}(?:\d{2})?)?(?!\d)');
     for (final title in titles) {
-      for (final match in pattern.allMatches(title)) {
+      for (final match in _noticeTitleDateRegex.allMatches(title)) {
         final year = int.parse(match[1]!);
         final month = int.parse(match[2]!);
         final day = int.parse(match[3]!);
@@ -688,9 +925,7 @@ class ChaoxingExamParser {
   }
 
   static DateTime? _yearlessNoticeTime(String? raw, DateTime anchor) {
-    if (raw == null ||
-        !RegExp(r'^\d{1,2}[-/月]\d{1,2}日?\s+\d{1,2}[:：]\d{2}(?:[:：]\d{2})?$')
-            .hasMatch(raw.trim())) {
+    if (raw == null || !_yearlessNoticeTimeRegex.hasMatch(raw.trim())) {
       return null;
     }
     const beijingOffset = Duration(hours: 8);
@@ -712,20 +947,15 @@ class ChaoxingExamParser {
   static String _noticeBody(dynamic value) {
     if (value is! String || value.isEmpty) return '';
     final clean = _withoutNoticeLinks(entities(value
-            .replaceAll(
-                RegExp(r'<(script|style)\b[^>]*>[\s\S]*?</\1>',
-                    caseSensitive: false),
-                '')
-            .replaceAll(
-                RegExp(r'<br\b[^>]*>|</(?:p|div|tr|li)>', caseSensitive: false),
-                '\n')
-            .replaceAll(RegExp(r'<[^>]*>'), ' ')))
+            .replaceAll(_scriptOrStyleRegex, '')
+            .replaceAll(_blockBreakTagRegex, '\n')
+            .replaceAll(_htmlTagRegex, ' ')))
         .replaceAll('\r\n', '\n')
         .replaceAll('\r', '\n')
         .replaceAll('&nbsp;', ' ');
     return clean
         .split('\n')
-        .map((s) => s.replaceAll(RegExp(r'[ \t]+'), ' ').trim())
+        .map((s) => s.replaceAll(_horizontalSpacesRegex, ' ').trim())
         .where((s) => s.isNotEmpty)
         .join('\n');
   }
@@ -735,7 +965,15 @@ class ChaoxingExamParser {
       _field(body, '考试地点|考场地点|考试场地|地点|考场|教室|考试地址');
 
   static String? _field(String body, String names) {
-    final fields = RegExp('^(?:$names)\\s*[:：]\\s*(.+?)\\s*\$', multiLine: true)
+    var pattern = _fieldRegexCache[names];
+    if (pattern == null) {
+      if (_fieldRegexCache.length >= _maxDynamicRegexCache) {
+        _fieldRegexCache.remove(_fieldRegexCache.keys.first);
+      }
+      pattern = RegExp('^(?:$names)\\s*[:：]\\s*(.+?)\\s*\$', multiLine: true);
+      _fieldRegexCache[names] = pattern;
+    }
+    final fields = pattern
         .allMatches(body)
         .map((m) => m[1]!.replaceAll(_noticeLinkMarker, '').trim())
         .where((s) => s.isNotEmpty)
@@ -745,18 +983,14 @@ class ChaoxingExamParser {
 
   static int? _duration(String? value) {
     if (value == null) return null;
-    final m =
-        RegExp(r'^\s*(\d+)\s*(?:分钟|分|min(?:utes?)?)?\s*$', caseSensitive: false)
-            .firstMatch(value);
+    final m = _durationRegex.firstMatch(value);
     final n = int.tryParse(m?[1] ?? '');
     return n != null && n > 0 && n <= 10080 ? n : null;
   }
 
   static const _noticeLinkMarker = '（链接请在官方页面查看）';
-  static String _withoutNoticeLinks(String value) => value.replaceAll(
-      RegExp(r'''(?:https?://|/examApi/intoexamorwork\?)[^\s<>"'，。；！？）]+''',
-          caseSensitive: false),
-      _noticeLinkMarker);
+  static String _withoutNoticeLinks(String value) =>
+      value.replaceAll(_noticeLinkRegex, _noticeLinkMarker);
 
   /// Resolve only the list's structured exam card; never open its start URL.
   static Map<String, String>? _examCard(dynamic raw) {
@@ -780,7 +1014,7 @@ class ChaoxingExamParser {
       final id =
           ChaoxingParamHelper.singleMapValue(card, const {'examorworkid'});
       if ([course, clazz, id]
-          .any((v) => v == null || !RegExp(r'^[1-9]\d*$').hasMatch(v))) {
+          .any((v) => v == null || !_positiveIntRegex.hasMatch(v))) {
         continue;
       }
       final rawUrl = card['url'];
@@ -834,7 +1068,7 @@ class ChaoxingExamParser {
   }
 
   static Map<String, dynamic> _listMetadata(String html) {
-    final marker = RegExp(r'\bTestRelationInfo\s*=\s*\{').firstMatch(html);
+    final marker = _testRelationInfoRegex.firstMatch(html);
     if (marker == null) return const {};
     final start = marker.end - 1;
     var depth = 0, quoted = false, escaped = false;
@@ -1038,14 +1272,12 @@ class ChaoxingExamParser {
   static bool _matchesNoticeTime(String body, DateTime reference, bool start) {
     var raw = _field(body, start ? '考试开始时间|开始时间|开考时间' : '考试结束时间|结束时间|截止时间');
     if (raw == null) {
-      final range = _field(body, '考试起止时间|起止时间|考试时间')
-          ?.split(RegExp(r'\s*(?:至|到|~|～|—|--)\s*'));
+      final range =
+          _field(body, '考试起止时间|起止时间|考试时间')?.split(_rangeSeparatorRegex);
       if (range != null && range.length == 2) raw = range[start ? 0 : 1];
     }
     if (raw == null) return false;
-    final m = RegExp(
-            r'^(\d{1,2})[-/月](\d{1,2})日?\s+(\d{1,2})[:：](\d{2})(?:[:：](\d{2}))?$')
-        .firstMatch(raw.trim());
+    final m = _monthDayTimeRegex.firstMatch(raw.trim());
     if (m == null) return false;
     final wall = reference.toUtc().add(const Duration(hours: 8));
     return wall.month == int.parse(m[1]!) &&

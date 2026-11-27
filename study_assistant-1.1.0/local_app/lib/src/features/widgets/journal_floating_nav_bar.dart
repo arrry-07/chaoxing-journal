@@ -75,113 +75,116 @@ class _JournalFloatingNavBarState extends State<JournalFloatingNavBar>
         journal.isDark ? journal.accent.withValues(alpha: 0.20) : journal.sage;
     final activeForeground = journal.isDark ? journal.accent : journal.ink;
 
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [
-            journal.paper.withValues(alpha: 0.0),
-            journal.paper.withValues(alpha: 0.78),
-            journal.paper,
-          ],
-          stops: const [0.0, 0.56, 1.0],
+    return RepaintBoundary(
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              journal.paper.withValues(alpha: 0.0),
+              journal.paper.withValues(alpha: 0.78),
+              journal.paper,
+            ],
+            stops: const [0.0, 0.56, 1.0],
+          ),
         ),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 6, 20, 12),
-        child: Center(
-          heightFactor: 1.0,
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 460),
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(31),
-                boxShadow: [
-                  BoxShadow(
-                    color: journal.isDark
-                        ? const Color(0x4D000000)
-                        : const Color(0x161F2328),
-                    blurRadius: 24,
-                    offset: const Offset(0, 8),
-                  ),
-                ],
-              ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(31),
-                child: BackdropFilter(
-                  filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-                  child: Container(
-                    height: JournalLayout.floatingNavHeight,
-                    decoration: BoxDecoration(
-                      color: journal.navGlassFill,
-                      borderRadius: BorderRadius.circular(31),
-                      border: Border.all(
-                        color: journal.navGlassBorder,
-                        width: 0.8,
-                      ),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 6, 20, 12),
+          child: Center(
+            heightFactor: 1.0,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 460),
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(31),
+                  boxShadow: [
+                    BoxShadow(
+                      color: journal.isDark
+                          ? const Color(0x4D000000)
+                          : const Color(0x161F2328),
+                      blurRadius: 24,
+                      offset: const Offset(0, 8),
                     ),
-                    foregroundDecoration: journal.isDark
-                        ? BoxDecoration(
-                            borderRadius: BorderRadius.circular(31),
-                            border: Border(
-                              top: BorderSide(
-                                color: journal.navGlassHighlight,
-                                width: 0.8,
+                  ],
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(31),
+                  child: BackdropFilter(
+                    filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+                    child: Container(
+                      height: JournalLayout.floatingNavHeight,
+                      decoration: BoxDecoration(
+                        color: journal.navGlassFill,
+                        borderRadius: BorderRadius.circular(31),
+                        border: Border.all(
+                          color: journal.navGlassBorder,
+                          width: 0.8,
+                        ),
+                      ),
+                      foregroundDecoration: journal.isDark
+                          ? BoxDecoration(
+                              borderRadius: BorderRadius.circular(31),
+                              border: Border(
+                                top: BorderSide(
+                                  color: journal.navGlassHighlight,
+                                  width: 0.8,
+                                ),
+                              ),
+                            )
+                          : null,
+                      padding: const EdgeInsets.symmetric(horizontal: 6),
+                      child: LayoutBuilder(
+                        builder: (context, constraints) {
+                          final slotWidth = constraints.maxWidth / tabs.length;
+                          final indicatorPill = SizedBox(
+                            width: slotWidth,
+                            height: 48,
+                            child: Padding(
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 3),
+                              child: DecoratedBox(
+                                decoration: BoxDecoration(
+                                  color: indicatorColor,
+                                  borderRadius: BorderRadius.circular(24),
+                                ),
                               ),
                             ),
-                          )
-                        : null,
-                    padding: const EdgeInsets.symmetric(horizontal: 6),
-                    child: LayoutBuilder(
-                      builder: (context, constraints) {
-                        final slotWidth = constraints.maxWidth / tabs.length;
-                        return Stack(
-                          alignment: Alignment.centerLeft,
-                          children: [
-                            AnimatedBuilder(
-                              animation: _slideController,
-                              builder: (context, _) {
-                                final clamped = _slideController.value
-                                    .clamp(0.0, (tabs.length - 1).toDouble());
-                                return Transform.translate(
-                                  offset: Offset(clamped * slotWidth, 0),
-                                  child: SizedBox(
-                                    width: slotWidth,
-                                    height: 48,
-                                    child: Padding(
-                                      padding: const EdgeInsets.symmetric(
-                                          horizontal: 3),
-                                      child: DecoratedBox(
-                                        decoration: BoxDecoration(
-                                          color: indicatorColor,
-                                          borderRadius:
-                                              BorderRadius.circular(24),
-                                        ),
+                          );
+                          return Stack(
+                            alignment: Alignment.centerLeft,
+                            children: [
+                              AnimatedBuilder(
+                                animation: _slideController,
+                                child: indicatorPill,
+                                builder: (context, child) {
+                                  final clamped = _slideController.value
+                                      .clamp(0.0, (tabs.length - 1).toDouble());
+                                  return Transform.translate(
+                                    offset: Offset(clamped * slotWidth, 0),
+                                    child: child,
+                                  );
+                                },
+                              ),
+                              Row(
+                                children: [
+                                  for (var i = 0; i < tabs.length; i++)
+                                    Expanded(
+                                      child: _NavDestinationItem(
+                                        tab: tabs[i],
+                                        selected: i == widget.selectedIndex,
+                                        activeColor: activeForeground,
+                                        inactiveColor: journal.muted,
+                                        accentColor: journal.accent,
+                                        onTap: () => widget.onSelected(i),
                                       ),
                                     ),
-                                  ),
-                                );
-                              },
-                            ),
-                            Row(
-                              children: [
-                                for (var i = 0; i < tabs.length; i++)
-                                  Expanded(
-                                    child: _NavDestinationItem(
-                                      tab: tabs[i],
-                                      selected: i == widget.selectedIndex,
-                                      activeColor: activeForeground,
-                                      inactiveColor: journal.muted,
-                                      accentColor: journal.accent,
-                                      onTap: () => widget.onSelected(i),
-                                    ),
-                                  ),
-                              ],
-                            ),
-                          ],
-                        );
-                      },
+                                ],
+                              ),
+                            ],
+                          );
+                        },
+                      ),
                     ),
                   ),
                 ),

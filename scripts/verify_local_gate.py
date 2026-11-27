@@ -201,16 +201,39 @@ def _run_flutter_step(
     print(f"[PASS] {label} ({elapsed:.1f}s)")
 
 
-def _changed_dart_files(repo: Path, app_dir: Path) -> list[str]:
+def _changed_dart_files(repo: Path, app_dir: Path, base: str | None = None) -> list[str]:
     paths: set[str] = set()
-    for args in (
-        ["git", "-c", "core.quotePath=false", "diff", "--name-only", "--diff-filter=ACMR", "-z", "HEAD"],
-        ["git", "-c", "core.quotePath=false", "diff", "--name-only", "--diff-filter=ACMR", "-z", "HEAD^", "HEAD"],
-        ["git", "-c", "core.quotePath=false", "ls-files", "--others", "--exclude-standard", "-z"],
-    ):
-        proc = subprocess.run(args, cwd=repo, capture_output=True)
+    if base is None:
+        common = subprocess.run(
+            ["git", "merge-base", "refs/remotes/origin/main", "HEAD"],
+            cwd=repo, capture_output=True, text=True,
+        )
+        base = common.stdout.strip() if common.returncode == 0 else None
+        if base is None and subprocess.run(
+            ["git", "show-ref", "--verify", "--quiet", "refs/remotes/origin/main"], cwd=repo,
+        ).returncode == 0:
+            raise RuntimeError("[FAIL] No merge base with origin/main; fetch history or pass --format-base")
+    else:
+        resolved = subprocess.run(
+            ["git", "rev-parse", "--verify", "--end-of-options", f"{base}^{{commit}}"],
+            cwd=repo, capture_output=True, text=True,
+        )
+        if resolved.returncode != 0:
+            raise RuntimeError(f"[FAIL] Invalid Dart format baseline: {base}")
+        base = resolved.stdout.strip()
+    commands = [
+        (["git", "diff", "--name-only", "--diff-filter=ACMR", "-z", "HEAD"], False),
+        (["git", "diff", "--name-only", "--diff-filter=ACMR", "-z", "HEAD^", "HEAD"], True),
+        (["git", "ls-files", "--others", "--exclude-standard", "-z"], False),
+    ]
+    if base:
+        commands.append((["git", "diff", "--name-only", "--diff-filter=ACMR", "-z", base, "HEAD", "--"], False))
+    for command, allow_missing_parent in commands:
+        proc = subprocess.run(command, cwd=repo, capture_output=True)
         if proc.returncode != 0:
-            continue
+            if allow_missing_parent:
+                continue
+            raise RuntimeError(f"[FAIL] Cannot determine changed Dart files: {' '.join(command[1:])}")
         for raw in proc.stdout.split(b"\x00"):
             if not raw:
                 continue
@@ -224,8 +247,8 @@ def _changed_dart_files(repo: Path, app_dir: Path) -> list[str]:
 
 def _should_allow_dev_metadata(repo: Path, release_flag: bool) -> bool:
     # Continuous-integration PRs can merge Z > 0 commits into main before formal
-    # release freeze; check_release_metadata.py still enforces formal docs for
-    # Z == 0, while --release requires formal docs for all versions (e.g. hotfix Z > 0).
+    # release freeze; the validator still enforces docs for marked candidates
+    # and Z == 0. Explicit --release also checks unmarked versions strictly.
     del repo
     return not release_flag
 
@@ -253,6 +276,9 @@ def main(argv: list[str] | None = None) -> int:
         "--release",
         action="store_true",
         help="Enforce formal release version metadata (never pass --allow-dev)",
+    )
+    parser.add_argument(
+        "--format-base", help="Explicit Git baseline for Dart formatting; defaults to the origin/main merge base",
     )
     parser.add_argument(
         "--test-case-timeout",
@@ -334,7 +360,7 @@ def main(argv: list[str] | None = None) -> int:
         _run_step("Release metadata check", meta_cmd, app_dir)
 
         # 4. Changed Dart formatting
-        changed_dart = _changed_dart_files(repo, app_dir)
+        changed_dart = _changed_dart_files(repo, app_dir, args.format_base)
         if changed_dart:
             _run_step(
                 f"Changed Dart format ({len(changed_dart)} files)",

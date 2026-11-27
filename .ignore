@@ -1,0 +1,5 @@
+# Exclude large rendered architecture bundles & historical archives from ripgrep / batch_search by default
+# (All files remain tracked in Git; pass --no-ignore if explicitly inspecting these paths)
+docs/architecture/*.html
+docs/architecture/*.svg
+docs/archive/**

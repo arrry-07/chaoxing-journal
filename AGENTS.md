@@ -6,23 +6,23 @@
 | --- | --- |
 | L0 热层 | 默认必读本文件与 [PROJECT_STATE.md](docs/ai-workflow/PROJECT_STATE.md)。两份合计最多 80 行。日常 `dev` 以这两份建立项目上下文，修改前核对分支、HEAD、工作区、暂存区及相关代码和测试。 |
 | L1 温层 | 按目标点读 [文档索引](docs/README.md)、[验证规则](docs/ai-workflow/VALIDATION.md)、[路线图](docs/ROADMAP.md)、[反馈台账](docs/待处理体验反馈.md)、`docs/guides/`、`docs/plans/` 当前方案及有效交接。查发布证据时从状态页进入最近两版记录。 |
-| L2 冷层 | `docs/archive/**` 默认禁读。所有 AI Agent 日常开发、排查及审读时严禁主动扫描、遍历或读取归档；仅在用户明确点名追溯某个历史版本时，按该版本定向访问。全仓内容检索用 `rg -g '!docs/archive/**'`，子代理同样遵守。 |
+| L2 冷层 | 普通搜索由根 `.ignore` 排除归档、架构 HTML/SVG。为核实当前任务的旧契约、回退原因或验收证据，可沿活跃状态页、计划或验收记录的明确链接定点读归档，或按用户指定路径读取。日常禁止扫归档或读取架构渲染产物。 |
 | Skill 路由 | 动手出方案、改代码、查疑难 Bug、审代码或打包发版前**必查** [Skill 强制路由表](.agents/rules/skill-routing.md)，命中场景须先 `read_file` 加载对应 `SKILL.md`（提示词再长也不得跳过）。 |
 
 ## 日常开发与正式发布
 
 - 日常在 `dev` 工作，通过定向快检后提交并轻量推送 `origin/dev`（无需重复确认；阶段收口或停机交接时同步更新 [dev 本地状态](docs/ai-workflow/DEV_STATE.md)，里程碑/打包收口时更新 [PROJECT_STATE.md](docs/ai-workflow/PROJECT_STATE.md)，不必为每个中间小提交重复刷写），细则见[日常推送门禁](docs/ai-workflow/VALIDATION.md#dev-日常推送门禁)。
-- 推送 `origin/dev` 前必查 `git status` 与本次提交 Diff，严禁纳入凭据、Cookie、账号响应、敏感日志、`docs/feedback/`、`scripts/demo-video/`、个人材料或 `.apk` 等大体积二进制；日常默认只推 `origin/dev`，可按需开日常集成 PR（`dev → main`）跑全量 CI 并合入 `main`（不改正式文档/下载链、不打 Tag），严禁顺手冻版或发正式 Release（正式发版须等明确指令）。
+- 推送 `origin/dev` 前必查 `git status` 与提交 Diff，排除凭据、Cookie、账号响应、敏感日志、`docs/feedback/`、`scripts/demo-video/`、个人材料及 APK 等大体积二进制。日常默认交付到 `dev`，日常集成和正式发布分别按[两阶段门禁](docs/ai-workflow/VALIDATION.md#集成验收与正式发布)核对授权。
 - 推送完成后，在最终回复末尾固定附两行供代码走查：最新 `origin/dev` 提交号（完整 SHA 与简短信息），以及对比链接 `https://github.com/arrry-07/chaoxing-journal/compare/main...dev` 与核心修改文件的 `dev` 直达链接。
-- 本地快检使用缓存依赖，按需运行 `python scripts/verify_local_gate.py --tests <相关测试>`（自带单测超时熔断；涉 Android/Kotlin 改动同步跑 `python scripts/run_android_tests.py --local-fast`；含中文路径时勿直接运行 `flutter analyze`）。
+- 本地快检按[行为影响选入口](docs/ai-workflow/VALIDATION.md#local-checks)：纯文档或静态文案核对差异与适用场景，局部业务改动跑对应行为用例，Android/Kotlin 改动运行 `python scripts/run_android_tests.py --local-fast`。共享契约与集成按全量门禁执行。
 - 修改课业、时间信任或首页筛选时，读[学习通参考实现](docs/guides/开发与贡献.md#学习通参考实现)与[首页课业行为约束](docs/guides/开发与贡献.md#首页课业排序长期约束)。确认逾期在双向时间排序中始终置底，保留 `FB-005` 回归。
 - 第三方 API、版本兼容或升级先查锁文件（Flutter 用 `pubspec.lock`），再用 Context7 核对对应版本文档。项目内部逻辑直接检查本地源码和测试。
 - 视觉与布局改动须有当前任务的明确要求；功能修复只改必需的可观察界面状态，并在交付中说明。无关视觉问题只记录。
 - 保留已有修改和未跟踪的 `docs/feedback/`、`scripts/demo-video/` 及个人材料。凭据、Cookie、账号响应或敏感日志不得进入提交。保持 Flutter、脚本、参考实现与 CI 约定的目录路径。
-- **分级研发闭环**：① ≤3 文件且不碰核心契约的小步快修，当前窗直改快检推送（可按需 `@verifier` 抽检，自测包可攒批打）；② 跨模块迭代落盘 4 模块精简方案，在当前窗 `/clear` 或新开纯 `Neon (high)` 对话按全局 `staged-release-gate`（模型分流、执行纪律、Gate 审查与分级返工均以该技能为唯一真源）跑完 `/goal` 闭环 → 按[自测包步骤](docs/guides/开发与贡献.md#mumu-自测包)升 `Z+1` 原签名打包并在 MuMu 保数据核验（纯逻辑无 UI 改动可按方案暂缓攒批）→ 阶段收口更新状态文档推送；正式发版等明确指令。
-- **MuMu 验收口径**：采用「基础保数据冒烟 + 本轮及尚未发版的核心改动路径」；涉及学习通线上接口最多集中刷新 1 次，避免高频请求触发 `9010`；未改同步解析时不重复刷线上接口，始终保留登录态、课程与课业数据。
-- 支持两段节奏：日常在 `dev` 每完成 1–3 个修订版可先过本地全量门禁再提集成 PR 合入 `main` 跑云端 CI（不修改 `README.md`/`CHANGELOG.md`/`安装与使用.md`，不打 Tag）；维护者明确要求正式发版后，再提轻量版本冻结 PR（升 `Y+1` 归零 `Z` 并同步正式文档）合入 `main`、构建验收并打 Tag 发布。紧急 Hotfix 从**最新正式版 Tag** 起步，发布后同步回 `main` 与 `dev`。正式版采用标准无前导零三段 `X.Y.Z` 与 `vX.Y.Z`（`Y` 上限 `99`，满 `99` 进 `X+1.0.0`），构建号高于全部测试包；每次正式版自动更新 `update-manual.json`，仅在大更新或紧急热修时显式开启 `--promote-stable` 推进 `update-stable.json`（细则见[版本号与迭代规则](docs/ai-workflow/VALIDATION.md#版本号与迭代分级规则)）。
-- 正式发布逐关核对 [CI、原签名 APK、设备及回下载](docs/ai-workflow/VALIDATION.md#集成验收与正式发布)。GitHub 每包必发，Gitee 自动更新小索引、按需手动镜像 APK，细则见[分发指南](docs/guides/更新渠道与国内分发.md)。
+- **研发风险分档**读全局 `staged-release-gate`，项目执行与验证看 [VALIDATION.md](docs/ai-workflow/VALIDATION.md)。按功能模块就地维护契约测试，阶段收口更新 `DEV_STATE.md`。
+- **视觉改动**在首个可运行的代表性页面先做 [MuMu 保数据预览](docs/guides/开发与贡献.md#mumu-自测包)，及时确认方向。
+- **日常集成与正式发布**的版本号、紧急 Hotfix、原签名与分发要求见[验证规则](docs/ai-workflow/VALIDATION.md#版本号与迭代分级规则)。
+- GitHub 每个正式包均发布。Gitee 自动更新小索引，APK 按需手动镜像，见[分发指南](docs/guides/更新渠道与国内分发.md)。
 - 并行任务先划定文件与资源归属；正式发布的独立审读、Git 与验收责任见[协作与发布审读](docs/ai-workflow/VALIDATION.md#协作与发布审读)。
 
 ## 事实源与归档
