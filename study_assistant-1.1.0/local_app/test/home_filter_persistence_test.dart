@@ -636,4 +636,140 @@ void main() {
     expect((await repo.loadHomeFilters()).sortOrder, HomeSortOrder.courseName);
     await t.pumpWidget(const SizedBox.shrink());
   });
+
+  testWidgets(
+      'open course picker sub-sheet updates counts live when store notifies',
+      (t) async {
+    var now = DateTime.utc(2026, 11, 16, 2);
+    final session = Session();
+    final s = _LiveCourseStore(
+      sessionStore: session,
+      clock: () => now,
+    );
+    addTearDown(s.dispose);
+    await s.restoreSession();
+
+    final math1 = Assignment(
+      id: 'cx:work:1:1:w1',
+      courseName: '高等数学',
+      title: '微积分一',
+      deadlineAt: now.add(const Duration(days: 2)),
+      deadlineTrusted: true,
+      requirementsText: '',
+      status: 'pending',
+      lastSyncedAt: now,
+    );
+    final math2 = Assignment(
+      id: 'cx:work:1:1:w2',
+      courseName: '高等数学',
+      title: '微积分二',
+      deadlineAt: now.add(const Duration(days: 3)),
+      deadlineTrusted: true,
+      requirementsText: '',
+      status: 'pending',
+      lastSyncedAt: now,
+    );
+    final englishSoon = Assignment(
+      id: 'cx:work:2:2:w1',
+      courseName: '大学英语',
+      title: '英语短时作业',
+      deadlineAt: now.add(const Duration(minutes: 30)),
+      deadlineTrusted: true,
+      requirementsText: '',
+      status: 'pending',
+      lastSyncedAt: now,
+    );
+    final englishLater = Assignment(
+      id: 'cx:work:2:2:w2',
+      courseName: '大学英语',
+      title: '英语长时作业',
+      deadlineAt: now.add(const Duration(days: 3)),
+      deadlineTrusted: true,
+      requirementsText: '',
+      status: 'pending',
+      lastSyncedAt: now,
+    );
+    s.replaceAssignmentsForTest([math1, englishSoon, englishLater]);
+    await s.saveHomeFilters(
+      const HomeFilters(deadline: AssignmentDeadlineFilter.notExpired),
+      s.accountEpoch,
+    );
+
+    await t.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: AssignmentListScreen(store: s, clock: () => now),
+      ),
+    ));
+    await t.pumpAndSettle();
+
+    await t.tap(find.text('已筛选'));
+    await t.pumpAndSettle();
+
+    final courseRow = find.byKey(const ValueKey('home-course-filter'));
+    await t.ensureVisible(courseRow);
+    await t.pumpAndSettle();
+    await t.tap(courseRow);
+    await t.pumpAndSettle();
+
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('course-option-1:1')),
+        matching: find.text('1 项'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('course-option-2:2')),
+        matching: find.text('2 项'),
+      ),
+      findsOneWidget,
+    );
+
+    // Switch filter chip inside the open sub-sheet, then mutate clock + store
+    // and notify without closing the sheet.
+    await t.tap(find.byKey(const ValueKey('picker-filter-allTerms')));
+    await t.pumpAndSettle();
+
+    now = now.add(const Duration(hours: 1));
+    s.replaceAssignmentsForTest([math1, math2, englishSoon, englishLater]);
+    s.emitChange();
+    await t.pumpAndSettle();
+
+    final allTermsChip = t.widget<ChoiceChip>(
+      find.byKey(const ValueKey('picker-filter-allTerms')),
+    );
+    expect(allTermsChip.selected, isTrue);
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('course-option-1:1')),
+        matching: find.text('2 项'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('course-option-2:2')),
+        matching: find.text('1 项'),
+      ),
+      findsOneWidget,
+    );
+
+    await t.tap(find.byKey(const ValueKey('course-option-1:1')));
+    await t.pumpAndSettle();
+    await tapSheetOption(t, '应用');
+    expect(s.homeFilters.courseKey, '1:1');
+    expect(t.takeException(), isNull);
+    await t.pumpWidget(const SizedBox.shrink());
+  });
+}
+
+class _LiveCourseStore extends AssignmentStore {
+  _LiveCourseStore({required super.sessionStore, required super.clock})
+      : super(
+          notificationService: Notifications(),
+          widgetSnapshotService: Snapshot(),
+        );
+
+  void emitChange() => notifyListeners();
 }

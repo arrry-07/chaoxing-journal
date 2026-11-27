@@ -50,7 +50,6 @@ class HomeViewData {
     required this.upcomingExam,
     required this.buddyMood,
     required this.homeSnapshot,
-    required this.courseCountsFor,
   });
 
   final bool filtersActive;
@@ -72,10 +71,81 @@ class HomeViewData {
   final HomeUpcomingExam? upcomingExam;
   final JournalPixelBuddyMood buddyMood;
   final ClawdPageContextSnapshot homeSnapshot;
-  final Map<String, int> Function(
-    AssignmentTypeFilter,
-    AssignmentDeadlineFilter,
-  ) courseCountsFor;
+}
+
+typedef HomeCoursePickerProjection = ({
+  List<HomeCourseFilterOption> options,
+  Map<String, int> Function(
+    String query,
+    AssignmentTypeFilter type,
+    AssignmentDeadlineFilter deadline,
+  ) countsFor,
+});
+
+/// Shared projection for followed courses and live item counts across home and
+/// the filter sheet's course picker.
+HomeCoursePickerProjection computeHomeCoursePickerProjection({
+  required AssignmentStore store,
+  required DateTime now,
+  required String? selectedCourseKey,
+  AssignmentDisplayIndex? fallbackDisplayIndex,
+}) {
+  final coursework = store.courseworkState;
+  final termCatalog = store.termCatalog;
+  final allFollowedSources = [
+    for (final group in store.localRecordGroups)
+      if (!group.hidden &&
+          (group.primary.courseKey == null ||
+              (store.follows(group.primary.courseKey!) &&
+                  !termCatalog.isBlocked(group.primary.courseKey!))))
+        ...group.sources,
+  ];
+  final pickerIndex = allFollowedSources.isEmpty && fallbackDisplayIndex != null
+      ? fallbackDisplayIndex
+      : AssignmentDisplayIndex.from(allFollowedSources);
+  final pickerAssignments = AssignmentQuery.currentDisplay(
+    AssignmentQuery.scope(allFollowedSources, {}),
+    now,
+    index: pickerIndex,
+    coursework: coursework,
+  );
+  final options = buildHomeCourseFilterOptions(
+    assignments: pickerAssignments,
+    catalog: [
+      for (final course in store.courses)
+        if (store.follows(course.key) && !termCatalog.isBlocked(course.key))
+          course,
+    ],
+    records: allFollowedSources,
+    selectedCourseKey: selectedCourseKey,
+    termCatalog: termCatalog,
+    includeIdleCourses: true,
+  );
+  return (
+    options: options,
+    countsFor: (query, type, deadline) => countHomeCourseItems(
+          options: options,
+          filteredAssignments: AssignmentQuery.filterHome(
+            allFollowedSources,
+            query: query,
+            deadline: deadline,
+            type: type,
+            includeHistorical: false,
+            index: pickerIndex,
+            now: now,
+            coursework: coursework,
+          ),
+          filteredManualEntries: HomeManualTimeline.filterManualEntries(
+            store.isAuthenticated
+                ? store.notebook.entries
+                : const <ManualEntry>[],
+            query: query,
+            deadline: deadline,
+            type: type,
+            now: now,
+          ),
+        ),
+  );
 }
 
 HomeViewData prepareHomeViewData({
@@ -96,7 +166,6 @@ HomeViewData prepareHomeViewData({
       courseKey != null ||
       deadlineFilter != AssignmentDeadlineFilter.all;
   final coursework = store.courseworkState;
-  final termCatalog = store.termCatalog;
   final catalogAssignments = courseKey == null
       ? store.homeCatalogAssignments
       : store.homeCatalogAssignmentsWithSelectedCourse(courseKey);
@@ -109,35 +178,12 @@ HomeViewData prepareHomeViewData({
     index: displayIndex,
     coursework: coursework,
   );
-  final allFollowedSources = [
-    for (final group in store.localRecordGroups)
-      if (!group.hidden &&
-          (group.primary.courseKey == null ||
-              (store.follows(group.primary.courseKey!) &&
-                  !termCatalog.isBlocked(group.primary.courseKey!))))
-        ...group.sources,
-  ];
-  final pickerIndex = allFollowedSources.isEmpty
-      ? displayIndex
-      : AssignmentDisplayIndex.from(allFollowedSources);
-  final pickerAssignments = AssignmentQuery.currentDisplay(
-    AssignmentQuery.scope(allFollowedSources, {}),
-    now,
-    index: pickerIndex,
-    coursework: coursework,
-  );
-  final options = buildHomeCourseFilterOptions(
-    assignments: pickerAssignments,
-    catalog: [
-      for (final course in store.courses)
-        if (store.follows(course.key) && !termCatalog.isBlocked(course.key))
-          course,
-    ],
-    records: allFollowedSources,
+  final options = computeHomeCoursePickerProjection(
+    store: store,
+    now: now,
     selectedCourseKey: courseKey,
-    termCatalog: termCatalog,
-    includeIdleCourses: true,
-  );
+    fallbackDisplayIndex: displayIndex,
+  ).options;
   final items = !recoveryActive
       ? AssignmentQuery.filterHome(
           catalogAssignments,
@@ -179,32 +225,6 @@ HomeViewData prepareHomeViewData({
       typeFilter == AssignmentTypeFilter.all &&
       manualItems.isEmpty &&
       !displayAssignments.any((a) => a.courseKey == courseKey);
-  Map<String, int> courseCountsFor(
-    AssignmentTypeFilter type,
-    AssignmentDeadlineFilter deadline,
-  ) =>
-      countHomeCourseItems(
-        options: options,
-        filteredAssignments: AssignmentQuery.filterHome(
-          allFollowedSources,
-          query: query,
-          deadline: deadline,
-          type: type,
-          includeHistorical: false,
-          index: pickerIndex,
-          now: now,
-          coursework: coursework,
-        ),
-        filteredManualEntries: HomeManualTimeline.filterManualEntries(
-          store.isAuthenticated
-              ? store.notebook.entries
-              : const <ManualEntry>[],
-          query: query,
-          deadline: deadline,
-          type: type,
-          now: now,
-        ),
-      );
   final sortedTimelineItems = HomeManualTimeline.mergeAndSort(
     assignments: items,
     manualEntries: manualItems,
@@ -302,7 +322,6 @@ HomeViewData prepareHomeViewData({
     upcomingExam: upcomingExam,
     buddyMood: buddyMood,
     homeSnapshot: homeSnapshot,
-    courseCountsFor: courseCountsFor,
   );
 }
 

@@ -2,14 +2,12 @@ import 'package:flutter/material.dart';
 
 import '../../app/journal.dart';
 import '../../models/home_filters.dart';
-import '../../models/study_notebook.dart';
-import '../../services/assignment_query.dart';
 import '../../services/assignment_store.dart';
 import '../../services/home_course_filter.dart';
-import '../../services/home_manual_timeline.dart';
 import '../../services/interaction_feedback_service.dart';
 import 'home_action_bar.dart';
 import 'home_course_filter_row.dart';
+import 'home_timeline_list.dart';
 import 'journal_buttons.dart';
 import 'journal_grouped_card.dart';
 import 'journal_modal_sheet.dart';
@@ -99,67 +97,12 @@ class _HomeFilterSheetBodyState extends State<_HomeFilterSheetBody> {
     return key;
   }
 
-  ({
-    List<HomeCourseFilterOption> options,
-    Map<String, int> Function(
-        AssignmentTypeFilter, AssignmentDeadlineFilter) countsFor,
-  }) _liveCoursePickerData(AssignmentStore store) {
-    final now = widget.clock?.call() ?? DateTime.now();
-    final coursework = store.courseworkState;
-    final termCatalog = store.termCatalog;
-    final allFollowedSources = [
-      for (final group in store.localRecordGroups)
-        if (!group.hidden &&
-            (group.primary.courseKey == null ||
-                (store.follows(group.primary.courseKey!) &&
-                    !termCatalog.isBlocked(group.primary.courseKey!))))
-          ...group.sources,
-    ];
-    final pickerIndex = AssignmentDisplayIndex.from(allFollowedSources);
-    final pickerAssignments = AssignmentQuery.currentDisplay(
-      AssignmentQuery.scope(allFollowedSources, {}),
-      now,
-      index: pickerIndex,
-      coursework: coursework,
-    );
-    final options = buildHomeCourseFilterOptions(
-      assignments: pickerAssignments,
-      catalog: [
-        for (final course in store.courses)
-          if (store.follows(course.key) && !termCatalog.isBlocked(course.key))
-            course,
-      ],
-      records: allFollowedSources,
-      selectedCourseKey: _effectiveCourseKey(store),
-      termCatalog: termCatalog,
-      includeIdleCourses: true,
-    );
-    return (
-      options: options,
-      countsFor: (type, deadline) => countHomeCourseItems(
-            options: options,
-            filteredAssignments: AssignmentQuery.filterHome(
-              allFollowedSources,
-              query: _query,
-              deadline: deadline,
-              type: type,
-              includeHistorical: false,
-              index: pickerIndex,
-              now: now,
-              coursework: coursework,
-            ),
-            filteredManualEntries: HomeManualTimeline.filterManualEntries(
-              store.isAuthenticated
-                  ? store.notebook.entries
-                  : const <ManualEntry>[],
-              query: _query,
-              deadline: deadline,
-              type: type,
-              now: now,
-            ),
-          ),
-    );
-  }
+  HomeCoursePickerProjection _coursePickerProjection(AssignmentStore store) =>
+      computeHomeCoursePickerProjection(
+        store: store,
+        now: widget.clock?.call() ?? DateTime.now(),
+        selectedCourseKey: _effectiveCourseKey(store),
+      );
 
   @override
   Widget build(BuildContext context) {
@@ -169,7 +112,7 @@ class _HomeFilterSheetBodyState extends State<_HomeFilterSheetBody> {
       animation: store,
       builder: (context, _) {
         final effectiveCourseKey = _effectiveCourseKey(store);
-        final courseOptions = _liveCoursePickerData(store).options;
+        final courseOptions = _coursePickerProjection(store).options;
         final selectedCourseLabel = effectiveCourseKey == null
             ? '全部课程'
             : courseOptions
@@ -270,17 +213,62 @@ class _HomeFilterSheetBodyState extends State<_HomeFilterSheetBody> {
                       selected: effectiveCourseKey != null,
                       onClear: () => setState(() => _courseKey = null),
                       onTap: () async {
-                        final live = _liveCoursePickerData(store);
-                        final liveCourseOptions = live.options;
-                        final counts = live.countsFor(_type, _deadline);
-                        final ordered = sortHomeCourseOptionsByCount(
-                            liveCourseOptions, counts);
+                        final initialOptions =
+                            _coursePickerProjection(store).options;
+                        JournalPickerLiveSnapshot<String>
+                            buildCoursePickerSnapshot() {
+                          final projection = _coursePickerProjection(store);
+                          final liveCourseOptions = projection.options;
+                          final counts =
+                              projection.countsFor(_query, _type, _deadline);
+                          final ordered = sortHomeCourseOptionsByCount(
+                            liveCourseOptions,
+                            counts,
+                          );
+                          return JournalPickerLiveSnapshot<String>(
+                            options: [
+                              const JournalPickerOption<String>(
+                                value: '',
+                                label: '全部课程',
+                              ),
+                              for (final option in ordered)
+                                JournalPickerOption<String>(
+                                  key: ValueKey(
+                                      'course-option-${option.courseKey}'),
+                                  value: option.courseKey,
+                                  label: option.name,
+                                  subtitle: option.subtitle,
+                                  keywords: option.searchKeywords,
+                                  icon: courseIconFor(option.name),
+                                  trailingText: homeCourseCountLabel(
+                                      counts[option.courseKey] ?? 0),
+                                ),
+                            ],
+                            filterPredicate: (option, filterId) {
+                              if (option.value.isEmpty) return true;
+                              return store.termCatalog.matchesHomeCoursePicker(
+                                option.value,
+                                filterId,
+                                hasVisibleItems:
+                                    (counts[option.value] ?? 0) > 0,
+                              );
+                            },
+                            filterNoticeBuilder: (filterId, filtered) =>
+                                filterId == 'currentTerm' &&
+                                        filtered
+                                            .every((o) => o.value.isEmpty) &&
+                                        liveCourseOptions.isNotEmpty
+                                    ? '本学期暂未识别出课程，可切换到「本学年」或「全部学期」查看'
+                                    : null,
+                          );
+                        }
+
                         final picked = await showJournalPickerSheet<String>(
                           context,
                           title: '课程筛选',
                           selectedValue: effectiveCourseKey ?? '',
-                          searchable: liveCourseOptions.length > 5 ||
-                              liveCourseOptions
+                          searchable: initialOptions.length > 5 ||
+                              initialOptions
                                   .any((o) => o.teacherNames.isNotEmpty),
                           searchHint: '搜索课程或教师...',
                           displayPrefs: store.display,
@@ -303,38 +291,8 @@ class _HomeFilterSheetBodyState extends State<_HomeFilterSheetBody> {
                             ),
                           ],
                           initialFilterId: 'currentTerm',
-                          filterPredicate: (option, filterId) {
-                            if (option.value.isEmpty) return true;
-                            return store.termCatalog.matchesHomeCoursePicker(
-                              option.value,
-                              filterId,
-                              hasVisibleItems: (counts[option.value] ?? 0) > 0,
-                            );
-                          },
-                          filterNoticeBuilder: (filterId, filtered) =>
-                              filterId == 'currentTerm' &&
-                                      filtered.every((o) => o.value.isEmpty) &&
-                                      liveCourseOptions.isNotEmpty
-                                  ? '本学期暂未识别出课程，可切换到「本学年」或「全部学期」查看'
-                                  : null,
-                          options: [
-                            const JournalPickerOption<String>(
-                              value: '',
-                              label: '全部课程',
-                            ),
-                            for (final option in ordered)
-                              JournalPickerOption<String>(
-                                key: ValueKey(
-                                    'course-option-${option.courseKey}'),
-                                value: option.courseKey,
-                                label: option.name,
-                                subtitle: option.subtitle,
-                                keywords: option.searchKeywords,
-                                icon: courseIconFor(option.name),
-                                trailingText: homeCourseCountLabel(
-                                    counts[option.courseKey] ?? 0),
-                              ),
-                          ],
+                          refreshListenable: store,
+                          liveBuilder: buildCoursePickerSnapshot,
                         );
                         if (picked != null && mounted) {
                           setState(

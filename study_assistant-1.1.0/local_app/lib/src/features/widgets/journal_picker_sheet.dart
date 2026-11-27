@@ -44,10 +44,26 @@ class JournalPickerOption<T> {
   final String? trailingText;
 }
 
+@immutable
+class JournalPickerLiveSnapshot<T> {
+  const JournalPickerLiveSnapshot({
+    required this.options,
+    this.filterPredicate,
+    this.filterNoticeBuilder,
+  });
+
+  final List<JournalPickerOption<T>> options;
+  final bool Function(JournalPickerOption<T> option, String filterId)?
+      filterPredicate;
+  final String? Function(
+          String? activeFilterId, List<JournalPickerOption<T>> filtered)?
+      filterNoticeBuilder;
+}
+
 Future<T?> showJournalPickerSheet<T>(
   BuildContext context, {
   required String title,
-  required List<JournalPickerOption<T>> options,
+  List<JournalPickerOption<T>> options = const [],
   T? selectedValue,
   bool? searchable,
   String searchHint = '搜索选项...',
@@ -60,24 +76,41 @@ Future<T?> showJournalPickerSheet<T>(
   String? Function(
           String? activeFilterId, List<JournalPickerOption<T>> filtered)?
       filterNoticeBuilder,
+  Listenable? refreshListenable,
+  JournalPickerLiveSnapshot<T> Function()? liveBuilder,
 }) {
-  final enableSearch = searchable ?? options.length > 6;
-  return showJournalModalSheet<T>(
-    context: context,
-    backgroundColor: Colors.transparent,
-    builder: (sheetContext) => _JournalPickerSheetBody<T>(
+  Widget buildBody(JournalPickerLiveSnapshot<T>? snapshot) {
+    final effectiveOptions = snapshot?.options ?? options;
+    final effectivePredicate = snapshot?.filterPredicate ?? filterPredicate;
+    final effectiveNoticeBuilder =
+        snapshot?.filterNoticeBuilder ?? filterNoticeBuilder;
+    return _JournalPickerSheetBody<T>(
       title: title,
-      options: options,
+      options: effectiveOptions,
       selectedValue: selectedValue,
-      enableSearch: enableSearch,
+      enableSearch: searchable ?? effectiveOptions.length > 6,
       searchHint: searchHint,
       emptyText: emptyText,
       displayPrefs: displayPrefs,
       filterOptions: filterOptions,
       initialFilterId: initialFilterId,
-      filterPredicate: filterPredicate,
-      filterNoticeBuilder: filterNoticeBuilder,
-    ),
+      filterPredicate: effectivePredicate,
+      filterNoticeBuilder: effectiveNoticeBuilder,
+    );
+  }
+
+  return showJournalModalSheet<T>(
+    context: context,
+    backgroundColor: Colors.transparent,
+    builder: (sheetContext) {
+      if (refreshListenable != null && liveBuilder != null) {
+        return AnimatedBuilder(
+          animation: refreshListenable,
+          builder: (_, __) => buildBody(liveBuilder()),
+        );
+      }
+      return buildBody(liveBuilder?.call());
+    },
   );
 }
 
@@ -298,6 +331,17 @@ class _JournalPickerSheetBodyState<T>
   void initState() {
     super.initState();
     if (widget.filterOptions.isNotEmpty) {
+      _activeFilterId = widget.initialFilterId ?? widget.filterOptions.first.id;
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant _JournalPickerSheetBody<T> oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.filterOptions.isEmpty) {
+      _activeFilterId = null;
+    } else if (_activeFilterId == null ||
+        !widget.filterOptions.any((f) => f.id == _activeFilterId)) {
       _activeFilterId = widget.initialFilterId ?? widget.filterOptions.first.id;
     }
   }

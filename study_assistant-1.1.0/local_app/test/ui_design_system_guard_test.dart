@@ -132,14 +132,27 @@ bool _isIdentifierChar(int codeUnit) =>
     codeUnit == 0x5F ||
     codeUnit == 0x24;
 
-/// Advances past a Dart comment or string literal starting at [index], or
-/// returns [index] unchanged if none starts there.
-int _skipDartCommentOrString(String source, int index) {
+void _writeMasked(StringBuffer? out, String source, int start, int end) {
+  if (out == null) return;
+  for (var k = start; k < end; k++) {
+    out.write(source[k] == '\n' ? '\n' : ' ');
+  }
+}
+
+/// Scans a Dart comment or string literal starting at [index], returning its
+/// exclusive end offset (or [index] unchanged if none starts there).
+///
+/// When [out] is non-null, writes a masked copy of the scanned span into [out]
+/// that preserves newlines/column offsets while keeping Dart code inside
+/// non-raw `${...}` interpolations intact.
+int _scanDartCommentOrString(String source, int index, StringBuffer? out) {
   final len = source.length;
   if (index >= len) return index;
   if (source.startsWith('//', index)) {
     final nl = source.indexOf('\n', index + 2);
-    return nl == -1 ? len : nl + 1;
+    final end = nl == -1 ? len : nl + 1;
+    _writeMasked(out, source, index, end);
+    return end;
   }
   if (source.startsWith('/*', index)) {
     var depth = 1;
@@ -155,6 +168,7 @@ int _skipDartCommentOrString(String source, int index) {
         pos++;
       }
     }
+    _writeMasked(out, source, index, pos);
     return pos;
   }
   var raw = false;
@@ -172,28 +186,62 @@ int _skipDartCommentOrString(String source, int index) {
       pos + 2 < len && source[pos + 1] == ch && source[pos + 2] == ch;
   final delim = triple ? ch * 3 : ch;
   pos += delim.length;
+  _writeMasked(out, source, index, pos);
   while (pos < len) {
     if (!raw && source[pos] == r'\') {
-      pos = pos + 1 < len ? pos + 2 : len;
+      final end = pos + 1 < len ? pos + 2 : len;
+      _writeMasked(out, source, pos, end);
+      pos = end;
       continue;
     }
-    if (source.startsWith(delim, pos)) return pos + delim.length;
+    if (source.startsWith(delim, pos)) {
+      final end = pos + delim.length;
+      _writeMasked(out, source, pos, end);
+      return end;
+    }
+    if (!raw && source.startsWith(r'${', pos)) {
+      _writeMasked(out, source, pos, pos + 2);
+      pos += 2;
+      var braceDepth = 1;
+      while (pos < len && braceDepth > 0) {
+        final next = _scanDartCommentOrString(source, pos, out);
+        if (next > pos) {
+          pos = next;
+          continue;
+        }
+        final c = source[pos];
+        if (c == '{') {
+          braceDepth++;
+          out?.write('{');
+        } else if (c == '}') {
+          braceDepth--;
+          out?.write(braceDepth == 0 ? ' ' : '}');
+        } else {
+          out?.write(c);
+        }
+        pos++;
+      }
+      continue;
+    }
+    out?.write(source[pos] == '\n' ? '\n' : ' ');
     pos++;
   }
   return len;
 }
+
+/// Advances past a Dart comment or string literal starting at [index], or
+/// returns [index] unchanged if none starts there.
+int _skipDartCommentOrString(String source, int index) =>
+    _scanDartCommentOrString(source, index, null);
 
 String _stripDartCommentsAndStrings(String source) {
   final len = source.length;
   final out = StringBuffer();
   var i = 0;
   while (i < len) {
-    final skipped = _skipDartCommentOrString(source, i);
-    if (skipped > i) {
-      for (var k = i; k < skipped; k++) {
-        out.write(source[k] == '\n' ? '\n' : ' ');
-      }
-      i = skipped;
+    final next = _scanDartCommentOrString(source, i, out);
+    if (next > i) {
+      i = next;
       continue;
     }
     out.write(source[i]);
@@ -486,6 +534,49 @@ triple double showModalBottomSheet(
           'safe_double.dart',
         ),
         isEmpty,
+      );
+    });
+
+    test(
+        'modal bottom sheet detector handles Dart string interpolation recursively',
+        () {
+      const interpolatedCall = r'''
+String render(BuildContext context, WidgetBuilder build) {
+  return '${showModalBottomSheet(context: context, builder: build)}';
+}
+''';
+      expect(
+        _findRawShowModalBottomSheetViolations(
+          interpolatedCall,
+          'interp_call.dart',
+        ),
+        hasLength(1),
+      );
+
+      const interpolatedSafeStringArg = r'''
+String render() {
+  return '${wrap('showModalBottomSheet(')}';
+}
+''';
+      expect(
+        _findRawShowModalBottomSheetViolations(
+          interpolatedSafeStringArg,
+          'interp_safe.dart',
+        ),
+        isEmpty,
+      );
+
+      const nestedInterpolatedCall = r'''
+String render(BuildContext context, WidgetBuilder build) {
+  return '${'${showModalBottomSheet(context: context, builder: build)}'}';
+}
+''';
+      expect(
+        _findRawShowModalBottomSheetViolations(
+          nestedInterpolatedCall,
+          'interp_nested.dart',
+        ),
+        hasLength(1),
       );
     });
 

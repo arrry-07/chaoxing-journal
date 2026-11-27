@@ -371,6 +371,129 @@ void main() {
     expect(store.syncReport.phase, SyncPhase.cancelled);
   });
 
+  for (final blockCursorWrite in [true, false]) {
+    test(
+        blockCursorWrite
+            ? 'historical sweep cancellation while waiting for the write lease '
+                'keeps the cursor unchanged'
+            : 'historical sweep cancellation during native session validation '
+                'keeps the journal unchanged', () async {
+      SharedPreferences.setMockInitialValues({});
+      final gateway = _HistoricalSweepGateway();
+      final repository =
+          LocalAssignmentRepository(backgroundReminderGateway: gateway);
+      await repository.activateAccount('student');
+      await repository.saveCourses(
+        const [
+          CourseRef(
+            courseId: '1',
+            clazzId: '10',
+            name: '本学期课程',
+            folderName: '2026年秋',
+          ),
+          CourseRef(
+            courseId: '2',
+            clazzId: '10',
+            name: '往期课程',
+            folderName: '2025年秋',
+          ),
+        ],
+        account: 'student',
+      );
+      final client = _SyncInterleaveClient();
+      const currentId = 'cx:current';
+      const historicalId = 'cx:historical';
+      client.fetchResult = () {
+        if (client.fetchCount == 1) {
+          return [_assignment(id: currentId, title: '本学期作业')];
+        }
+        gateway.gateNextWrite = blockCursorWrite;
+        gateway.gateAfterPendingUpdate = !blockCursorWrite;
+        return [_assignment(id: historicalId, title: '往期作业')];
+      };
+      final now = DateTime(2026, 11, 20, 11);
+      final store = AssignmentStore(
+        sessionStore: _MemorySessionStore(account: 'student'),
+        repository: repository,
+        chaoxingClient: client,
+        notificationService: _NoopNotificationService(),
+        widgetSnapshotService: _NoopWidgetSnapshotService(),
+        backgroundReminderGateway: gateway,
+        nativeReminderDeliveryEnabled: true,
+        manageBackgroundSchedule: false,
+        clock: () => now,
+      );
+      addTearDown(store.dispose);
+      await store.restoreSession();
+      final prefs = await SharedPreferences.getInstance();
+
+      final sync =
+          store.syncAssignmentsForTrigger(BackgroundSyncTrigger.daytime);
+      await Future.any([
+        blockCursorWrite
+            ? gateway.writeLeaseStarted.future
+            : gateway.sessionCheckStarted.future,
+        sync.then((_) => fail('未到达往期巡检的写入检查：${store.error}')),
+      ]);
+      store.cancelSynchronization();
+      if (blockCursorWrite) {
+        gateway.writeLease.complete(true);
+      } else {
+        gateway.sessionCheck.complete(true);
+      }
+      await sync;
+
+      expect(client.fetchCount, 2);
+      if (blockCursorWrite) {
+        await prefs.reload();
+        expect(prefs.getString('historical_sweep_state_v1'), isNull);
+        expect(store.historicalSweepState.lastBatchAtUtc, isNull);
+        expect(store.historicalSweepState.cursorIndex, 0);
+      } else {
+        expect(store.historicalSweepState.lastBatchAtUtc, now.toUtc());
+      }
+      expect((await repository.loadJournal()).map((item) => item.id), [
+        currentId,
+      ]);
+      expect(store.assignments.map((item) => item.id), [currentId]);
+    });
+  }
+
+  test('late sync lease denial leaves logged-out warnings and listeners alone',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final gateway = _GatedSyncAcquireGateway();
+    final store = AssignmentStore(
+      sessionStore: _MemorySessionStore(account: 'student'),
+      notificationService: _NoopNotificationService(),
+      widgetSnapshotService: _NoopWidgetSnapshotService(),
+      backgroundReminderGateway: gateway,
+      nativeReminderDeliveryEnabled: true,
+      manageBackgroundSchedule: false,
+    );
+    addTearDown(store.dispose);
+    await store.restoreSession();
+
+    final sync = store.syncAssignments();
+    await gateway.acquireStarted.future;
+    await store.logout();
+    expect(store.isAuthenticated, isFalse);
+    var lateNotifications = 0;
+    store.addListener(() => lateNotifications++);
+
+    gateway.acquire.complete(const SyncLeaseResult(
+      acquired: false,
+      waited: true,
+      lastAttemptAt: null,
+      lastFullSuccessAt: null,
+    ));
+    await sync;
+
+    expect(store.backgroundWarning, isNull);
+    expect(store.serviceWarnings, isEmpty);
+    expect(lateNotifications, 0);
+  });
+
   test('late sync lease release failure leaves logged-out warnings clean',
       () async {
     SharedPreferences.setMockInitialValues({});
@@ -1028,6 +1151,7 @@ class _SyncInterleaveClient extends ChaoxingLocalClient {
   final loginStarted = Completer<void>();
   Future<ChaoxingLoginResult>? loginResult;
   void Function()? onFetch;
+  List<Assignment> Function()? fetchResult;
 
   @override
   bool get needsSessionInitialization => needsInitialization;
@@ -1052,7 +1176,7 @@ class _SyncInterleaveClient extends ChaoxingLocalClient {
   Future<List<Assignment>> fetchAssignments() async {
     fetchCount++;
     onFetch?.call();
-    return [];
+    return fetchResult?.call() ?? [];
   }
 }
 
@@ -1086,10 +1210,7 @@ class _GatedWriteLeaseGateway extends BackgroundReminderGateway {
   Future<void> releaseWriteLease(String owner) async {}
 }
 
-class _GatedSyncReleaseGateway extends _GatedWriteLeaseGateway {
-  final releaseStarted = Completer<void>();
-  final release = Completer<void>();
-
+class _SyncTestGateway extends _GatedWriteLeaseGateway {
   @override
   Future<bool> isAvailable() async => true;
 
@@ -1102,6 +1223,12 @@ class _GatedSyncReleaseGateway extends _GatedWriteLeaseGateway {
   @override
   Future<bool> isSessionCurrent(String accountHash, int sessionEpoch) async =>
       true;
+
+  @override
+  Future<void> markPendingUpdate({
+    required String accountHash,
+    required int sessionEpoch,
+  }) async {}
 
   @override
   Future<void> updateSettings(
@@ -1146,6 +1273,58 @@ class _GatedSyncReleaseGateway extends _GatedWriteLeaseGateway {
         lastAttemptAt: null,
         lastFullSuccessAt: null,
       );
+
+  @override
+  Future<void> releaseSyncLease({
+    required String accountHash,
+    required String requestId,
+  }) async {}
+}
+
+class _HistoricalSweepGateway extends _SyncTestGateway {
+  bool gateAfterPendingUpdate = false;
+  bool _gateNextSessionCheck = false;
+  final sessionCheckStarted = Completer<void>();
+  final sessionCheck = Completer<bool>();
+
+  @override
+  Future<void> markPendingUpdate({
+    required String accountHash,
+    required int sessionEpoch,
+  }) async {
+    if (gateAfterPendingUpdate) {
+      gateAfterPendingUpdate = false;
+      _gateNextSessionCheck = true;
+    }
+  }
+
+  @override
+  Future<bool> isSessionCurrent(String accountHash, int sessionEpoch) async {
+    if (!_gateNextSessionCheck) return true;
+    _gateNextSessionCheck = false;
+    sessionCheckStarted.complete();
+    return sessionCheck.future;
+  }
+}
+
+class _GatedSyncAcquireGateway extends _SyncTestGateway {
+  final acquireStarted = Completer<void>();
+  final acquire = Completer<SyncLeaseResult>();
+
+  @override
+  Future<SyncLeaseResult> acquireSyncLease({
+    required String accountHash,
+    required String requestId,
+    required DateTime requestedAt,
+  }) {
+    acquireStarted.complete();
+    return acquire.future;
+  }
+}
+
+class _GatedSyncReleaseGateway extends _SyncTestGateway {
+  final releaseStarted = Completer<void>();
+  final release = Completer<void>();
 
   @override
   Future<void> releaseSyncLease({

@@ -130,6 +130,9 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
   String? _feedbackAccount;
   HomeFilters? _preExamStripFilters;
   int? _preExamStripEpoch;
+  HomeSortOrder? _pendingSortOrder;
+  int? _pendingSortEpoch;
+  int _pendingSortSeq = 0;
   ClawdCompanionController? _clawdController;
   ClawdCompanionController? _localClawdController;
   bool _appResumed = true;
@@ -351,6 +354,11 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
       _localClawdController?.resetForAccountChange();
       _clearCompletingManual();
       _pinPulseByKey.clear();
+      _preExamStripFilters = null;
+      _preExamStripEpoch = null;
+      _pendingSortOrder = null;
+      _pendingSortEpoch = null;
+      _pendingSortSeq++;
       _feedbackEpoch = store.accountEpoch;
       _feedbackAccount = store.account;
       store.addListener(_onStoreChanged);
@@ -433,6 +441,10 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
   AssignmentDeadlineFilter get _deadlineFilter => store.homeFilters.deadline;
   HomeSortOrder get _sortOrder =>
       normalizedHomeSort(store.homeFilters.sortOrder);
+  HomeSortOrder _effectiveSortOrder(int epoch) =>
+      (_pendingSortEpoch == epoch && _pendingSortOrder != null)
+          ? _pendingSortOrder!
+          : _sortOrder;
   AssignmentTypeFilter get _typeFilter =>
       normalizedHomeType(store.homeFilters.type);
   final _openingAssignments = <String>{};
@@ -914,17 +926,27 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
         store.account != openingAccount) {
       return;
     }
-    await _saveFilters(
-      HomeFilters(
-        query: _query,
-        courseKey: _courseKey,
-        deadline: _deadlineFilter,
-        type: _typeFilter,
-        sortOrder: order,
-      ),
-      openingEpoch,
-      openingAccount,
-    );
+    final seq = ++_pendingSortSeq;
+    _pendingSortOrder = order;
+    _pendingSortEpoch = openingEpoch;
+    try {
+      await _saveFilters(
+        HomeFilters(
+          query: _query,
+          courseKey: _courseKey,
+          deadline: _deadlineFilter,
+          type: _typeFilter,
+          sortOrder: order,
+        ),
+        openingEpoch,
+        openingAccount,
+      );
+    } finally {
+      if (_pendingSortSeq == seq) {
+        _pendingSortOrder = null;
+        _pendingSortEpoch = null;
+      }
+    }
   }
 
   Future<void> _openFilters() async {
@@ -938,7 +960,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
         courseKey: _courseKey,
         deadline: _deadlineFilter,
         type: _typeFilter,
-        sortOrder: _sortOrder,
+        sortOrder: _effectiveSortOrder(openingEpoch),
       ),
       clock: widget.clock,
     );
@@ -950,6 +972,9 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
     }
     _preExamStripFilters = null;
     _preExamStripEpoch = null;
+    _pendingSortOrder = null;
+    _pendingSortEpoch = null;
+    _pendingSortSeq++;
     await _saveFilters(
       HomeFilters(
         query: selection.query.trim(),
@@ -967,13 +992,14 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
     final inExamView = _typeFilter == AssignmentTypeFilter.exam;
     final epoch = store.accountEpoch;
     final account = store.account;
+    final effectiveSortOrder = _effectiveSortOrder(epoch);
     if (!inExamView) {
       _preExamStripFilters = HomeFilters(
         query: _query,
         courseKey: _courseKey,
         deadline: _deadlineFilter,
         type: _typeFilter,
-        sortOrder: _sortOrder,
+        sortOrder: effectiveSortOrder,
       );
       _preExamStripEpoch = epoch;
       unawaited(_saveFilters(
@@ -982,7 +1008,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
           courseKey: _courseKey,
           deadline: AssignmentDeadlineFilter.all,
           type: AssignmentTypeFilter.exam,
-          sortOrder: _sortOrder,
+          sortOrder: effectiveSortOrder,
         ),
         epoch,
         account,
@@ -1005,7 +1031,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
           courseKey: restoredCourseKey,
           deadline: previous?.deadline ?? _deadlineFilter,
           type: previous?.type ?? AssignmentTypeFilter.all,
-          sortOrder: _sortOrder,
+          sortOrder: effectiveSortOrder,
         ),
         epoch,
         account,
@@ -1224,7 +1250,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                   courseKey: _courseKey,
                   deadline: nextDeadline,
                   type: _typeFilter,
-                  sortOrder: _sortOrder,
+                  sortOrder: _effectiveSortOrder(epoch),
                 ),
                 epoch,
                 account,
@@ -1250,7 +1276,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                 courseKey: _courseKey,
                 deadline: _deadlineFilter,
                 type: _typeFilter,
-                sortOrder: _sortOrder,
+                sortOrder: _effectiveSortOrder(epoch),
               ),
               epoch,
               account,
@@ -1264,7 +1290,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                   courseKey: _courseKey,
                   deadline: _deadlineFilter,
                   type: AssignmentTypeFilter.all,
-                  sortOrder: _sortOrder,
+                  sortOrder: _effectiveSortOrder(epoch),
                 ),
                 epoch,
                 account,
@@ -1276,7 +1302,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                 courseKey: _courseKey,
                 deadline: AssignmentDeadlineFilter.all,
                 type: _typeFilter,
-                sortOrder: _sortOrder,
+                sortOrder: _effectiveSortOrder(epoch),
               ),
               epoch,
               account,
@@ -1287,7 +1313,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
                 courseKey: null,
                 deadline: _deadlineFilter,
                 type: _typeFilter,
-                sortOrder: _sortOrder,
+                sortOrder: _effectiveSortOrder(epoch),
               ),
               epoch,
               account,
@@ -1296,7 +1322,7 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
               _preExamStripFilters = null;
               _preExamStripEpoch = null;
               unawaited(_saveFilters(
-                HomeFilters(sortOrder: _sortOrder),
+                HomeFilters(sortOrder: _effectiveSortOrder(epoch)),
                 epoch,
                 account,
               ));
@@ -1333,13 +1359,13 @@ class _AssignmentListScreenState extends State<AssignmentListScreen>
               query: _query,
               deadline: _deadlineFilter,
               type: _typeFilter,
-              sortOrder: _sortOrder,
+              sortOrder: _effectiveSortOrder(epoch),
             ),
             epoch,
             account,
           ),
           onClearAllFilters: () => _saveFilters(
-            HomeFilters(sortOrder: _sortOrder),
+            HomeFilters(sortOrder: _effectiveSortOrder(epoch)),
             epoch,
             account,
           ),

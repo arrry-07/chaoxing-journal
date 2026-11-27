@@ -607,8 +607,16 @@ extension _AssignmentStoreSync on AssignmentStore {
         requestedAt: leaseRequestedAt,
       );
       if (!lease.acquired) {
-        _backgroundWarning = '另一轮作业检查仍在进行，本次已合并等待';
-        this._notify();
+        if (_isSessionStateCurrent(
+          epoch: generation,
+          account: account,
+          checkAccount: true,
+          expectedAuthenticated: null,
+          syncOperation: operation,
+        )) {
+          _backgroundWarning = '另一轮作业检查仍在进行，本次已合并等待';
+          this._notify();
+        }
         return null;
       }
     }
@@ -1052,6 +1060,7 @@ extension _AssignmentStoreSync on AssignmentStore {
 
     final account = session.account;
     if (account == null) return;
+    final canCommit = _scopedWriteGateFor(session);
 
     final savedReport = syncReport;
     final savedError = _error;
@@ -1101,32 +1110,29 @@ extension _AssignmentStoreSync on AssignmentStore {
       abortedMidBatch: abortedMidBatch,
     );
     try {
-      await repository.saveHistoricalSweepState(nextState, account);
-      if (_isSessionCurrent(session)) {
-        _historicalSweepState = nextState;
-      }
+      await repository.saveHistoricalSweepState(
+        nextState,
+        account,
+        canCommit: canCommit,
+      );
+      if (!_isSessionCurrent(session)) return;
+      _historicalSweepState = nextState;
+    } on StaleSessionWriteException {
+      return;
     } catch (_) {
       // Cursor persistence failure leaves old cursor intact without failing
       // the primary daytime sync.
     }
 
-    if (swept.isNotEmpty && _isSessionCurrent(session) && !_disposed) {
+    if (swept.isNotEmpty && _isSessionCurrent(session)) {
       try {
         await _markReminderMutationPending();
         await repository.mergeAndSave(
           swept,
           completeSync: false,
-          canCommit: _nativeReminderAvailable
-              ? () async {
-                  if (!_isSessionCurrent(session) || _disposed) return false;
-                  return backgroundReminderGateway.isSessionCurrent(
-                    session.accountHash!,
-                    session.sessionEpoch,
-                  );
-                }
-              : () async => _isSessionCurrent(session) && !_disposed,
+          canCommit: canCommit,
         );
-        if (_isSessionCurrent(session) && !_disposed) {
+        if (_isSessionCurrent(session)) {
           await _reloadJournal(
             completeSync: false,
             detectNewAssignments: false,
@@ -1140,7 +1146,7 @@ extension _AssignmentStoreSync on AssignmentStore {
         // Keep primary daytime sync state intact when best-effort historical merge fails.
       }
     }
-    if (_isSessionCurrent(session) && !_disposed) {
+    if (_isSessionCurrent(session)) {
       syncReport = savedReport;
       _error = savedError;
     }
@@ -1386,28 +1392,16 @@ extension _AssignmentStoreSync on AssignmentStore {
     final before = [..._assignments, ..._hiddenAssignments];
     await _markReminderMutationPending();
     markSavingStage();
-    await repository.mergeAndSave(
-      incoming,
-      completeSync: cleanSuccess && isFullCoverage,
-      canCommit: _nativeReminderAvailable
-          ? () async {
-              _ensureSyncActive(operation);
-              if (generation != _generation || _disposed) {
-                throw const SyncCancelledException();
-              }
-              final current = await backgroundReminderGateway.isSessionCurrent(
-                  _accountHash!, _nativeSessionEpoch);
-              _ensureSyncActive(operation);
-              if (generation != _generation || _disposed) {
-                throw const SyncCancelledException();
-              }
-              return current;
-            }
-          : () async {
-              _ensureSyncActive(operation);
-              return generation == _generation && !_disposed;
-            },
-    );
+    try {
+      await repository.mergeAndSave(
+        incoming,
+        completeSync: cleanSuccess && isFullCoverage,
+        canCommit: _scopedWriteGateFor(syncSession),
+      );
+    } on StaleSessionWriteException {
+      _ensureSyncActive(operation);
+      rethrow;
+    }
     if (generation != _generation || _disposed) return;
     if (repository.identityConflictCount > 0) {
       warning ??= '部分旧记录存在重复关联，已暂停其提醒，请查看本地记录';
