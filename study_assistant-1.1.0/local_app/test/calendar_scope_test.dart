@@ -622,7 +622,7 @@ void main() {
     await tester.pumpAndSettle();
 
     final title = tester.getRect(find.text('课业日历'));
-    final agendaEntry = tester.getRect(find.text('个人待办与考试'));
+    final agendaEntry = tester.getRect(find.text('个人待办'));
     expect(agendaEntry.left, greaterThan(title.right));
     final agendaHeading = find.text('11月18日 · 议程');
     expect(agendaHeading.hitTestable(), findsOneWidget);

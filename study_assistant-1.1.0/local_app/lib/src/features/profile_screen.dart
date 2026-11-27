@@ -4,6 +4,7 @@ import 'display_settings_screen.dart';
 import 'widgets/appearance_controls.dart';
 import 'widgets/clawd_speech_bubble.dart';
 import 'widgets/clawd_title_stage.dart';
+import 'widgets/journal_buttons.dart';
 import 'widgets/update_scope.dart';
 import 'widgets/update_dialog.dart';
 import 'open_source_screen.dart';
@@ -480,25 +481,30 @@ class _ProfileScreenState extends State<ProfileScreen>
                         const SizedBox(height: 18),
                         SizedBox(
                           width: double.infinity,
-                          child: OutlinedButton(
-                            onPressed: store.isLoading
-                                ? null
-                                : () => _confirmLogout(context),
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: journal.ink,
-                              side: BorderSide(color: journal.rule, width: 0.8),
-                              backgroundColor: journal.sheet,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 16,
-                                vertical: 16,
+                          child: JournalPressableScale(
+                            enabled: !store.isLoading,
+                            pressScale: 0.97,
+                            child: OutlinedButton(
+                              onPressed: store.isLoading
+                                  ? null
+                                  : () => _confirmLogout(context),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: journal.ink,
+                                side:
+                                    BorderSide(color: journal.rule, width: 0.8),
+                                backgroundColor: journal.sheet,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 16,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(14),
+                                ),
                               ),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(14),
+                              child: const Text(
+                                '退出登录并清理本机记录',
+                                textAlign: TextAlign.center,
                               ),
-                            ),
-                            child: const Text(
-                              '退出登录并清理本机记录',
-                              textAlign: TextAlign.center,
                             ),
                           ),
                         ),
@@ -849,26 +855,30 @@ class _SettingsTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final journal = Journal.of(context);
-    return ListTile(
-      leading: Icon(icon, color: IconTheme.of(context).color, size: 22),
-      title: Text(title, style: journal.entryTitle),
-      subtitle: subtitle == null ? null : Text(subtitle!),
-      subtitleTextStyle: compactSubtitle
-          ? Theme.of(context).textTheme.bodySmall?.copyWith(
-                fontSize: 12,
-                height: 1.4,
-                color: journal.muted,
-              )
-          : null,
-      trailing: trailingOnPressed != null
-          ? IconButton(
-              tooltip: '打开链接',
-              onPressed: trailingOnPressed,
-              icon: Icon(trailing))
-          : onTap == null
-              ? null
-              : Icon(trailing, color: journal.muted),
-      onTap: onTap,
+    return JournalPressableScale(
+      enabled: onTap != null,
+      pressScale: 0.985,
+      child: ListTile(
+        leading: Icon(icon, color: IconTheme.of(context).color, size: 22),
+        title: Text(title, style: journal.entryTitle),
+        subtitle: subtitle == null ? null : Text(subtitle!),
+        subtitleTextStyle: compactSubtitle
+            ? Theme.of(context).textTheme.bodySmall?.copyWith(
+                  fontSize: 12,
+                  height: 1.4,
+                  color: journal.muted,
+                )
+            : null,
+        trailing: trailingOnPressed != null
+            ? IconButton(
+                tooltip: '打开链接',
+                onPressed: trailingOnPressed,
+                icon: Icon(trailing))
+            : onTap == null
+                ? null
+                : Icon(trailing, color: journal.muted),
+        onTap: onTap,
+      ),
     );
   }
 }

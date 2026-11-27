@@ -9,6 +9,7 @@ import '../services/app_update_service.dart';
 import '../services/external_link_service.dart';
 import 'widgets/journal_buttons.dart';
 import 'widgets/journal_grouped_card.dart';
+import 'widgets/journal_modal_sheet.dart';
 
 class HelpFeedbackScreen extends StatelessWidget {
   const HelpFeedbackScreen({super.key});
@@ -182,9 +183,8 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
       showJournalMessage(context, '已打开邮件草稿，请在邮箱中确认发送');
       return;
     }
-    await showModalBottomSheet<void>(
+    await showJournalModalSheet<void>(
       context: context,
-      useSafeArea: true,
       backgroundColor: Journal.of(context).sheetElevated,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),

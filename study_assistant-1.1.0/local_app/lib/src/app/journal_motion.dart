@@ -68,9 +68,9 @@ class JournalMotion {
           ? AnimationStyle.noAnimation
           : const AnimationStyle(
               curve: criticalCurve,
-              reverseCurve: Curves.easeInCubic,
+              reverseCurve: easeOut,
               duration: Duration(milliseconds: 280),
-              reverseDuration: Duration(milliseconds: 210),
+              reverseDuration: Duration(milliseconds: 180),
             );
 
   static SpringSimulation springFor(

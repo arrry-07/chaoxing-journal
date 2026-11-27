@@ -1,4 +1,6 @@
 import 'dart:io';
+import 'dart:math' as math;
+import 'dart:ui' show Tristate;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -8,10 +10,13 @@ import 'package:intl/date_symbol_data_local.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:study_assistant_mobile/src/app/app_shell.dart';
 import 'package:study_assistant_mobile/src/app/journal.dart';
+import 'package:study_assistant_mobile/src/app/journal_motion.dart';
 import 'package:study_assistant_mobile/src/features/assignment_list_screen.dart';
 import 'package:study_assistant_mobile/src/features/calendar_screen.dart';
 import 'package:study_assistant_mobile/src/features/profile_screen.dart';
 import 'package:study_assistant_mobile/src/features/stats_screen.dart';
+import 'package:study_assistant_mobile/src/features/widgets/journal_context_menu.dart';
+import 'package:study_assistant_mobile/src/features/widgets/journal_modal_sheet.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/services/assignment_store.dart';
 import 'package:study_assistant_mobile/src/services/local_notification_service.dart';
@@ -448,5 +453,191 @@ JournalGroupedCard(
         },
       );
     }
+  });
+
+  group('M3 · JournalPalette.subtle, modal sheet, and context menu', () {
+    double contrastRatio(Color fg, Color bg) {
+      final l1 = fg.computeLuminance();
+      final l2 = bg.computeLuminance();
+      return (math.max(l1, l2) + 0.05) / (math.min(l1, l2) + 0.05);
+    }
+
+    test('JournalPalette.subtle meets WCAG AA across paper/sheet/parchment',
+        () {
+      expect(Journal.muted, const Color(0xFF363C44));
+      expect(Journal.entryTitle.fontSize, 15.5);
+      expect(Journal.entryTitle.height, 1.38);
+      expect(Journal.entryTitle.fontWeight, FontWeight.w400);
+      expect(Journal.display.fontSize, 30);
+      expect(Journal.display.fontWeight, FontWeight.w400);
+
+      final light = StudyAssistantTheme.light.extension<JournalPalette>()!;
+      final dark = StudyAssistantTheme.dark.extension<JournalPalette>()!;
+      expect(light.subtle, const Color(0xFF565E69));
+      expect(dark.subtle, const Color(0xFFA5A096));
+
+      for (final p in [light, dark]) {
+        expect(contrastRatio(p.subtle, p.paper), greaterThanOrEqualTo(4.5));
+        expect(contrastRatio(p.subtle, p.sheet), greaterThanOrEqualTo(4.5));
+        expect(contrastRatio(p.subtle, p.parchment), greaterThanOrEqualTo(4.5));
+      }
+
+      final copied = light.copyWith(subtle: const Color(0xFF445566));
+      expect(copied.subtle, const Color(0xFF445566));
+      expect(copied, isNot(equals(light)));
+      expect(copied.hashCode, isNot(equals(light.hashCode)));
+      expect(light.copyWith(), equals(light));
+      expect(light.copyWith().hashCode, equals(light.hashCode));
+
+      final mid = light.lerp(dark, 0.5);
+      expect(mid.subtle, Color.lerp(light.subtle, dark.subtle, 0.5));
+    });
+
+    testWidgets(
+        'modalSheetAnimationStyle uses 180ms easeOut dismiss and honors reduced motion',
+        (tester) async {
+      late AnimationStyle normalStyle;
+      late AnimationStyle reducedStyle;
+
+      await tester.pumpWidget(
+        MediaQuery(
+          data: const MediaQueryData(disableAnimations: false),
+          child: Builder(
+            builder: (context) {
+              normalStyle = JournalMotion.modalSheetAnimationStyle(context);
+              return const SizedBox.shrink();
+            },
+          ),
+        ),
+      );
+
+      await tester.pumpWidget(
+        MediaQuery(
+          data: const MediaQueryData(disableAnimations: true),
+          child: Builder(
+            builder: (context) {
+              reducedStyle = JournalMotion.modalSheetAnimationStyle(context);
+              return const SizedBox.shrink();
+            },
+          ),
+        ),
+      );
+
+      expect(normalStyle.duration, const Duration(milliseconds: 280));
+      expect(normalStyle.reverseDuration, const Duration(milliseconds: 180));
+      expect(normalStyle.curve, JournalMotion.criticalCurve);
+      expect(normalStyle.reverseCurve, JournalMotion.easeOut);
+      expect(reducedStyle, AnimationStyle.noAnimation);
+    });
+
+    testWidgets(
+        'showJournalModalSheet injects animation style without forcing transparent surface',
+        (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: StudyAssistantTheme.light,
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => TextButton(
+                onPressed: () {
+                  showJournalModalSheet<void>(
+                    context: context,
+                    builder: (_) => const SizedBox(
+                      height: 120,
+                      child: Center(child: Text('共享弹窗内容')),
+                    ),
+                  );
+                },
+                child: const Text('打开弹窗'),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('打开弹窗'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('共享弹窗内容'), findsOneWidget);
+      final route = ModalRoute.of(tester.element(find.text('共享弹窗内容')))
+          as ModalBottomSheetRoute<void>;
+      expect(
+        route.sheetAnimationStyle?.reverseDuration,
+        const Duration(milliseconds: 180),
+      );
+      expect(route.sheetAnimationStyle?.reverseCurve, JournalMotion.easeOut);
+      final bottomSheet = tester.widget<BottomSheet>(find.byType(BottomSheet));
+      expect(
+        bottomSheet.backgroundColor,
+        StudyAssistantTheme.light.extension<JournalPalette>()!.sheet,
+      );
+      expect(bottomSheet.backgroundColor, isNot(Colors.transparent));
+    });
+
+    testWidgets(
+        'JournalContextMenuAction.selected highlights with accent and keeps destructive priority',
+        (tester) async {
+      final semantics = tester.ensureSemantics();
+      try {
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: StudyAssistantTheme.light,
+            home: Scaffold(
+              body: Builder(
+                builder: (context) => TextButton(
+                  onPressed: () {
+                    showJournalContextMenu(
+                      context: context,
+                      anchorRect: const Rect.fromLTWH(40, 80, 140, 40),
+                      useSelectionFeedback: true,
+                      actions: [
+                        JournalContextMenuAction(
+                          label: '当前排序',
+                          icon: Icons.schedule_rounded,
+                          selected: true,
+                          onSelected: () {},
+                        ),
+                        JournalContextMenuAction(
+                          label: '危险操作',
+                          icon: Icons.delete_outline_rounded,
+                          destructive: true,
+                          selected: true,
+                          onSelected: () {},
+                        ),
+                      ],
+                    );
+                  },
+                  child: const Text('打开菜单'),
+                ),
+              ),
+            ),
+          ),
+        );
+
+        await tester.tap(find.text('打开菜单'));
+        await tester.pumpAndSettle();
+
+        final light = StudyAssistantTheme.light.extension<JournalPalette>()!;
+        final selectedText = tester.widget<Text>(find.text('当前排序'));
+        expect(selectedText.style?.color, light.accent);
+        expect(find.byIcon(Icons.check_rounded), findsOneWidget);
+        final checkIcon = tester.widget<Icon>(find.byIcon(Icons.check_rounded));
+        expect(checkIcon.color, light.accent);
+        final selectedSemantics =
+            tester.getSemantics(find.text('当前排序')).getSemanticsData();
+        expect(selectedSemantics.flagsCollection.isSelected, Tristate.isTrue);
+
+        final destructiveText = tester.widget<Text>(find.text('危险操作'));
+        expect(destructiveText.style?.color, light.berry);
+        final destructiveSemantics =
+            tester.getSemantics(find.text('危险操作')).getSemanticsData();
+        expect(
+          destructiveSemantics.flagsCollection.isSelected,
+          isNot(Tristate.isTrue),
+        );
+      } finally {
+        semantics.dispose();
+      }
+    });
   });
 }

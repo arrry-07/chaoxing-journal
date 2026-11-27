@@ -6,6 +6,7 @@ import '../../app/journal.dart';
 import '../../app/journal_motion.dart';
 import '../../models/display_preferences.dart';
 import 'journal_buttons.dart';
+import 'journal_modal_sheet.dart';
 
 @immutable
 class JournalPickerFilterOption {
@@ -61,13 +62,9 @@ Future<T?> showJournalPickerSheet<T>(
       filterNoticeBuilder,
 }) {
   final enableSearch = searchable ?? options.length > 6;
-  return showModalBottomSheet<T>(
+  return showJournalModalSheet<T>(
     context: context,
-    useRootNavigator: true,
-    isScrollControlled: true,
-    useSafeArea: true,
     backgroundColor: Colors.transparent,
-    sheetAnimationStyle: JournalMotion.modalSheetAnimationStyle(context),
     builder: (sheetContext) => _JournalPickerSheetBody<T>(
       title: title,
       options: options,

@@ -8,6 +8,7 @@ import '../../services/assignment_query.dart';
 import '../../services/coursework_deadline.dart';
 import '../../services/exam_schedule_presentation.dart';
 import 'coursework_status_pill.dart';
+import 'journal_buttons.dart';
 
 class AssignmentCard extends StatelessWidget {
   const AssignmentCard(
@@ -305,12 +306,14 @@ class AssignmentCard extends StatelessWidget {
     final largeText = JournalLayout.isLargeText(context);
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
     final compactLayout = compact && !largeText;
-    final titleStyle = compactLayout
-        ? journal.entryTitle.copyWith(fontSize: 14.5)
-        : journal.entryTitle;
-    final metaStyle = compactLayout
-        ? journal.metadata.copyWith(fontSize: 12.5)
-        : journal.metadata;
+    final titleStyle = journal.entryTitle.copyWith(
+      fontSize: compactLayout ? 14.8 : 16.0,
+      height: 1.34,
+    );
+    final metaStyle = journal.metadata.copyWith(
+      color: journal.subtle,
+      fontSize: compactLayout ? 12.5 : null,
+    );
     final bodyGap = compactLayout ? 2.0 : 4.0;
     final pillRunGap = compactLayout ? 2.0 : 5.0;
 
@@ -440,26 +443,30 @@ class AssignmentCard extends StatelessWidget {
           excludeSemantics: true,
           child: Tooltip(
             message: openTooltip,
-            child: OutlinedButton.icon(
-              key: ValueKey('open-assignment-${a.id}'),
-              onPressed: enabled ? onOpenAssignment : null,
-              style: OutlinedButton.styleFrom(
-                minimumSize: const Size(48, 48),
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                backgroundColor: journal.parchment,
-                side: BorderSide.none,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(20),
+            child: JournalPressableScale(
+              enabled: enabled,
+              pressScale: 0.92,
+              child: OutlinedButton.icon(
+                key: ValueKey('open-assignment-${a.id}'),
+                onPressed: enabled ? onOpenAssignment : null,
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size(48, 48),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  backgroundColor: journal.parchment,
+                  side: BorderSide.none,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(20),
+                  ),
                 ),
-              ),
-              icon: iconWidget,
-              label: ExcludeSemantics(
-                child: Text(
-                  shortOpenLabel,
-                  style: journal.metadata.copyWith(
-                    color: enabled ? journal.ink : journal.muted,
-                    fontWeight: FontWeight.w600,
+                icon: iconWidget,
+                label: ExcludeSemantics(
+                  child: Text(
+                    shortOpenLabel,
+                    style: journal.metadata.copyWith(
+                      color: enabled ? journal.ink : journal.muted,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
               ),
@@ -475,13 +482,17 @@ class AssignmentCard extends StatelessWidget {
         label: openTooltip,
         onTap: enabled ? onOpenAssignment : null,
         excludeSemantics: true,
-        child: IconButton(
-          key: ValueKey('open-assignment-${a.id}'),
-          tooltip: openTooltip,
-          onPressed: enabled ? onOpenAssignment : null,
-          constraints: const BoxConstraints.tightFor(width: 48, height: 48),
-          padding: EdgeInsets.zero,
-          icon: iconWidget,
+        child: JournalPressableScale(
+          enabled: enabled,
+          pressScale: 0.92,
+          child: IconButton(
+            key: ValueKey('open-assignment-${a.id}'),
+            tooltip: openTooltip,
+            onPressed: enabled ? onOpenAssignment : null,
+            constraints: const BoxConstraints.tightFor(width: 48, height: 48),
+            padding: EdgeInsets.zero,
+            icon: iconWidget,
+          ),
         ),
       );
     }
@@ -528,9 +539,9 @@ class AssignmentCard extends StatelessWidget {
       final remLabel = overdue
           ? (isManualDeadline ? '手动已过' : '已逾期')
           : _compactRemaining(d, now);
-      final dateColor = pinUrgent ? journal.accent : journal.muted;
+      final dateColor = pinUrgent ? journal.accent : journal.subtle;
       final clockColor = pinUrgent ? journal.accent : journal.ink;
-      final remColor = pinUrgent ? journal.accent : journal.muted;
+      final remColor = pinUrgent ? journal.accent : journal.subtle;
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
@@ -715,7 +726,7 @@ class AssignmentCard extends StatelessWidget {
                                                     height: 1.22,
                                                     color: highlightToday
                                                         ? journal.accent
-                                                        : journal.muted,
+                                                        : journal.subtle,
                                                   ),
                                                 ),
                                               ],

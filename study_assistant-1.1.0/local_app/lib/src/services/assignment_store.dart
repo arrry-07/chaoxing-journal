@@ -34,7 +34,6 @@ import 'account_identity.dart';
 import 'assignment_reminder_planner.dart';
 import 'background_check_settings.dart';
 import 'background_reminder_gateway.dart';
-import 'daily_summary.dart';
 import 'daytime_check_policy.dart';
 import '../models/assignment_change.dart';
 import '../models/backup_snapshot.dart';
@@ -44,10 +43,13 @@ import '../models/personal_workspace.dart';
 import '../models/pinned_assignments.dart';
 import '../models/reminder_history.dart';
 import '../models/study_notebook.dart';
+import 'assignment_personal_state_coordinator.dart';
+import 'assignment_reminder_coordinator.dart';
 import 'course_term_catalog.dart';
 import 'coursework_deadline.dart';
-import 'deadline_quiet_hours_policy.dart';
-import 'reminder_explanation.dart';
+
+part 'assignment_store_personal.dart';
+part 'assignment_store_reminders.dart';
 
 class ReturnCheckConfirmation {
   const ReturnCheckConfirmation({
@@ -179,226 +181,30 @@ class AssignmentStore extends ChangeNotifier {
 
   Future<void>? _filterWrites;
 
-  Future<bool> saveHomeFilters(HomeFilters next, int expectedEpoch) {
-    final account = _account;
-    if (account == null || !_isSessionStateCurrent(epoch: expectedEpoch)) {
-      return Future<bool>.value(false);
-    }
-    final encoded = next.encode();
-    final write = (_filterWrites ?? Future<void>.value()).then((_) async {
-      if (!_isSessionStateCurrent(
-        epoch: expectedEpoch,
-        account: account,
-        checkAccount: true,
-      )) {
-        return false;
-      }
-      try {
-        await repository.saveHomeFilters(next, account);
-      } on StaleSessionWriteException {
-        return false;
-      } catch (error) {
-        if (_isSessionStateCurrent(
-          epoch: expectedEpoch,
-          account: account,
-          checkAccount: true,
-        )) {
-          _error = _friendlyError(error);
-          notifyListeners();
-        }
-        return false;
-      }
-      if (!_isSessionStateCurrent(
-        epoch: expectedEpoch,
-        account: account,
-        checkAccount: true,
-      )) {
-        return false;
-      }
-      _error = null;
-      homeFilters = HomeFilters.decode(encoded);
-      notifyListeners();
-      return true;
-    });
-    _filterWrites = write.then<void>((_) {}, onError: (Object _) {});
-    return write;
-  }
+  Future<bool> saveHomeFilters(HomeFilters next, int expectedEpoch) =>
+      _saveHomeFilters(next, expectedEpoch);
 
   Future<bool> saveNotebook(
-      StudyNotebook Function(StudyNotebook) update, int expectedEpoch) async {
-    final account = _account;
-    var saved = false;
-    await _run(() async {
-      if (account == null ||
-          !_isSessionStateCurrent(
-            epoch: expectedEpoch,
-            account: account,
-            checkAccount: true,
-            requireNotDisposed: false,
-          )) {
-        return;
-      }
-      final next = update(notebook);
-      await repository.saveNotebook(next, account);
-      if (!_isSessionStateCurrent(
-        epoch: expectedEpoch,
-        requireNotDisposed: false,
-      )) {
-        return;
-      }
-      final previous = notebook;
-      notebook = StudyNotebook.decode(next.encode());
-      _invalidatePinnableKeys();
-      saved = true;
-      await _cleanupRemovedManualAttachments(previous, notebook);
-      if (_pinsNeedSave || _pinned.keys.any(ManualEntry.isManualKey)) {
-        await _prunePins();
-      }
-      if (!_ownsAuthenticatedSession(expectedEpoch, account)) {
-        return;
-      }
-      final manualSucceeded = await _afterAssignmentsChanged(
-        updateAssignmentReminders: false,
-        updateSummary: false,
-        updateManual: true,
-        updateWidget: false,
-      );
-      await _recordManualCancellationOutcomes(
-        previous,
-        notebook,
-        rescheduleSucceeded: manualSucceeded,
-      );
-    });
-    return saved;
-  }
-
-  static bool _dailyPlansChanged(
-    List<DailyPlanItem> a,
-    List<DailyPlanItem> b,
-  ) {
-    if (a.length != b.length) return true;
-    for (var i = 0; i < a.length; i++) {
-      if (a[i].assignmentId != b[i].assignmentId ||
-          a[i].day != b[i].day ||
-          a[i].minutes != b[i].minutes ||
-          a[i].done != b[i].done) {
-        return true;
-      }
-    }
-    return false;
-  }
+          StudyNotebook Function(StudyNotebook) update, int expectedEpoch) =>
+      _saveNotebook(update, expectedEpoch);
 
   int get accountEpoch => _generation;
   int get reminderHistoryGeneration => _reminderHistoryGeneration;
+
   Future<bool> savePersonal(
-      PersonalWorkspace Function(PersonalWorkspace) update,
-      int expectedEpoch) async {
-    final account = _account;
-    var saved = false;
-    await _run(() async {
-      if (account == null ||
-          !_isSessionStateCurrent(
-            epoch: expectedEpoch,
-            account: account,
-            checkAccount: true,
-            requireNotDisposed: false,
-          )) {
-        return;
-      }
-      final previous = personal;
-      final next = update(previous);
-      await repository.savePersonalWorkspace(next, account);
-      if (!_isSessionStateCurrent(
-        epoch: expectedEpoch,
-        requireNotDisposed: false,
-      )) {
-        return;
-      }
-      personal = PersonalWorkspace.decode(next.encode());
-      saved = true;
-      final summarySettingsChanged =
-          previous.summaryEnabled != personal.summaryEnabled ||
-              previous.summaryHour != personal.summaryHour ||
-              previous.summaryMinute != personal.summaryMinute;
-      final plansChanged = _dailyPlansChanged(previous.plans, personal.plans);
-      final needSummary = summarySettingsChanged ||
-          ((previous.summaryEnabled || personal.summaryEnabled) &&
-              plansChanged);
-      if (needSummary) {
-        await _afterAssignmentsChanged(
-          updateAssignmentReminders: false,
-          updateSummary: true,
-          updateManual: false,
-          updateWidget: false,
-        );
-      }
-    });
-    return saved;
-  }
+          PersonalWorkspace Function(PersonalWorkspace) update,
+          int expectedEpoch) =>
+      _savePersonal(update, expectedEpoch);
 
   Future<bool> markNoticeLocalRead(
     String noticeId, {
     bool read = true,
     int expectedEpoch = -1,
-  }) async {
-    final epoch = expectedEpoch >= 0 ? expectedEpoch : _generation;
-    if (expectedEpoch >= 0 && expectedEpoch != _generation) return false;
-    final account = _account;
-    var saved = false;
-    await _run(() async {
-      if (account == null ||
-          !_isSessionStateCurrent(
-            epoch: epoch,
-            account: account,
-            checkAccount: true,
-          )) {
-        return;
-      }
-      final next = _courseNotices.markLocalRead(noticeId, read: read);
-      await repository.saveCourseNotices(next, account);
-      if (!_isSessionStateCurrent(
-        epoch: epoch,
-        account: account,
-        checkAccount: true,
-      )) {
-        return;
-      }
-      _courseNotices = next;
-      saved = true;
-    });
-    return saved;
-  }
+  }) =>
+      _markNoticeLocalRead(noticeId, read: read, expectedEpoch: expectedEpoch);
 
-  Future<bool> markAllNoticesLocalRead({Iterable<String>? noticeIds}) async {
-    final account = _account;
-    final epoch = _generation;
-    var saved = false;
-    await _run(() async {
-      if (account == null ||
-          !_isSessionStateCurrent(
-            epoch: epoch,
-            account: account,
-            checkAccount: true,
-            requireNotDisposed: false,
-          )) {
-        return;
-      }
-      final next =
-          _courseNotices.markAllLocalRead(noticeIds: noticeIds?.toSet());
-      await repository.saveCourseNotices(next, account);
-      if (!_isSessionStateCurrent(
-        epoch: epoch,
-        account: account,
-        checkAccount: true,
-        requireNotDisposed: false,
-      )) {
-        return;
-      }
-      _courseNotices = next;
-      saved = true;
-    });
-    return saved;
-  }
+  Future<bool> markAllNoticesLocalRead({Iterable<String>? noticeIds}) =>
+      _markAllNoticesLocalRead(noticeIds: noticeIds);
 
   Future<bool> syncCourseChapters({String? courseKey}) async {
     final account = _account;
@@ -548,96 +354,12 @@ class AssignmentStore extends ChangeNotifier {
     CourseNotice notice, {
     required DateTime remindAt,
     int expectedEpoch = -1,
-  }) async {
-    final epoch = expectedEpoch >= 0 ? expectedEpoch : _generation;
-    if (expectedEpoch >= 0 && expectedEpoch != _generation) return null;
-    final account = _account;
-    ManualEntry? created;
-    await _run(() async {
-      if (account == null ||
-          !_isSessionStateCurrent(
-            epoch: epoch,
-            account: account,
-            checkAccount: true,
-          )) {
-        return;
-      }
-      final existing = notice.linkedManualEntryId == null
-          ? null
-          : notebook.entries
-              .where((e) => e.id == notice.linkedManualEntryId)
-              .firstOrNull;
-      if (existing != null) {
-        created = existing;
-        return;
-      }
-      if (notebook.entries.length >= 500) {
-        _error = '待办已达 500 条上限，请清理后再添加';
-        return;
-      }
-      final baseId = 'notice-${notice.id.substring(10, 24)}';
-      var candidateId = baseId;
-      var suffix = 1;
-      while (notebook.entries.any((e) => e.id == candidateId)) {
-        candidateId = '$baseId-${suffix++}';
-      }
-      final rawTitle = '[课程通知] ${notice.title}';
-      final entryTitle =
-          rawTitle.length > 200 ? rawTitle.substring(0, 200) : rawTitle;
-      final entryCourse = notice.courseName == '通知中心' ? '' : notice.courseName;
-      final entryNote = notice.summary.length > 500
-          ? notice.summary.substring(0, 500)
-          : notice.summary;
-      final entry = ManualEntry(
-        id: candidateId,
-        title: entryTitle,
-        kind: 'todo',
-        course: entryCourse.length > 200
-            ? entryCourse.substring(0, 200)
-            : entryCourse,
-        note: entryNote,
-        at: remindAt.toUtc(),
-        remind: true,
+  }) =>
+      _createReminderFromNotice(
+        notice,
+        remindAt: remindAt,
+        expectedEpoch: expectedEpoch,
       );
-      final nextNotebook = notebook.withEntries([...notebook.entries, entry]);
-      await repository.saveNotebook(nextNotebook, account);
-      if (!_isSessionStateCurrent(
-        epoch: epoch,
-        account: account,
-        checkAccount: true,
-      )) {
-        return;
-      }
-      final previous = notebook;
-      notebook = StudyNotebook.decode(nextNotebook.encode());
-      _invalidatePinnableKeys();
-      final manualSucceeded = await _afterAssignmentsChanged();
-      await _recordManualCancellationOutcomes(
-        previous,
-        notebook,
-        rescheduleSucceeded: manualSucceeded,
-      );
-      if (!_isSessionStateCurrent(
-        epoch: epoch,
-        account: account,
-        checkAccount: true,
-      )) {
-        return;
-      }
-      final nextNotices = _courseNotices.bindManualEntry(notice.id, entry.id);
-      await repository.saveCourseNotices(nextNotices, account);
-      if (!_isSessionStateCurrent(
-        epoch: epoch,
-        account: account,
-        checkAccount: true,
-      )) {
-        return;
-      }
-      _courseNotices = nextNotices;
-      created = entry;
-    });
-    return created;
-  }
 
   Future<ManualEntry?> createTodoFromChapterNode(
     CourseChapterSnapshot snapshot,
@@ -645,103 +367,14 @@ class AssignmentStore extends ChangeNotifier {
     DateTime? remindAt,
     int minutes = 30,
     int expectedEpoch = -1,
-  }) async {
-    final epoch = expectedEpoch >= 0 ? expectedEpoch : _generation;
-    if (expectedEpoch >= 0 && expectedEpoch != _generation) return null;
-    final account = _account;
-    ManualEntry? created;
-    await _run(() async {
-      if (account == null ||
-          !_isSessionStateCurrent(
-            epoch: epoch,
-            account: account,
-            checkAccount: true,
-          )) {
-        return;
-      }
-      final existing = node.linkedManualEntryId == null
-          ? null
-          : notebook.entries
-              .where((e) => e.id == node.linkedManualEntryId)
-              .firstOrNull;
-      if (existing != null) {
-        created = existing;
-        return;
-      }
-      if (notebook.entries.length >= 500) {
-        _error = '待办已达 500 条上限，请清理后再添加';
-        return;
-      }
-      final digest = sha256
-          .convert(utf8.encode(node.sectionId))
-          .toString()
-          .substring(0, 14);
-      var candidateId = 'chap-$digest';
-      var suffix = 1;
-      while (notebook.entries.any((e) => e.id == candidateId)) {
-        candidateId = 'chap-$digest-${suffix++}';
-      }
-      final rawTitle = '[章节任务点] ${node.code} ${node.title}';
-      final entryTitle =
-          rawTitle.length > 200 ? rawTitle.substring(0, 200) : rawTitle;
-      final entryNote = node.state == ChapterTaskState.pendingPoints
-          ? '待完成任务点：${node.pendingPoints} 个'
-          : '';
-      final entry = ManualEntry(
-        id: candidateId,
-        title: entryTitle,
-        kind: 'todo',
-        course: snapshot.courseName.length > 200
-            ? snapshot.courseName.substring(0, 200)
-            : snapshot.courseName,
-        note: entryNote,
-        at: remindAt?.toUtc(),
-        remind: remindAt != null,
-        minutes: minutes.clamp(0, 1440),
+  }) =>
+      _createTodoFromChapterNode(
+        snapshot,
+        node,
+        remindAt: remindAt,
+        minutes: minutes,
+        expectedEpoch: expectedEpoch,
       );
-      final nextNotebook = notebook.withEntries([...notebook.entries, entry]);
-      await repository.saveNotebook(nextNotebook, account);
-      if (!_isSessionStateCurrent(
-        epoch: epoch,
-        account: account,
-        checkAccount: true,
-      )) {
-        return;
-      }
-      final previous = notebook;
-      notebook = StudyNotebook.decode(nextNotebook.encode());
-      _invalidatePinnableKeys();
-      final manualSucceeded = await _afterAssignmentsChanged();
-      await _recordManualCancellationOutcomes(
-        previous,
-        notebook,
-        rescheduleSucceeded: manualSucceeded,
-      );
-      if (!_isSessionStateCurrent(
-        epoch: epoch,
-        account: account,
-        checkAccount: true,
-      )) {
-        return;
-      }
-      final nextCatalog = _courseChapters.bindManualEntry(
-        snapshot.courseKey,
-        node.sectionId,
-        entry.id,
-      );
-      await repository.saveCourseChapters(nextCatalog, account);
-      if (!_isSessionStateCurrent(
-        epoch: epoch,
-        account: account,
-        checkAccount: true,
-      )) {
-        return;
-      }
-      _courseChapters = nextCatalog;
-      created = entry;
-    });
-    return created;
-  }
 
   List<AssignmentChange> changes = [];
   Set<String> _acknowledgedDeadlineChangeIds = <String>{};
@@ -968,21 +601,24 @@ class AssignmentStore extends ChangeNotifier {
   int _generation = 0;
   bool _disposed = false, _loginRunning = false;
   String get syncSummary {
-    if (_serviceWarnings.isNotEmpty && syncReport.phase == SyncPhase.success) {
+    if (_warningBuckets.isNotEmpty && syncReport.phase == SyncPhase.success) {
       return hasWidgetWarningOnly ? '作业已更新，小组件需要处理' : '作业已更新，提醒或小组件需要处理';
     }
     return syncReport.summary;
   }
 
-  bool get hasWidgetWarningOnly =>
-      _widgetWarnings.isNotEmpty &&
-      _serviceWarnings.length == _widgetWarnings.length &&
-      _recoveryWarnings.isEmpty &&
-      _error == null &&
-      repository.recoveryWarning == null;
+  bool get hasWidgetWarningOnly => _warningBuckets.hasWidgetWarningOnly(
+        hasRecoveryWarnings: _recoveryWarnings.isNotEmpty,
+        hasOperationError: _error != null,
+        hasRepositoryRecoveryWarning: repository.recoveryWarning != null,
+      );
 
   bool get hasNonQuietServiceWarning =>
-      _serviceWarnings.isNotEmpty && !hasWidgetWarningOnly;
+      _warningBuckets.hasNonQuietServiceWarning(
+        hasRecoveryWarnings: _recoveryWarnings.isNotEmpty,
+        hasOperationError: _error != null,
+        hasRepositoryRecoveryWarning: repository.recoveryWarning != null,
+      );
   bool _authenticated = false;
   bool _loading = false;
   bool _agreementAccepted = false;
@@ -1018,23 +654,17 @@ class AssignmentStore extends ChangeNotifier {
   bool get isAuthenticated => _authenticated;
   bool get isLoading => _loading;
   bool get agreementAccepted => _agreementAccepted;
-  final List<String> _serviceWarnings = [];
-  final List<String> _privacyWarnings = [];
-  final List<String> _deadlineWarnings = [];
-  final List<String> _summaryWarnings = [];
-  final List<String> _manualWarnings = [];
-  final List<String> _widgetWarnings = [];
+  final ReminderWarningBuckets _warningBuckets = ReminderWarningBuckets();
   final List<String> _recoveryWarnings = [];
-  List<String> get serviceWarnings => List.unmodifiable(_serviceWarnings);
-  List<String> get manualSaveWarnings =>
-      List.unmodifiable([..._privacyWarnings, ..._manualWarnings]);
+  List<String> get serviceWarnings => _warningBuckets.serviceWarnings;
+  List<String> get manualSaveWarnings => _warningBuckets.manualSaveWarnings;
   String? get recoveryWarning => repository.recoveryWarning;
   String? get operationError => _error;
   String? get error {
     final messages = [
       _error,
       repository.recoveryWarning,
-      ..._serviceWarnings,
+      ..._warningBuckets.serviceWarnings,
       ..._recoveryWarnings
     ].whereType<String>().where((s) => s.isNotEmpty).toSet();
     return messages.isEmpty ? null : messages.join('；');
@@ -1048,7 +678,7 @@ class AssignmentStore extends ChangeNotifier {
   }) {
     final mergedWarnings = {
       if (repository.recoveryWarning != null) repository.recoveryWarning!,
-      ...(warnings ?? _serviceWarnings),
+      ...(warnings ?? _warningBuckets.serviceWarnings),
     };
     return [
       saved ? successMessage : failureMessage,
@@ -1105,18 +735,8 @@ class AssignmentStore extends ChangeNotifier {
     return _nextBackgroundTarget(DateTime.now());
   }
 
-  Future<BackgroundReminderHealth?> inspectBackgroundReminderHealth() async {
-    final accountHash = _accountHash;
-    if (!_nativeReminderAvailable || !_authenticated || accountHash == null) {
-      return null;
-    }
-    // Once the bridge is expected, a failed read is not "zero reminders"; let
-    // the caller surface the failure instead of fabricating a healthy state.
-    return backgroundReminderGateway.inspectHealth(
-      accountHash: accountHash,
-      sessionEpoch: _nativeSessionEpoch,
-    );
-  }
+  Future<BackgroundReminderHealth?> inspectBackgroundReminderHealth() =>
+      _inspectBackgroundReminderHealth();
 
   List<int> get reminderOffsetsMinutes =>
       List.unmodifiable(_reminderOffsetsMinutes);
@@ -1180,219 +800,17 @@ class AssignmentStore extends ChangeNotifier {
     return latest;
   }
 
-  Future<bool> acknowledgeDeadlineAlert(String changeId) async {
-    final normalized = changeId.trim();
-    if (normalized.isEmpty) return false;
-    if (_acknowledgedDeadlineChangeIds.contains(normalized)) return true;
-    final snap = _captureSession();
-    if (!snap.authenticated || snap.account == null) return false;
-    var nextSet = <String>{..._acknowledgedDeadlineChangeIds, normalized};
-    try {
-      await _runScopedWrite(snap, (prefs) async {
-        final durable =
-            await repository.readAcknowledgedDeadlineChangeIdsInPrefs(prefs);
-        final merged = <String>{
-          ..._acknowledgedDeadlineChangeIds,
-          ...durable,
-        };
-        final nextOrdered = <String>[
-          normalized,
-          for (final c in changes)
-            if (merged.contains(c.effectiveChangeId) &&
-                c.effectiveChangeId != normalized)
-              c.effectiveChangeId,
-          for (final id in merged)
-            if (id != normalized) id,
-        ];
-        nextSet = nextOrdered.take(300).toSet();
-        await repository.writeAcknowledgedDeadlineChangeIdsInPrefs(
-          prefs,
-          nextOrdered,
-        );
-      });
-    } on StaleSessionWriteException {
-      return false;
-    } on LocalStorageLeaseReleaseException {
-      const warning = '时间变更提醒确认状态已保存，本机写入通道释放未确认，请稍后重试其他写入';
-      if (snap.generation == _generation &&
-          !_recoveryWarnings.contains(warning)) {
-        _recoveryWarnings.add(warning);
-      }
-    } catch (_) {
-      return false;
-    }
-    if (!_isSessionCurrent(snap)) return false;
-    _acknowledgedDeadlineChangeIds = nextSet;
-    notifyListeners();
-    return true;
-  }
+  Future<bool> acknowledgeDeadlineAlert(String changeId) =>
+      _acknowledgeDeadlineAlert(changeId);
 
-  Future<bool> _mutateCourseworkState(
-    _SessionSnapshot snap,
-    LocalCourseworkState Function(Assignment current) transform, {
-    required String leaseWarning,
-  }) async {
-    var saved = false;
-    await _run(() async {
-      if (!_isSessionCurrent(snap)) return;
-      final next = transform(Assignment(
-        id: '_',
-        courseName: '',
-        title: '',
-        deadlineAt: null,
-        requirementsText: '',
-        status: 'unknown',
-        lastSyncedAt: _clock(),
-      ));
-      if (next == _courseworkState) {
-        saved = true;
-        return;
-      }
-      await _markReminderMutationPending();
-      if (!_isSessionCurrent(snap)) return;
-      try {
-        await _runScopedWrite(
-          snap,
-          (prefs) => repository.writeCourseworkStateInPrefs(prefs, next),
-        );
-      } on StaleSessionWriteException {
-        return;
-      } on LocalStorageLeaseReleaseException {
-        if (snap.generation == _generation &&
-            !_recoveryWarnings.contains(leaseWarning)) {
-          _recoveryWarnings.add(leaseWarning);
-        }
-      } catch (_) {
-        return;
-      }
-      if (!_isSessionCurrent(snap)) return;
-      _courseworkState = next;
-      _invalidateHomeDisplayIndex();
-      saved = true;
-      await _afterAssignmentsChanged(
-        updateSummary: true,
-        updateManual: false,
-        updateWidget: true,
-      );
-      if (_isSessionCurrent(snap)) notifyListeners();
-    });
-    return saved;
-  }
-
-  Future<bool> setManualDeadline(Assignment assignment, DateTime? at) async {
-    final snap = _captureSession();
-    if (!snap.authenticated || snap.account == null || assignment.isExam) {
-      return false;
-    }
-    if (at != null &&
-        !CourseworkDeadline.canSetManualDeadline(
-          assignment,
-          entry: courseworkEntryFor(assignment),
-        )) {
-      return false;
-    }
-    return _mutateCourseworkState(
-      snap,
-      (_) {
-        final current = findAnyAssignment(assignment.id) ?? assignment;
-        if (at != null &&
-            !CourseworkDeadline.canSetManualDeadline(
-              current,
-              entry: courseworkEntryFor(current),
-            )) {
-          return _courseworkState;
-        }
-        return _courseworkState.withManualDeadline(
-          CourseworkDeadline.keyFor(current),
-          CourseworkDeadline.aliasesFor(current),
-          at,
-        );
-      },
-      leaseWarning: '手动截止状态已保存，本机写入通道释放未确认，请稍后重试其他写入',
-    );
-  }
+  Future<bool> setManualDeadline(Assignment assignment, DateTime? at) =>
+      _setManualDeadline(assignment, at);
 
   Future<bool> setLocallyCompleted(
     Assignment assignment,
     bool completed,
-  ) async {
-    final snap = _captureSession();
-    if (!snap.authenticated || snap.account == null) return false;
-    return _mutateCourseworkState(
-      snap,
-      (_) {
-        final current = findAnyAssignment(assignment.id) ?? assignment;
-        return _courseworkState.withLocallyCompleted(
-          CourseworkDeadline.keyFor(current),
-          CourseworkDeadline.aliasesFor(current),
-          completed,
-        );
-      },
-      leaseWarning: '本机完成状态已保存，本机写入通道释放未确认，请稍后重试其他写入',
-    );
-  }
-
-  Future<void> _reconcileCourseworkState() async {
-    final snap = _captureSession();
-    if (!snap.authenticated ||
-        snap.account == null ||
-        _journalRestoreFailed ||
-        repository.recoveryWarning != null ||
-        _courseworkState.isEmpty) {
-      return;
-    }
-    final reconciled = CourseworkDeadline.reconcileWithAssignments(
-      _courseworkState,
-      [..._assignments, ..._hiddenAssignments],
-    );
-    if (reconciled == _courseworkState) return;
-    try {
-      await _runScopedWrite(
-        snap,
-        (prefs) => repository.writeCourseworkStateInPrefs(prefs, reconciled),
-      );
-    } on StaleSessionWriteException {
-      return;
-    } on LocalStorageLeaseReleaseException {
-      const warning = '个人截止状态已同步清理，本机写入通道释放未确认，请稍后重试其他写入';
-      if (snap.generation == _generation &&
-          !_recoveryWarnings.contains(warning)) {
-        _recoveryWarnings.add(warning);
-      }
-    } catch (_) {
-      const warning = '部分个人截止状态同步整理未能保存，请稍后重试';
-      if (snap.generation == _generation &&
-          !_recoveryWarnings.contains(warning)) {
-        _recoveryWarnings.add(warning);
-      }
-      return;
-    }
-    if (!_isSessionCurrent(snap)) return;
-    _courseworkState = reconciled;
-    _invalidateHomeDisplayIndex();
-  }
-
-  Set<String> _pinAliases(Assignment assignment) {
-    final key = _pinKey(assignment);
-    final aliases = <String>{
-      key,
-      assignment.id,
-      if (assignment.courseTaskKey != null) assignment.courseTaskKey!,
-    };
-    if (AssignmentGrouping.examKey(assignment) != null) {
-      final group =
-          courseworkGroups.where((item) => item.key == key).firstOrNull;
-      if (group != null) {
-        for (final source in group.sources) {
-          aliases.add(source.id);
-          if (source.courseTaskKey != null) {
-            aliases.add(source.courseTaskKey!);
-          }
-        }
-      }
-    }
-    return aliases;
-  }
+  ) =>
+      _setLocallyCompleted(assignment, completed);
 
   final _authNotifier = ValueNotifier<int>(0);
   bool _lastNotifiedAuth = false;
@@ -1418,34 +836,15 @@ class AssignmentStore extends ChangeNotifier {
     }
   }
 
+  void _notify() => notifyListeners();
+
   bool isPinned(Assignment assignment) =>
       _authenticated && _pinned.containsAny(_pinAliases(assignment));
 
   Set<String>? _pinnableKeysCache;
   int? _pinnableKeysCacheMinute;
 
-  void _invalidatePinnableKeys() =>
-      _pinnableKeysCache = _pinnableKeysCacheMinute = null;
-
-  Set<String> _pinnableKeys() {
-    final now = _clock();
-    final minute = now.millisecondsSinceEpoch ~/ 60000;
-    if (_pinnableKeysCache != null && _pinnableKeysCacheMinute == minute) {
-      return _pinnableKeysCache!;
-    }
-    _pinnableKeysCacheMinute = minute;
-    return _pinnableKeysCache = {
-      for (final item in visibleAssignments) _pinKey(item),
-      for (final entry in notebook.entries)
-        if (!entry.done) manualPinKeyOf(entry),
-    };
-  }
-
-  bool canTogglePin(Assignment assignment) =>
-      _manageBackgroundSchedule &&
-      _authenticated &&
-      _account != null &&
-      _pinnableKeys().contains(_pinKey(assignment));
+  bool canTogglePin(Assignment assignment) => _canTogglePin(assignment);
 
   Future<bool> togglePin(Assignment assignment) => _togglePinKey(
         _pinKey(assignment),
@@ -1456,164 +855,15 @@ class AssignmentStore extends ChangeNotifier {
   bool isManualPinned(ManualEntry entry) =>
       _authenticated && _pinned.containsAny([manualPinKeyOf(entry)]);
 
-  bool canToggleManualPin(ManualEntry entry) =>
-      _manageBackgroundSchedule &&
-      _authenticated &&
-      _account != null &&
-      !entry.done &&
-      _pinnableKeys().contains(manualPinKeyOf(entry));
+  bool canToggleManualPin(ManualEntry entry) => _canToggleManualPin(entry);
 
   Future<bool> toggleManualPin(ManualEntry entry) {
     final key = manualPinKeyOf(entry);
     return _togglePinKey(key, [key], () => canToggleManualPin(entry));
   }
 
-  Future<bool> _togglePinKey(
-    String key,
-    Iterable<String> aliases,
-    bool Function() canToggle,
-  ) async {
-    final account = _account;
-    final generation = _generation;
-    if (account == null || !canToggle()) return false;
-    var saved = false;
-    await _run(() async {
-      bool stillOwned() => _ownsAuthenticatedSession(generation, account);
-      bool valid() => stillOwned() && canToggle();
-      if (!valid()) return;
-      final next = _pinned.toggle(key, aliases);
-      final persisted = await _savePins(next, account, generation);
-      if (!persisted || !stillOwned()) return;
-      _pinned = next;
-      _pinsNeedSave = false;
-      saved = true;
-    });
-    return saved;
-  }
-
-  Future<bool> reorderPinned(List<String> visibleOrderedKeys) async {
-    final account = _account;
-    final generation = _generation;
-    if (account == null || !_authenticated || !_manageBackgroundSchedule) {
-      return false;
-    }
-    final cleanOrdered = [
-      for (final raw in visibleOrderedKeys)
-        if (raw.trim().isNotEmpty) raw.trim(),
-    ];
-    // Filters may hide pinned slots; only the visible subset is reordered.
-    final pinnable = _pinnableKeys();
-    if (cleanOrdered.isEmpty ||
-        cleanOrdered.toSet().length != cleanOrdered.length ||
-        cleanOrdered.any(
-            (key) => !pinnable.contains(key) || !_pinned.keys.contains(key))) {
-      return false;
-    }
-    final visibleKeySet = cleanOrdered.toSet();
-    var saved = false;
-    await _run(() async {
-      if (!_manageBackgroundSchedule ||
-          !_ownsAuthenticatedSession(generation, account)) {
-        return;
-      }
-      final next = _pinned.reorderVisible(cleanOrdered, visibleKeySet);
-      if (next == null) return;
-      if (!await _savePins(next, account, generation) ||
-          !_ownsAuthenticatedSession(generation, account)) {
-        return;
-      }
-      _pinned = next;
-      _pinsNeedSave = false;
-      saved = true;
-    });
-    return saved;
-  }
-
-  bool _ownsAuthenticatedSession(int generation, String? account) =>
-      account != null &&
-      _isSessionStateCurrent(
-        epoch: generation,
-        account: account,
-        checkAccount: true,
-      );
-
-  Future<bool> _savePins(
-      PinnedAssignments pins, String account, int generation) async {
-    try {
-      await repository.savePinnedAssignments(pins, account);
-      return true;
-    } on StaleSessionWriteException {
-      return false;
-    } on LocalStorageLeaseReleaseException {
-      const warning = '置顶状态已保存，本机写入通道释放未确认，请稍后重试其他写入';
-      if (_ownsAuthenticatedSession(generation, account) &&
-          !_recoveryWarnings.contains(warning)) {
-        _recoveryWarnings.add(warning);
-      }
-      return true;
-    }
-  }
-
-  Future<void> _prunePins() async {
-    final account = _account;
-    // Only the foreground store manages pins, and never prune after a
-    // failed/damaged journal read. Keys absent merely due to unfollowed
-    // courses, partial sync frames, or filters must remain pinned on disk.
-    if (!_manageBackgroundSchedule ||
-        !_authenticated ||
-        account == null ||
-        (_pinned.isEmpty && !_pinsNeedSave) ||
-        _journalRestoreFailed ||
-        repository.recoveryWarning != null) {
-      return;
-    }
-    final aliasToCanonical = <String, String>{};
-    final explicitlyCompletedOrHiddenKeys = <String>{};
-    for (final group in localRecordGroups) {
-      final canonical = _pinKey(group.primary);
-      for (final alias in _pinAliases(group.primary)) {
-        aliasToCanonical[alias] = canonical;
-      }
-      for (final source in group.sources) {
-        for (final alias in _pinAliases(source)) {
-          aliasToCanonical[alias] = canonical;
-        }
-      }
-      if (group.hidden ||
-          group.primary.isCompleted ||
-          isLocallyCompleted(group.primary) ||
-          AssignmentQuery.isExamEnded(group.primary, _clock())) {
-        explicitlyCompletedOrHiddenKeys.add(canonical);
-        explicitlyCompletedOrHiddenKeys.addAll(_pinAliases(group.primary));
-        for (final source in group.sources) {
-          explicitlyCompletedOrHiddenKeys.addAll(_pinAliases(source));
-        }
-      }
-    }
-    for (final key in _pinned.keys.where(ManualEntry.isManualKey)) {
-      final id = key.substring(ManualEntry.pinPrefix.length);
-      if (!notebook.hasActiveEntry(id)) {
-        explicitlyCompletedOrHiddenKeys.add(key);
-      }
-    }
-    final retained = _pinned.migrateAndPrune(
-      aliasToCanonical: aliasToCanonical,
-      explicitlyCompletedOrHiddenKeys: explicitlyCompletedOrHiddenKeys,
-    );
-    if (retained == _pinned && !_pinsNeedSave) return;
-    _pinned = retained;
-    _pinsNeedSave = true;
-    final generation = _generation;
-    try {
-      final persisted = await _savePins(_pinned, account, generation);
-      if (persisted && _ownsAuthenticatedSession(generation, account)) {
-        _pinsNeedSave = false;
-      }
-    } catch (_) {
-      // The next successful journal update can retry without restoring pins
-      // for entries already removed during this session.
-    }
-  }
+  Future<bool> reorderPinned(List<String> visibleOrderedKeys) =>
+      _reorderPinned(visibleOrderedKeys);
 
   List<CourseRef> _courses = [];
   List<CourseRef> get courses => List.unmodifiable(_courses);
@@ -1643,72 +893,14 @@ class AssignmentStore extends ChangeNotifier {
   bool isCourseActive(String key) =>
       follows(key) && termCatalog.isActiveOrRecalled(key);
 
-  Future<bool> _mutateCourseTermPreferences(
-    _SessionSnapshot snap,
-    CourseTermPreferences Function(CourseTermPreferences current) transform, {
-    required String leaseWarning,
-  }) async {
-    var saved = false;
-    await _run(() async {
-      if (!_isSessionCurrent(snap)) return;
-      final next = transform(_courseTermPreferences);
-      if (next == _courseTermPreferences) {
-        saved = true;
-        return;
-      }
-      await _markReminderMutationPending();
-      if (!_isSessionCurrent(snap)) return;
-      try {
-        await _runScopedWrite(
-          snap,
-          (prefs) => repository.writeCourseTermPreferencesInPrefs(prefs, next),
-        );
-      } on StaleSessionWriteException {
-        return;
-      } on LocalStorageLeaseReleaseException {
-        if (snap.generation == _generation &&
-            !_recoveryWarnings.contains(leaseWarning)) {
-          _recoveryWarnings.add(leaseWarning);
-        }
-      } catch (_) {
-        return;
-      }
-      if (!_isSessionCurrent(snap)) return;
-      _courseTermPreferences = next;
-      _invalidateHomeDisplayIndex();
-      saved = true;
-      await _afterAssignmentsChanged(
-        updateSummary: true,
-        updateManual: false,
-        updateWidget: true,
-      );
-      if (_isSessionCurrent(snap)) notifyListeners();
-    });
-    return saved;
-  }
-
-  Future<bool> setCourseManualTerm(String courseKey, AcademicTerm? term) async {
-    final snap = _captureSession();
-    if (!snap.authenticated || snap.account == null) return false;
-    return _mutateCourseTermPreferences(
-      snap,
-      (current) => current.withManualTerm(courseKey, term?.key),
-      leaseWarning: '学期归属已保存，本机写入通道释放未确认，请稍后重试其他写入',
-    );
-  }
+  Future<bool> setCourseManualTerm(String courseKey, AcademicTerm? term) =>
+      _setCourseManualTerm(courseKey, term);
 
   Future<bool> setCourseArchiveMode(
     String courseKey,
     CourseArchiveMode mode,
-  ) async {
-    final snap = _captureSession();
-    if (!snap.authenticated || snap.account == null) return false;
-    return _mutateCourseTermPreferences(
-      snap,
-      (current) => current.withArchiveMode(courseKey, mode),
-      leaseWarning: '课程归档状态已保存，本机写入通道释放未确认，请稍后重试其他写入',
-    );
-  }
+  ) =>
+      _setCourseArchiveMode(courseKey, mode);
 
   Future<bool> batchUpdateCourseTerms({
     required Iterable<String> courseKeys,
@@ -1716,104 +908,25 @@ class AssignmentStore extends ChangeNotifier {
     bool updateManualTerm = false,
     CourseArchiveMode? archiveMode,
     CourseBlockMode? blockMode,
-  }) async {
-    final keys = courseKeys.where((k) => k.trim().isNotEmpty).toSet();
-    if (keys.isEmpty) return true;
-    if (!updateManualTerm && archiveMode == null && blockMode == null) {
-      return true;
-    }
-    final snap = _captureSession();
-    if (!snap.authenticated || snap.account == null) return false;
-    final saved = await _mutateCourseTermPreferences(
-      snap,
-      (current) {
-        var next = current;
-        if (updateManualTerm) {
-          next = next.withBatchManualTerm(keys, manualTerm?.key);
-        }
-        if (archiveMode != null) {
-          for (final key in keys) {
-            next = next.withArchiveMode(key, archiveMode);
-          }
-        }
-        if (blockMode != null) {
-          next = next.withBatchBlockMode(keys, blockMode);
-        }
-        return next;
-      },
-      leaseWarning: '批量课程设置已保存，本机写入通道释放未确认，请稍后重试其他写入',
-    );
-    final selectedCourseKey = homeFilters.courseKey;
-    if (saved &&
-        _isSessionCurrent(snap) &&
-        selectedCourseKey != null &&
-        keys.contains(selectedCourseKey) &&
-        termCatalog.isBlocked(selectedCourseKey)) {
-      final cleared = HomeFilters(
-        query: homeFilters.query,
-        courseKey: null,
-        deadline: homeFilters.deadline,
-        sortOrder: homeFilters.sortOrder,
-        type: homeFilters.type,
+  }) =>
+      _batchUpdateCourseTerms(
+        courseKeys: courseKeys,
+        manualTerm: manualTerm,
+        updateManualTerm: updateManualTerm,
+        archiveMode: archiveMode,
+        blockMode: blockMode,
       );
-      await saveHomeFilters(cleared, snap.generation);
-    }
-    return saved;
-  }
 
   Future<bool> setCourseBlockMode(
     String courseKey,
     CourseBlockMode mode,
-  ) async {
-    final snap = _captureSession();
-    if (!snap.authenticated || snap.account == null) return false;
-    final saved = await _mutateCourseTermPreferences(
-      snap,
-      (current) => current.withBlockMode(courseKey, mode),
-      leaseWarning: '课程屏蔽状态已保存，本机写入通道释放未确认，请稍后重试其他写入',
-    );
-    if (saved &&
-        _isSessionCurrent(snap) &&
-        homeFilters.courseKey == courseKey &&
-        termCatalog.isBlocked(courseKey)) {
-      final cleared = HomeFilters(
-        query: homeFilters.query,
-        courseKey: null,
-        deadline: homeFilters.deadline,
-        sortOrder: homeFilters.sortOrder,
-        type: homeFilters.type,
-      );
-      await saveHomeFilters(cleared, snap.generation);
-    }
-    return saved;
-  }
+  ) =>
+      _setCourseBlockMode(courseKey, mode);
 
-  Future<bool> dismissCourseRecall(String courseKey) async {
-    final snap = _captureSession();
-    if (!snap.authenticated || snap.account == null) return false;
-    return _mutateCourseTermPreferences(
-      snap,
-      (current) {
-        final cursor = termCatalog.entryFor(courseKey)?.latestRecallEventUtc ??
-            _clock().toUtc();
-        return current
-            .withArchiveMode(courseKey, CourseArchiveMode.auto)
-            .withDismissedRecallCursor(courseKey, cursor);
-      },
-      leaseWarning: '召回忽略状态已保存，本机写入通道释放未确认，请稍后重试其他写入',
-    );
-  }
+  Future<bool> dismissCourseRecall(String courseKey) =>
+      _dismissCourseRecall(courseKey);
 
-  Future<bool> archivePastCourses() async {
-    final snap = _captureSession();
-    if (!snap.authenticated || snap.account == null) return false;
-    return _mutateCourseTermPreferences(
-      snap,
-      (current) =>
-          current.withBatchArchive(termCatalog.archivablePastCourseKeys),
-      leaseWarning: '往期课程已批量归档，本机写入通道释放未确认，请稍后重试其他写入',
-    );
-  }
+  Future<bool> archivePastCourses() => _archivePastCourses();
 
   List<Assignment> get formalAssignments =>
       courseAssignments.where((a) => a.isFormal).toList();
@@ -1933,117 +1046,13 @@ class AssignmentStore extends ChangeNotifier {
   final Set<String> _pendingNativeCleanupAccounts = <String>{};
   bool get notificationPrivacyPending => _privacyCleanupPending;
   bool get notificationDetails => notificationService.showDetails;
-  Future<void> saveNotificationDetails(bool value) {
-    final snap = _captureSession();
-    return _run(() async {
-      if (!_isSessionCurrent(snap)) return;
-      await _markReminderMutationPending();
-      if (!_isSessionCurrent(snap)) return;
-      if (!value) {
-        try {
-          await _cancelPrivateNotifications();
-        } catch (_) {
-          throw StateError('旧提醒未能清理，通知详情尚未关闭，请在提醒体检重试');
-        }
-        if (!_isSessionCurrent(snap)) return;
-      }
-      try {
-        await _runScopedWrite(snap, (prefs) async {
-          if (value) {
-            await prefs.remove(_privacyVerifiedHiddenKey);
-          }
-          if (!await prefs.setBool('notification_details_v1', value)) {
-            throw StateError('通知隐私设置未能保存');
-          }
-          if (!value) {
-            await _writeBoolPreferenceAndVerify(
-                prefs, _privacyVerifiedHiddenKey, true);
-          }
-        });
-      } on StaleSessionWriteException {
-        return;
-      }
-      if (!_isSessionCurrent(snap)) return;
-      notificationService.showDetails = value;
-      _privacyCleanupPending = false;
-      await _reconcileBackgroundControls();
-      if (!_isSessionCurrent(snap)) return;
-      await _afterAssignmentsChanged();
-      if (!_isSessionCurrent(snap)) return;
-      if (_serviceWarnings.isNotEmpty) {
-        throw StateError('隐私设置已保存，部分旧提醒未更新，请在提醒体检重试');
-      }
-    });
-  }
+  Future<void> saveNotificationDetails(bool value) =>
+      _saveNotificationDetails(value);
 
   DisplayPreferences display = const DisplayPreferences();
   Future<void>? _displayWrites;
 
-  Future<String?> saveDisplay(DisplayPreferences next) {
-    final snap = _captureSession();
-    display = next;
-    // Serialize preference writes independently of coursework operations.
-    final write = (_displayWrites ?? Future<void>.value()).then((_) async {
-      final prefs = await SharedPreferences.getInstance();
-      final previous =
-          DisplayPreferences.decode(prefs.getString('display_preferences_v1'));
-      if (!await prefs.setString('display_preferences_v1', next.encode())) {
-        throw StateError('显示设置未能保存');
-      }
-      return previous.widgetRange != next.widgetRange;
-    });
-    _displayWrites = write.then<void>((_) {}, onError: (Object _) {});
-    notifyListeners();
-    return _finishDisplaySave(next, write, snap);
-  }
-
-  Future<String?> _finishDisplaySave(
-    DisplayPreferences next,
-    Future<bool> write,
-    _SessionSnapshot snap,
-  ) async {
-    final bool rangeChanged;
-    try {
-      rangeChanged = await write;
-    } catch (_) {
-      return '显示设置未能保存，当前调整仅在本次使用时生效';
-    }
-    if (!rangeChanged ||
-        !_isSessionCurrent(snap) ||
-        display.widgetRange != next.widgetRange) {
-      return null;
-    }
-    final effectiveCoursework = snap.authenticated
-        ? _courseworkState
-        : const LocalCourseworkState.empty();
-    final now = _clock();
-    final activeCatalog = snap.authenticated ? termCatalog : null;
-    final items = next.forWidget(
-      snap.authenticated ? courseAssignments : <Assignment>[],
-      now,
-      coursework: effectiveCoursework,
-    );
-    try {
-      await _runScopedWrite(
-        snap,
-        (_) {
-          widgetSnapshotService.clock = _clock;
-          widgetSnapshotService.courseworkState = effectiveCoursework;
-          widgetSnapshotService.termCatalog = activeCatalog;
-          return widgetSnapshotService.saveAssignmentsForContext(
-            items,
-            authenticated: snap.authenticated,
-            range: next.widgetRange,
-          );
-        },
-      );
-      return null;
-    } on StaleSessionWriteException {
-      return null;
-    } catch (_) {
-      return '显示设置已保存，小组件更新失败，请稍后刷新';
-    }
-  }
+  Future<String?> saveDisplay(DisplayPreferences next) => _saveDisplay(next);
 
   List<Assignment> get visibleAssignments => AssignmentQuery.currentDisplay(
         courseAssignments,
@@ -2220,35 +1229,8 @@ class AssignmentStore extends ChangeNotifier {
     if (notify && hadPreview && !_disposed) notifyListeners();
   }
 
-  Future<void> followCourse(String key, bool followed) {
-    final snap = _captureSession();
-    return _run(() async {
-      if (!_isSessionCurrent(snap)) return;
-      await _markReminderMutationPending();
-      if (!_isSessionCurrent(snap)) return;
-      final next = {..._unfollowed};
-      if (followed) {
-        next.remove(key);
-      } else {
-        next.add(key);
-      }
-      try {
-        await _runScopedWrite(snap, (prefs) async {
-          if (!await prefs.setStringList('unfollowed_courses', next.toList())) {
-            throw StateError('课程关注设置未能保存，请重试');
-          }
-        });
-      } on StaleSessionWriteException {
-        return;
-      }
-      if (!_isSessionCurrent(snap)) return;
-      _unfollowed
-        ..clear()
-        ..addAll(next);
-      _invalidateHomeDisplayIndex();
-      await _afterAssignmentsChanged();
-    });
-  }
+  Future<void> followCourse(String key, bool followed) =>
+      _followCourse(key, followed);
 
   Map<String, dynamic>? get syncStatus => {
         'localOnly': true,
@@ -2281,12 +1263,7 @@ class AssignmentStore extends ChangeNotifier {
   }
 
   Future<void> restoreSession() async {
-    _serviceWarnings.clear();
-    _privacyWarnings.clear();
-    _deadlineWarnings.clear();
-    _summaryWarnings.clear();
-    _manualWarnings.clear();
-    _widgetWarnings.clear();
+    _warningBuckets.clearAll();
     _recoveryWarnings.clear();
     _nativeReminderAvailable = nativeReminderDeliveryEnabled &&
         await backgroundReminderGateway.isAvailable();
@@ -3225,7 +2202,7 @@ class AssignmentStore extends ChangeNotifier {
           // Keep the sync result intact; an unconfirmed release is visible and
           // the native engine-destroy path remains the safety net.
           _backgroundWarning = '同步租约释放未确认：$error';
-          _serviceWarnings.add(_backgroundWarning!);
+          _warningBuckets.addServiceWarning(_backgroundWarning!);
         }
       }
     }
@@ -3362,88 +2339,17 @@ class AssignmentStore extends ChangeNotifier {
     return restored;
   }
 
-  Future<void> updateCompletion(String assignmentId, bool completed) async {
-    await setAssignmentsHidden([assignmentId], completed);
-  }
+  Future<void> updateCompletion(String assignmentId, bool completed) =>
+      setAssignmentsHidden([assignmentId], completed);
 
-  Future<bool> hideAssignment(String assignmentId) async {
-    return setAssignmentsHidden([assignmentId], true);
-  }
+  Future<bool> hideAssignment(String assignmentId) =>
+      setAssignmentsHidden([assignmentId], true);
 
   Future<bool> setAssignmentsHidden(
     Iterable<String> assignmentIds,
     bool hidden,
-  ) async {
-    final ids = assignmentIds.toSet();
-    if (ids.isEmpty) return true;
-    final epoch = accountEpoch;
-    final account = _account;
-    final accountHash = _accountHash;
-    if (!_authenticated || account == null || accountHash == null) {
-      return false;
-    }
-    var saved = false;
-    await _run(() async {
-      if (!_isSessionStateCurrent(
-        epoch: epoch,
-        account: account,
-        checkAccount: true,
-        accountHash: accountHash,
-        checkAccountHash: true,
-        requireNotDisposed: false,
-      )) {
-        return;
-      }
-      await _markReminderMutationPending();
-      if (!_isSessionStateCurrent(
-        epoch: epoch,
-        account: account,
-        checkAccount: true,
-        accountHash: accountHash,
-        checkAccountHash: true,
-        requireNotDisposed: false,
-      )) {
-        return;
-      }
-      try {
-        await repository.updateCompletionMany(
-          ids,
-          hidden,
-          canCommit: () async {
-            if (!_isSessionStateCurrent(
-              epoch: epoch,
-              account: account,
-              checkAccount: true,
-              requireNotDisposed: false,
-            )) {
-              return false;
-            }
-            if (!_nativeReminderAvailable) return true;
-            return backgroundReminderGateway.isSessionCurrent(
-              accountHash,
-              _nativeSessionEpoch,
-            );
-          },
-        );
-      } on StateError {
-        if (accountEpoch != epoch) return;
-        rethrow;
-      }
-      if (!_isSessionStateCurrent(
-        epoch: epoch,
-        account: account,
-        checkAccount: true,
-        accountHash: accountHash,
-        checkAccountHash: true,
-        requireNotDisposed: false,
-      )) {
-        return;
-      }
-      await _reloadJournal();
-      saved = true;
-    });
-    return saved;
-  }
+  ) =>
+      _setAssignmentsHidden(assignmentIds, hidden);
 
   Future<bool> setCourseworkGroupHidden(
     CourseworkGroup group,
@@ -3454,63 +2360,12 @@ class AssignmentStore extends ChangeNotifier {
         hidden,
       );
 
-  Future<bool> saveReminderRule(List<int> offsetsMinutes) async {
-    final snap = _captureSession();
-    var saved = false;
-    await _run(() async {
-      if (!_isSessionCurrent(snap)) return;
-      await _markReminderMutationPending();
-      if (!_isSessionCurrent(snap)) return;
-      final List<int> normalized;
-      try {
-        normalized = await _runScopedWrite(
-          snap,
-          (_) => reminderRuleStore.saveOffsetsMinutes(offsetsMinutes),
-        );
-      } on StaleSessionWriteException {
-        return;
-      }
-      if (!_isSessionCurrent(snap)) return;
-      _reminderOffsetsMinutes = normalized;
-      saved = true;
-      await _afterAssignmentsChanged();
-    });
-    return saved;
-  }
+  Future<bool> saveReminderRule(List<int> offsetsMinutes) =>
+      _saveReminderRule(offsetsMinutes);
 
-  Future<bool> saveAutoSyncIntervalMinutes(int minutes) async {
-    if (minutes == 0) {
-      return saveBackgroundCheckEnabled(false);
-    }
-    return saveBackgroundCheckIntervalMinutes(minutes);
-  }
-
-  Future<bool> _saveBackgroundCheckSettings(
-    BackgroundCheckSettings Function(BackgroundCheckSettings current) transform,
-  ) async {
-    final snap = _captureSession();
-    var saved = false;
-    await _run(() async {
-      if (!_isSessionCurrent(snap)) return;
-      final next = transform(_backgroundCheckSettings);
-      try {
-        await _runScopedWrite(
-          snap,
-          (prefs) => backgroundCheckSettingsStore.save(next, prefs: prefs),
-        );
-      } on StaleSessionWriteException {
-        return;
-      }
-      if (!_isSessionCurrent(snap)) return;
-      _backgroundCheckSettings = next;
-      if (!await _reconcileBackgroundControls()) {
-        throw StateError('设置已保存，但后台提醒设置未确认，请重试');
-      }
-      if (!_isSessionCurrent(snap)) return;
-      saved = true;
-    });
-    return saved;
-  }
+  Future<bool> saveAutoSyncIntervalMinutes(int minutes) => minutes == 0
+      ? saveBackgroundCheckEnabled(false)
+      : saveBackgroundCheckIntervalMinutes(minutes);
 
   Future<bool> saveBackgroundCheckEnabled(bool enabled) =>
       _saveBackgroundCheckSettings(
@@ -3535,128 +2390,16 @@ class AssignmentStore extends ChangeNotifier {
         (current) => current.copyWith(newAssignmentReminderEnabled: enabled),
       );
 
-  Future<bool> saveAllowUrgentDeadlineNightBreakthrough(bool enabled) async {
-    final snap = _captureSession();
-    var saved = false;
-    await _run(() async {
-      if (!_isSessionCurrent(snap)) return;
-      await _markReminderMutationPending();
-      if (!_isSessionCurrent(snap)) return;
-      try {
-        await _runScopedWrite(
-          snap,
-          (prefs) => repository.writeAllowUrgentNightBreakthroughInPrefs(
-            prefs,
-            enabled,
-          ),
-        );
-      } on StaleSessionWriteException {
-        return;
-      }
-      if (!_isSessionCurrent(snap)) return;
-      _allowUrgentDeadlineNightBreakthrough = enabled;
-      notificationService.allowUrgentNightBreakthrough =
-          snap.authenticated && enabled;
-      saved = true;
-      await _afterAssignmentsChanged(updateSummary: false);
-    });
-    return saved;
-  }
+  Future<bool> saveAllowUrgentDeadlineNightBreakthrough(bool enabled) =>
+      _saveAllowUrgentDeadlineNightBreakthrough(enabled);
 
-  Future<bool> saveDeadlineChannelId(String channelId) async {
-    final normalized =
-        LocalAssignmentRepository.normalizeDeadlineChannelId(channelId);
-    if (normalized == null) {
-      _error = '未知的截止提醒通知渠道';
-      notifyListeners();
-      return false;
-    }
-    final snap = _captureSession();
-    var saved = false;
-    await _run(() async {
-      if (!_isSessionCurrent(snap)) return;
-      await _markReminderMutationPending();
-      if (!_isSessionCurrent(snap)) return;
-      try {
-        await _runScopedWrite(
-          snap,
-          (prefs) async {
-            await repository.writeDeadlineChannelIdInPrefs(
-              prefs,
-              normalized,
-            );
-            await prefs.setBool(_deadlineChannelV3AutoMigratedKey, true);
-          },
-        );
-      } on StaleSessionWriteException {
-        return;
-      }
-      if (!_isSessionCurrent(snap)) return;
-      _deadlineChannelId = normalized;
-      notificationService.activeDeadlineChannelId = snap.authenticated
-          ? normalized
-          : LocalNotificationService.assignmentV3Channel;
-      saved = true;
-      await _afterAssignmentsChanged(updateSummary: false);
-    });
-    return saved;
-  }
+  Future<bool> saveDeadlineChannelId(String channelId) =>
+      _saveDeadlineChannelId(channelId);
 
   Future<TestDeadlineNotificationOutcome> sendTestDeadlineNotification({
     int delayMillis = 3000,
-  }) async {
-    final now = _clock();
-    if (DeadlineQuietHoursPolicy.isQuiet(now)) {
-      final retryAt = DeadlineQuietHoursPolicy.nextQuietEnd(now);
-      final hm =
-          '${retryAt.hour.toString().padLeft(2, '0')}:${retryAt.minute.toString().padLeft(2, '0')}';
-      return TestDeadlineNotificationOutcome(
-        status: TestDeadlineNotificationStatus.quietHours,
-        channelId: activeDeadlineChannelId,
-        warning: '当前处于夜间静音时段（23:30–07:30），测试提醒不会穿透静音；请在 $hm 后重试。',
-        retryAfterAt: retryAt,
-      );
-    }
-    final targetChannel = _authenticated
-        ? _deadlineChannelId
-        : LocalNotificationService.assignmentV3Channel;
-    notificationService.activeDeadlineChannelId = targetChannel;
-    if (_nativeReminderAvailable) {
-      try {
-        return await backgroundReminderGateway.sendTestDeadlineNotification(
-          accountHash: _authenticated ? _accountHash : null,
-          channelId: targetChannel,
-          delayMillis: delayMillis,
-        );
-      } catch (error) {
-        return TestDeadlineNotificationOutcome(
-          status: TestDeadlineNotificationStatus.blocked,
-          channelId: targetChannel,
-          warning: '发送测试提醒失败：$error',
-        );
-      }
-    }
-    try {
-      final ok = await notificationService.showTestNotification();
-      return ok
-          ? TestDeadlineNotificationOutcome(
-              status: TestDeadlineNotificationStatus.posted,
-              channelId: targetChannel,
-            )
-          : TestDeadlineNotificationOutcome(
-              status: TestDeadlineNotificationStatus.blocked,
-              channelId: targetChannel,
-              warning:
-                  notificationService.lastWarning ?? '未能请求测试通知，请检查通知权限与渠道。',
-            );
-    } catch (error) {
-      return TestDeadlineNotificationOutcome(
-        status: TestDeadlineNotificationStatus.blocked,
-        channelId: targetChannel,
-        warning: '发送测试提醒失败：$error',
-      );
-    }
-  }
+  }) =>
+      _sendTestDeadlineNotification(delayMillis: delayMillis);
 
   /// Reloads durable sync timestamps and journal records if a headless
   /// background check persisted newer state while this foreground store was idle.
@@ -3874,208 +2617,6 @@ class AssignmentStore extends ChangeNotifier {
     );
   }
 
-  Future<void> _recordBackgroundCheckObservation(
-    BackgroundSyncTrigger trigger,
-    BackgroundCheckResult result,
-  ) async {
-    if (!_nativeReminderAvailable || !_reminderHistoryReady) return;
-    if (trigger == BackgroundSyncTrigger.daytime &&
-        result.skipped &&
-        result.success &&
-        result.skipReason == null) {
-      return;
-    }
-    final accountHash = _accountHash;
-    final epoch = _nativeSessionEpoch;
-    if (accountHash == null || epoch <= 0) return;
-    final isOutsideWindow =
-        result.skipReason == BackgroundCheckResult.outsideWindowSkipReason;
-    final stage = isOutsideWindow
-        ? 'deferred'
-        : result.skipped
-            ? 'blocked'
-            : result.success
-                ? 'scheduled'
-                : 'unconfirmed';
-    final reasonCode =
-        result.skipReason ?? (result.success ? null : 'backgroundCheckFailed');
-    final logicalKey = trigger == BackgroundSyncTrigger.notificationSignal
-        ? 'background:notificationSignal:${backgroundSignalVersion ?? 0}'
-        : 'background:${trigger.name}';
-    final owner = notificationRemoteStart?.workerId ?? nativeLeaseOwner;
-    final observationId = (owner != null && owner.isNotEmpty)
-        ? 'bg:${trigger.name}:${backgroundSignalVersion ?? 0}:$owner:$stage:${reasonCode ?? ''}'
-        : null;
-    try {
-      final context =
-          await backgroundReminderGateway.acquireReminderObservationContext(
-        accountHash: accountHash,
-        sessionEpoch: epoch,
-      );
-      await backgroundReminderGateway.appendReminderObservation(
-        context: context,
-        observation: ReminderObservation(
-          observationId: observationId,
-          subjectKind: 'account',
-          logicalKey: logicalKey,
-          category: 'backgroundCheck',
-          stage: stage,
-          reasonCode: reasonCode,
-          observedAt: _clock(),
-          scheduledAt: result.nextTargetAt,
-        ),
-      );
-    } on ReminderHistoryException catch (error) {
-      _serviceWarnings.add('提醒记录未能写入：${error.message}');
-    } catch (error) {
-      _serviceWarnings.add('提醒记录未能写入：$error');
-    }
-  }
-
-  Future<void> _prepareReminderHistorySession() async {
-    if (!reminderHistoryEnabled) return;
-    final accountHash = _accountHash;
-    final epoch = _nativeSessionEpoch;
-    if (!_nativeReminderAvailable ||
-        !_authenticated ||
-        accountHash == null ||
-        epoch <= 0) {
-      return;
-    }
-    final prefs = await SharedPreferences.getInstance();
-    try {
-      final control = await backgroundReminderGateway.getReminderHistoryControl(
-        accountHash: accountHash,
-        sessionEpoch: epoch,
-      );
-      var generation = control.historyGeneration;
-      if (control.purgePending) {
-        final token = control.purgeToken;
-        if (token == null) {
-          _reminderHistoryReady = false;
-          _serviceWarnings.add('提醒记录仍在清理，当前记录功能暂不可用');
-          return;
-        }
-        final finished =
-            await backgroundReminderGateway.finishReminderHistoryLogout(token);
-        generation = finished.historyGeneration;
-      }
-      final pendingRequest = prefs.getString(_historyPurgeRequestKey);
-      final pendingGeneration = prefs.getInt(_historyPurgeGenerationKey);
-      if (pendingRequest != null && pendingRequest.isNotEmpty) {
-        final expected = pendingGeneration == null || pendingGeneration <= 0
-            ? generation
-            : pendingGeneration;
-        try {
-          final started =
-              await backgroundReminderGateway.beginReminderHistoryLogout(
-            expectedHistoryGeneration: expected,
-            requestId: pendingRequest,
-            accountHash: accountHash,
-            sessionEpoch: epoch,
-          );
-          final finished = await backgroundReminderGateway
-              .finishReminderHistoryLogout(started.purgeToken);
-          generation = finished.historyGeneration;
-        } on ReminderHistoryException catch (error) {
-          if (error.code != 'stale_history_generation') rethrow;
-          generation =
-              (await backgroundReminderGateway.getReminderHistoryControl(
-            accountHash: accountHash,
-            sessionEpoch: epoch,
-          ))
-                  .historyGeneration;
-        }
-        await prefs.remove(_historyPurgeRequestKey);
-        await prefs.remove(_historyPurgeGenerationKey);
-      }
-      generation = await backgroundReminderGateway.enableReminderHistorySession(
-        accountHash: accountHash,
-        sessionEpoch: epoch,
-        expectedHistoryGeneration: generation,
-      );
-      _reminderHistoryGeneration = generation;
-      _reminderHistoryReady = true;
-    } on ReminderHistoryException catch (error) {
-      _reminderHistoryReady = false;
-      _serviceWarnings.add('提醒记录暂不可用：${error.message}');
-    } catch (error) {
-      _reminderHistoryReady = false;
-      _serviceWarnings.add('提醒记录暂不可用：$error');
-    }
-  }
-
-  Future<String?> _retireReminderHistoryBeforeLogout(
-    String accountHash,
-    int sessionEpoch,
-  ) async {
-    if (!reminderHistoryEnabled) return null;
-    if (!_nativeReminderAvailable) {
-      await _persistHistoryPurgeIntent();
-      return null;
-    }
-    final requestId =
-        'logout-${DateTime.now().microsecondsSinceEpoch}-$_generation';
-    final prefs = await SharedPreferences.getInstance();
-    try {
-      final control = await backgroundReminderGateway.getReminderHistoryControl(
-        accountHash: accountHash,
-        sessionEpoch: sessionEpoch,
-      );
-      var generation = control.historyGeneration;
-      if (control.purgePending && control.purgeToken != null) {
-        final finished = await backgroundReminderGateway
-            .finishReminderHistoryLogout(control.purgeToken!);
-        generation = finished.historyGeneration;
-      } else if (control.purgePending) {
-        await prefs.setString(_historyPurgeRequestKey, requestId);
-        await prefs.setInt(_historyPurgeGenerationKey, generation);
-        return null;
-      }
-      final started =
-          await backgroundReminderGateway.beginReminderHistoryLogout(
-        expectedHistoryGeneration: generation,
-        requestId: requestId,
-        accountHash: accountHash,
-        sessionEpoch: sessionEpoch,
-      );
-      await backgroundReminderGateway
-          .finishReminderHistoryLogout(started.purgeToken);
-      _reminderHistoryReady = false;
-      _reminderHistoryGeneration = 0;
-      return null;
-    } catch (error) {
-      await _persistHistoryPurgeIntent(
-        requestId: requestId,
-        generation: _reminderHistoryGeneration,
-      );
-      _reminderHistoryReady = false;
-      final warning = '退出时提醒记录清理未确认：$error';
-      _serviceWarnings.add(warning);
-      return warning;
-    }
-  }
-
-  Future<void> _persistHistoryPurgeIntent({
-    String? requestId,
-    int? generation,
-  }) async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(
-        _historyPurgeRequestKey,
-        requestId ??
-            'logout-${DateTime.now().microsecondsSinceEpoch}-$_generation',
-      );
-      await prefs.setInt(
-        _historyPurgeGenerationKey,
-        generation ?? _reminderHistoryGeneration,
-      );
-    } catch (_) {
-      // The logout path already reports the unconfirmed native cleanup.
-    }
-  }
-
   Future<void> logout() async {
     final logoutGen = ++_generation;
     cancelSynchronization();
@@ -4195,12 +2736,7 @@ class AssignmentStore extends ChangeNotifier {
       _chaoxingDisplayName = null;
       _chaoxingAvatarUrl = null;
       _error = null;
-      _serviceWarnings.clear();
-      _privacyWarnings.clear();
-      _deadlineWarnings.clear();
-      _summaryWarnings.clear();
-      _manualWarnings.clear();
-      _widgetWarnings.clear();
+      _warningBuckets.clearAll();
       _recoveryWarnings.clear();
       _assignments.clear();
       _lastSyncAt = null;
@@ -4233,13 +2769,13 @@ class AssignmentStore extends ChangeNotifier {
       await _afterAssignmentsChanged(updateWidget: false);
       if (logoutGen != _generation || _disposed) return;
       if (widgetLogoutWarning != null) {
-        _serviceWarnings.add(widgetLogoutWarning);
+        _warningBuckets.addServiceWarning(widgetLogoutWarning);
       }
       if (historyLogoutWarning != null) {
-        _serviceWarnings.add(historyLogoutWarning);
+        _warningBuckets.addServiceWarning(historyLogoutWarning);
       }
-      if (_serviceWarnings.isNotEmpty) {
-        final hasOtherWarnings = _serviceWarnings.any(
+      if (_warningBuckets.isNotEmpty) {
+        final hasOtherWarnings = _warningBuckets.any(
           (warning) => warning != historyLogoutWarning,
         );
         _error = hasOtherWarnings
@@ -4262,366 +2798,7 @@ class AssignmentStore extends ChangeNotifier {
     _invalidateHomeDisplayIndex();
   }
 
-  Future<void> _cleanupRemovedManualAttachments(
-    StudyNotebook previous,
-    StudyNotebook current,
-  ) async {
-    final retained = <String>{
-      for (final entry in current.entries)
-        for (final item in entry.attachments) item.relativePath,
-    };
-    final removed = <String>[
-      for (final entry in previous.entries)
-        for (final item in entry.attachments)
-          if (!retained.contains(item.relativePath)) item.relativePath,
-    ];
-    if (removed.isEmpty) return;
-    try {
-      await manualAttachmentService.deleteFiles(removed);
-    } catch (error) {
-      debugPrint('[ManualAttachment] cleanup: ${error.runtimeType}');
-    }
-  }
-
-  Future<bool> _afterAssignmentsChanged({
-    bool completeSync = false,
-    bool detectNewAssignments = false,
-    bool syncCompleted = false,
-    bool allowSourceBaselineUpdate = true,
-    String? syncFailure,
-    DateTime? completedAt,
-    bool updateAssignmentReminders = true,
-    bool updateSummary = true,
-    bool updateManual = true,
-    bool updateWidget = true,
-  }) async {
-    final snap = _captureSession();
-    if (updateAssignmentReminders) {
-      await _prunePins();
-      if (!_isSessionCurrent(snap)) {
-        return false;
-      }
-    }
-    var manualRescheduleSucceeded = false;
-    final fullRefresh = updateAssignmentReminders &&
-        updateSummary &&
-        updateManual &&
-        updateWidget;
-    void clearWarningBucket(List<String> bucket) {
-      for (final msg in bucket) {
-        _serviceWarnings.remove(msg);
-      }
-      bucket.clear();
-    }
-
-    void addSubsystemWarning(List<String> bucket, String message) {
-      bucket.add(message);
-      _serviceWarnings.add(message);
-    }
-
-    if (fullRefresh) {
-      _serviceWarnings.clear();
-      _privacyWarnings.clear();
-      _deadlineWarnings.clear();
-      _summaryWarnings.clear();
-      _manualWarnings.clear();
-      _widgetWarnings.clear();
-    } else {
-      clearWarningBucket(_privacyWarnings);
-      if (updateAssignmentReminders) clearWarningBucket(_deadlineWarnings);
-      if (updateSummary) clearWarningBucket(_summaryWarnings);
-      if (updateManual) clearWarningBucket(_manualWarnings);
-      if (updateWidget) clearWarningBucket(_widgetWarnings);
-    }
-    // Restored app preferences can outlive excluded/nonportable credentials.
-    // Do not publish their private content to lockscreen or widget before login.
-    final scoped = snap.authenticated ? courseAssignments : <Assignment>[];
-    if (_privacyCleanupPending) {
-      try {
-        await _cancelPrivateNotifications();
-      } catch (error) {
-        addSubsystemWarning(_privacyWarnings, _privacyCleanupMessage(error));
-      }
-    }
-    final effectiveCoursework = snap.authenticated
-        ? _courseworkState
-        : const LocalCourseworkState.empty();
-    notificationService.courseworkState = effectiveCoursework;
-    notificationService.allowUrgentNightBreakthrough =
-        snap.authenticated && _allowUrgentDeadlineNightBreakthrough;
-    notificationService.activeDeadlineChannelId = snap.authenticated
-        ? _deadlineChannelId
-        : LocalNotificationService.assignmentV3Channel;
-    if (!_privacyCleanupPending) {
-      if (updateAssignmentReminders) {
-        if (_nativeReminderAvailable && _authenticated) {
-          final controlsApplied = await _reconcileBackgroundControls();
-          if (!controlsApplied) {
-            // Fail closed: publishing a plan while showDetails/schedule settings
-            // were not applied would activate the previous native settings.
-            addSubsystemWarning(
-              _deadlineWarnings,
-              _backgroundWarning ?? '后台提醒设置未能应用，本次未更新提醒计划',
-            );
-          } else {
-            try {
-              if (await _ensureLegacyAssignmentVerified()) {
-                await _applyNativeReminderPlan(
-                  completeSync: completeSync,
-                  detectNewAssignments: detectNewAssignments,
-                  syncCompleted: syncCompleted,
-                  allowSourceBaselineUpdate: allowSourceBaselineUpdate,
-                  failure: syncFailure,
-                  completedAt: completedAt,
-                );
-              }
-            } catch (error) {
-              addSubsystemWarning(_deadlineWarnings, '后台作业提醒状态未能更新：$error');
-            }
-          }
-        } else {
-          try {
-            await notificationService.rescheduleAssignments(scoped,
-                offsetsMinutes: _reminderOffsetsMinutes);
-          } catch (_) {
-            addSubsystemWarning(_deadlineWarnings, '提醒安排失败，请检查通知权限后重试');
-          }
-          if (notificationService.lastWarning != null) {
-            addSubsystemWarning(
-                _deadlineWarnings, notificationService.lastWarning!);
-          }
-        }
-      }
-      if (_manageBackgroundSchedule && updateSummary) {
-        try {
-          await notificationService.rescheduleSummary(scoped,
-              _authenticated ? personal : PersonalWorkspace(), _lastSyncAt);
-          if (notificationService.lastWarning != null) {
-            addSubsystemWarning(
-                _summaryWarnings, notificationService.lastWarning!);
-          }
-        } catch (error) {
-          final detail = notificationService.lastWarning ?? error.toString();
-          addSubsystemWarning(
-            _summaryWarnings,
-            _authenticated && personal.summaryEnabled
-                ? '每日摘要未能更新：$detail'
-                : '旧摘要未能清理：$detail',
-          );
-        }
-        await _recordPluginScheduleOutcomes(
-          notificationService.lastScheduleOutcomes,
-        );
-      }
-      if (_manageBackgroundSchedule && updateManual) {
-        try {
-          await notificationService
-              .rescheduleManual(_authenticated ? notebook.entries : []);
-          manualRescheduleSucceeded = !notificationService.lastScheduleOutcomes
-              .any((item) => item.stage == 'scheduleFailed');
-          if (notificationService.lastWarning != null) {
-            addSubsystemWarning(
-                _manualWarnings, '个人日程：${notificationService.lastWarning!}');
-          }
-        } catch (error) {
-          manualRescheduleSucceeded = false;
-          final detail = notificationService.lastWarning ?? error.toString();
-          addSubsystemWarning(_manualWarnings, '个人日程提醒未能更新或清理：$detail');
-        }
-        await _recordPluginScheduleOutcomes(
-          notificationService.lastScheduleOutcomes,
-        );
-      }
-    }
-    if (!_isSessionCurrent(snap) || !updateWidget) {
-      return manualRescheduleSucceeded;
-    }
-    final now = _clock();
-    final activeCatalog = snap.authenticated ? termCatalog : null;
-    final widgetItems = display.forWidget(
-      scoped,
-      now,
-      coursework: effectiveCoursework,
-    );
-    if (_manageBackgroundSchedule) {
-      try {
-        await _runScopedWrite(
-          snap,
-          (_) {
-            widgetSnapshotService.clock = _clock;
-            widgetSnapshotService.courseworkState = effectiveCoursework;
-            widgetSnapshotService.termCatalog = activeCatalog;
-            return widgetSnapshotService.saveAssignmentsForContext(
-              widgetItems,
-              authenticated: snap.authenticated,
-              range: display.widgetRange,
-            );
-          },
-        );
-      } on StaleSessionWriteException {
-        return manualRescheduleSucceeded;
-      } catch (_) {
-        if (snap.generation == _generation && !_disposed) {
-          addSubsystemWarning(_widgetWarnings, '作业已保存在本机，小组件更新失败，请稍后刷新');
-        }
-      }
-    } else if (snap.authenticated && !_privacyCleanupPending) {
-      try {
-        await _runScopedWrite(
-          snap,
-          (_) {
-            widgetSnapshotService.clock = _clock;
-            widgetSnapshotService.courseworkState = effectiveCoursework;
-            widgetSnapshotService.termCatalog = activeCatalog;
-            return widgetSnapshotService.saveAssignmentsForContext(
-              widgetItems,
-              authenticated: true,
-              range: display.widgetRange,
-            );
-          },
-        );
-      } on StaleSessionWriteException {
-        return manualRescheduleSucceeded;
-      } catch (error) {
-        debugPrint('[WidgetSnapshot] background_refresh_skipped: $error');
-      }
-    }
-    return manualRescheduleSucceeded;
-  }
-
-  Future<void> _markReminderMutationPending() async {
-    final accountHash = _accountHash;
-    if (!_nativeReminderAvailable || !_authenticated || accountHash == null) {
-      return;
-    }
-    await backgroundReminderGateway.markPendingUpdate(
-      accountHash: accountHash,
-      sessionEpoch: _nativeSessionEpoch,
-    );
-  }
-
-  Future<void> _recordPluginScheduleOutcomes(
-    List<ReminderScheduleOutcome> outcomes,
-  ) async {
-    if (!_nativeReminderAvailable ||
-        !_reminderHistoryReady ||
-        outcomes.isEmpty) {
-      return;
-    }
-    final accountHash = _accountHash;
-    final epoch = _nativeSessionEpoch;
-    if (accountHash == null || epoch <= 0) return;
-    try {
-      final context =
-          await backgroundReminderGateway.acquireReminderObservationContext(
-        accountHash: accountHash,
-        sessionEpoch: epoch,
-      );
-      final result =
-          await backgroundReminderGateway.recordReminderScheduleOutcome(
-        context: context,
-        outcomes: outcomes,
-      );
-      if (result.warning != null) {
-        _serviceWarnings.add(result.warning!);
-      }
-    } on ReminderHistoryException catch (error) {
-      _serviceWarnings.add('提醒记录未能写入：${error.message}');
-    } catch (error) {
-      _serviceWarnings.add('提醒记录未能写入：$error');
-    }
-  }
-
-  Future<void> _recordManualCancellationOutcomes(
-    StudyNotebook previous,
-    StudyNotebook current, {
-    required bool rescheduleSucceeded,
-  }) async {
-    if (!_nativeReminderAvailable ||
-        !_reminderHistoryReady ||
-        !_authenticated) {
-      return;
-    }
-    final now = DateTime.now();
-    final outcomes = <ReminderScheduleOutcome>[];
-    for (final entry in previous.entries) {
-      if (entry.done || !entry.remind || entry.at == null) continue;
-      final next =
-          current.entries.where((item) => item.id == entry.id).firstOrNull;
-      final stillScheduled = next != null &&
-          !next.done &&
-          next.remind &&
-          next.at != null &&
-          next.at == entry.at &&
-          next.at!.subtract(const Duration(minutes: 30)).isAfter(now);
-      if (stillScheduled) continue;
-      final at = entry.at!.subtract(const Duration(minutes: 30));
-      if (!rescheduleSucceeded) {
-        outcomes.add(ReminderScheduleOutcome(
-          subjectKind: 'manual',
-          subjectId: entry.id,
-          logicalKey: 'manual:${entry.id}:${at.millisecondsSinceEpoch}',
-          category: 'personal',
-          stage: 'cancelFailed',
-          reasonCode: 'scheduleBatchFailed',
-          observedAt: now,
-          scheduledAt: at,
-          expectedPayload: 'p:${entry.id}',
-          evidenceState: 'recoveryPending',
-        ));
-        continue;
-      }
-      final String reasonCode;
-      if (next == null) {
-        reasonCode = 'removed';
-      } else if (next.done) {
-        reasonCode = 'completed';
-      } else if (!next.remind) {
-        reasonCode = 'reminderDisabled';
-      } else if (next.at == null) {
-        reasonCode = 'noDeadline';
-      } else if (!next.at!.subtract(const Duration(minutes: 30)).isAfter(now)) {
-        reasonCode = 'offsetWindowPassed';
-      } else {
-        reasonCode = 'scheduleReplaced';
-      }
-      outcomes.add(ReminderScheduleOutcome(
-        subjectKind: 'manual',
-        subjectId: entry.id,
-        logicalKey: 'manual:${entry.id}:${at.millisecondsSinceEpoch}',
-        category: 'personal',
-        stage: 'cancelled',
-        reasonCode: reasonCode,
-        observedAt: now,
-        scheduledAt: at,
-        expectedPayload: 'p:${entry.id}',
-        evidenceState: 'removed',
-      ));
-    }
-    await _recordPluginScheduleOutcomes(outcomes);
-  }
-
   bool get reminderHistoryAvailable => _reminderHistoryReady;
-
-  ReminderObservationContext _historyReadContext() {
-    final accountHash = _accountHash;
-    if (!_nativeReminderAvailable ||
-        !_reminderHistoryReady ||
-        accountHash == null ||
-        _nativeSessionEpoch <= 0 ||
-        _reminderHistoryGeneration <= 0) {
-      throw const ReminderHistoryException(
-        'history_unavailable',
-        '提醒记录当前不可用',
-      );
-    }
-    return ReminderObservationContext(
-      accountHash: accountHash,
-      sessionEpoch: _nativeSessionEpoch,
-      historyGeneration: _reminderHistoryGeneration,
-      operationSequence: 0,
-    );
-  }
 
   Future<ReminderHistoryPage> loadReminderHistory({
     int? snapshotMaxId,
@@ -4629,8 +2806,7 @@ class AssignmentStore extends ChangeNotifier {
     String? category,
     List<ReminderSubjectRef> subjectRefs = const [],
   }) =>
-      backgroundReminderGateway.listReminderHistory(
-        context: _historyReadContext(),
+      _loadReminderHistory(
         snapshotMaxId: snapshotMaxId,
         beforeId: beforeId,
         category: category,
@@ -4639,393 +2815,16 @@ class AssignmentStore extends ChangeNotifier {
 
   Future<ReminderSubjectEvidence> inspectReminderSubjects(
     List<ReminderSubjectRef> refs,
-  ) async {
-    final context = _historyReadContext();
-    if (refs.length <= 50) {
-      return backgroundReminderGateway.inspectReminderSubjects(
-        context: context,
-        subjectRefs: refs,
-      );
-    }
-    final nativeEvents = <ReminderNativeSubjectEvidence>[];
-    final pluginEvidence = <ReminderPluginSubjectEvidence>[];
-    final warnings = <String>[];
-    var checkedAt = DateTime.now();
-    var generation = context.historyGeneration;
-    for (var start = 0; start < refs.length; start += 50) {
-      final end = (start + 50).clamp(0, refs.length);
-      final page = await backgroundReminderGateway.inspectReminderSubjects(
-        context: context,
-        subjectRefs: refs.sublist(start, end),
-      );
-      checkedAt = page.checkedAt;
-      generation = page.historyGeneration;
-      nativeEvents.addAll(page.nativeEvents);
-      pluginEvidence.addAll(page.pluginEvidence);
-      warnings.addAll(page.queryWarnings);
-    }
-    return ReminderSubjectEvidence(
-      checkedAt: checkedAt,
-      nativeEvents: nativeEvents,
-      pluginEvidence: pluginEvidence,
-      queryWarnings: warnings,
-      historyGeneration: generation,
-    );
-  }
+  ) =>
+      _inspectReminderSubjects(refs);
 
   Future<ReminderExplanation> explainReminder({
     required String kind,
     required String id,
-  }) async {
-    final now = DateTime.now();
-    final warnings = <String>[];
-    ReminderHealth? health;
-    var healthQueryFailed = false;
-    try {
-      health = await notificationService.inspectHealth();
-      if (health.queryErrors.isNotEmpty) {
-        healthQueryFailed = true;
-        warnings.addAll(health.queryErrors);
-      }
-    } catch (error) {
-      healthQueryFailed = true;
-      warnings.add('系统通知状态暂时无法读取：$error');
-    }
-    PluginScheduleEvidenceSnapshot? plugin;
-    var pluginQueryFailed = false;
-    try {
-      plugin = await notificationService.readScheduleEvidence();
-    } catch (error) {
-      pluginQueryFailed = true;
-      warnings.add('系统待投递排期暂时无法读取：$error');
-    }
-    ReminderSubjectEvidence? evidence;
-    var subjectQueryFailed = false;
-    try {
-      final refs = switch (kind) {
-        'assignment' => [
-            for (final source in courseworkGroupFor(id)?.sources ??
-                [if (findAssignment(id) != null) findAssignment(id)!])
-              ReminderSubjectRef('assignment', source.id),
-          ],
-        'manual' => [ReminderSubjectRef('manual', id)],
-        'summary' => const [ReminderSubjectRef('summary', null)],
-        _ => <ReminderSubjectRef>[],
-      };
-      if (refs.isNotEmpty) {
-        evidence = await inspectReminderSubjects(refs);
-      }
-    } on ReminderHistoryException catch (error) {
-      subjectQueryFailed = true;
-      warnings.add(error.message);
-    } catch (error) {
-      subjectQueryFailed = true;
-      warnings.add('提醒证据暂时无法读取：$error');
-    }
-    if (kind == 'assignment') {
-      final group = courseworkGroupFor(id);
-      final primary = group?.primary ?? findAssignment(id);
-      if (primary == null) {
-        return ReminderExplanation(
-          checkedAt: now,
-          subjectKind: kind,
-          subjectId: id,
-          displayName: '事项已不在当前账号的本机记录中',
-          categories: const [
-            ReminderCategoryExplanation(
-              category: 'deadline',
-              status: ReminderExplanationStatus.ineligible,
-              reasonCodes: ['removed'],
-              nextScheduledAt: null,
-              evidenceAt: null,
-              actionLabel: null,
-            ),
-          ],
-          queryWarnings: warnings,
-        );
-      }
-      ReminderPlanState? plan;
-      if (_nativeReminderAvailable && _nativeSessionEpoch > 0) {
-        try {
-          plan = await backgroundReminderGateway.loadPlanState(
-            accountHash: _accountHash!,
-            sessionEpoch: _nativeSessionEpoch,
-          );
-        } catch (error) {
-          subjectQueryFailed = true;
-          warnings.add('提醒规则状态暂时无法读取：$error');
-        }
-      }
-      return ReminderExplanationService.forAssignment(
-        primary: primary,
-        sources: group?.sources ?? [primary],
-        groupHidden: group?.hidden ?? false,
-        hiddenAssignmentIds: _effectiveHiddenAssignmentIds(),
-        unfollowedCourseKeys: _unfollowed,
-        plan: plan,
-        offsets: _reminderOffsetsMinutes,
-        newReminderEnabled:
-            _backgroundCheckSettings.newAssignmentReminderEnabled,
-        now: now,
-        evidence: evidence,
-        health: health,
-        pluginEvidence: plugin,
-        queryWarnings: warnings,
-        coursework: _courseworkState,
-        allowUrgentNightBreakthrough: _allowUrgentDeadlineNightBreakthrough,
-        healthQueryFailed: healthQueryFailed,
-        pluginQueryFailed: pluginQueryFailed,
-        subjectQueryFailed: subjectQueryFailed,
-      );
-    }
-    if (kind == 'manual') {
-      final entry = notebook.entries.where((item) => item.id == id).firstOrNull;
-      return ReminderExplanationService.forManual(
-        entry: entry,
-        entryId: id,
-        now: now,
-        evidence: evidence,
-        health: health,
-        pluginEvidence: plugin,
-        queryWarnings: warnings,
-        allowUrgentNightBreakthrough: _allowUrgentDeadlineNightBreakthrough,
-        healthQueryFailed: healthQueryFailed,
-        pluginQueryFailed: pluginQueryFailed,
-        subjectQueryFailed: subjectQueryFailed,
-      );
-    }
-    if (kind == 'summary') {
-      final summaryId = int.tryParse(id);
-      final notices = DailySummary.build(
-        courseAssignments,
-        _authenticated ? personal : PersonalWorkspace(),
-        now,
-        _lastSyncAt,
-        coursework: _authenticated
-            ? _courseworkState
-            : const LocalCourseworkState.empty(),
-      );
-      return ReminderExplanationService.forSummary(
-        personal: _authenticated ? personal : PersonalWorkspace(),
-        summaryId: summaryId,
-        now: now,
-        evidence: evidence,
-        health: health,
-        pluginEvidence: plugin,
-        queryWarnings: warnings,
-        notices: notices,
-        healthQueryFailed: healthQueryFailed,
-        pluginQueryFailed: pluginQueryFailed,
-        subjectQueryFailed: subjectQueryFailed,
-      );
-    }
-    throw const ReminderHistoryException(
-      'invalid_history_argument',
-      '未知提醒事项类型',
-    );
-  }
+  }) =>
+      _explainReminder(kind: kind, id: id);
 
-  Future<void> retryReminderRecovery() {
-    final generation = _generation;
-    return _run(() async {
-      if (_disposed || generation != _generation) return;
-      await notificationService.recoverPendingSchedules();
-      if (_disposed || generation != _generation) return;
-      await _afterAssignmentsChanged();
-    });
-  }
-
-  Future<bool> _maybeMigrateLegacyAssignmentSchedules() async {
-    return await _ensureLegacyAssignmentVerified();
-  }
-
-  Future<void> _maybeMigrateLegacyManualSchedules({
-    bool? legacyAssignmentVerified,
-  }) async {
-    if (!_authenticated ||
-        !_manageBackgroundSchedule ||
-        _privacyCleanupPending ||
-        _disposed) {
-      return;
-    }
-    final snap = _captureSession();
-    notificationService.allowUrgentNightBreakthrough =
-        _allowUrgentDeadlineNightBreakthrough;
-    notificationService.courseworkState = _courseworkState;
-    try {
-      await notificationService
-          .migrateLegacyManualChannelIfNeeded(notebook.entries);
-    } catch (error) {
-      if (!_isSessionCurrent(snap)) return;
-      _manualWarnings.add('个人日程提醒渠道迁移未完成：$error');
-      _serviceWarnings.add('个人日程提醒渠道迁移未完成：$error');
-    }
-    if (!_isSessionCurrent(snap)) return;
-    try {
-      await notificationService.migrateLegacySummaryChannelIfNeeded(
-        courseAssignments,
-        personal,
-        _lastSyncAt,
-      );
-    } catch (error) {
-      if (!_isSessionCurrent(snap)) return;
-      _summaryWarnings.add('每日摘要提醒渠道迁移未完成：$error');
-      _serviceWarnings.add('每日摘要提醒渠道迁移未完成：$error');
-    }
-    if (!_isSessionCurrent(snap)) return;
-    var canRetireLegacyDeadline =
-        _deadlineChannelId == LocalNotificationService.assignmentV3Channel;
-    if (canRetireLegacyDeadline && _nativeReminderAvailable) {
-      if (legacyAssignmentVerified != null) {
-        canRetireLegacyDeadline = legacyAssignmentVerified;
-      } else {
-        try {
-          canRetireLegacyDeadline =
-              await notificationService.isLegacyAssignmentMigrationComplete();
-        } catch (_) {
-          canRetireLegacyDeadline = false;
-        }
-      }
-    }
-    if (!_isSessionCurrent(snap)) return;
-    var deadlineRescheduledForV3 = false;
-    try {
-      await notificationService.retireLegacyUpdatesAndDeadlineChannelsIfNeeded(
-        retireDeadlineV1: canRetireLegacyDeadline,
-        beforeRetireDeadlineV1: !_nativeReminderAvailable
-            ? () async {
-                if (!_isSessionCurrent(snap)) return false;
-                deadlineRescheduledForV3 = true;
-                await notificationService.rescheduleAssignments(
-                  courseAssignments,
-                  offsetsMinutes: _reminderOffsetsMinutes,
-                );
-                if (!_isSessionCurrent(snap)) return false;
-                if (notificationService.lastDeadlineScheduleFailed) {
-                  final reason = notificationService.lastWarning ?? '截止提醒重排未完成';
-                  _deadlineWarnings.add('截止提醒渠道升级重排未完成：$reason');
-                  _serviceWarnings.add('截止提醒渠道升级重排未完成：$reason');
-                  return false;
-                }
-                return true;
-              }
-            : null,
-      );
-    } catch (error) {
-      if (!_isSessionCurrent(snap)) return;
-      if (deadlineRescheduledForV3) {
-        _deadlineWarnings.add('截止提醒渠道升级重排未完成：$error');
-        _serviceWarnings.add('截止提醒渠道升级重排未完成：$error');
-      }
-      // Best-effort legacy v1/v2 channel cleanup.
-    }
-    if (!_isSessionCurrent(snap)) return;
-    if (_migratedDeadlineChannelToV3ThisRestore && !_nativeReminderAvailable) {
-      _migratedDeadlineChannelToV3ThisRestore = false;
-      if (!deadlineRescheduledForV3) {
-        try {
-          await notificationService.rescheduleAssignments(
-            courseAssignments,
-            offsetsMinutes: _reminderOffsetsMinutes,
-          );
-        } catch (error) {
-          if (!_isSessionCurrent(snap)) return;
-          _deadlineWarnings.add('截止提醒渠道升级重排未完成：$error');
-          _serviceWarnings.add('截止提醒渠道升级重排未完成：$error');
-        }
-      }
-    }
-  }
-
-  /// The native migration revision is the only activation fact. The Flutter
-  /// boolean is mirrored for diagnostics/tests but never authorizes delivery.
-  Future<bool> _ensureLegacyAssignmentVerified() async {
-    if (!_nativeReminderAvailable) return true;
-    try {
-      if (await notificationService.isLegacyAssignmentMigrationComplete()) {
-        await _mirrorLegacyCleanupMarker();
-        return true;
-      }
-      await notificationService.removeLegacyAssignmentSchedules();
-      if (!await notificationService.isLegacyAssignmentMigrationComplete()) {
-        _serviceWarnings.add('旧作业提醒迁移未完成，已暂缓原生提醒计划');
-        return false;
-      }
-      await _mirrorLegacyCleanupMarker();
-      return true;
-    } catch (error) {
-      _serviceWarnings.add('旧作业提醒迁移尚未完成：$error');
-      return false;
-    }
-  }
-
-  Future<void> _mirrorLegacyCleanupMarker() async {
-    final prefs = await SharedPreferences.getInstance();
-    if (prefs.getBool(_legacyScheduleCleanupKey) == true) return;
-    if (!await _writeBoolPreferenceAndVerify(
-        prefs, _legacyScheduleCleanupKey, true)) {
-      _serviceWarnings.add('旧作业提醒已清理，但本机完成标记未能保存；不影响原生迁移状态');
-    }
-  }
-
-  Future<void> _applyNativeReminderPlan({
-    required bool completeSync,
-    required bool detectNewAssignments,
-    required bool syncCompleted,
-    bool allowSourceBaselineUpdate = true,
-    String? failure,
-    DateTime? completedAt,
-  }) async {
-    final accountHash = _accountHash;
-    if (!_authenticated || accountHash == null) return;
-    final sessionEpoch = _nativeSessionEpoch;
-    final state = await backgroundReminderGateway.loadPlanState(
-      accountHash: accountHash,
-      sessionEpoch: sessionEpoch,
-    );
-    final now = completedAt ?? _clock();
-    final plan = AssignmentReminderPlanner.planAfterSync(
-      accountHash: accountHash,
-      sessionEpoch: sessionEpoch,
-      assignments: [..._assignments, ..._hiddenAssignments],
-      hiddenAssignmentIds: _effectiveHiddenAssignmentIds(),
-      unfollowedCourseKeys: _unfollowed,
-      knownAssignmentIds: state.knownAssignmentIds,
-      sentNewAssignmentIds: state.sentNewAssignmentIds,
-      baselineCompleted: state.baselineCompleted,
-      baselinedSources: state.baselinedSources,
-      completedSourceKeys: (syncCompleted && allowSourceBaselineUpdate)
-          ? {
-              for (final source in (_lastSyncSourceResults.isNotEmpty
-                  ? _lastSyncSourceResults
-                  : chaoxingClient.sourceResults))
-                if (source.phase == SyncSourcePhase.success) source.source,
-            }
-          : const {},
-      completeSync: completeSync,
-      detectNewAssignments: detectNewAssignments,
-      newAssignmentReminderEnabled:
-          _backgroundCheckSettings.newAssignmentReminderEnabled,
-      reminderOffsetsMinutes: _reminderOffsetsMinutes,
-      now: now,
-      courseworkState: _courseworkState,
-      archivedCourseKeys: _archivedReminderCourseKeys(),
-      allowUrgentNightBreakthrough: _allowUrgentDeadlineNightBreakthrough,
-    );
-    final result = await backgroundReminderGateway.applyPlan(
-      accountHash: accountHash,
-      sessionEpoch: sessionEpoch,
-      plan: plan,
-      completedAt: now,
-      failure: failure,
-      syncCompleted: syncCompleted,
-      expectedMutationVersion: state.mutationVersion,
-    );
-    _backgroundWarning = result.warning;
-    if (result.warning != null) {
-      _serviceWarnings.add(result.warning!);
-    }
-  }
+  Future<void> retryReminderRecovery() => _retryReminderRecovery();
 
   bool _needsProfileRecovery = false;
 
@@ -5722,93 +3521,6 @@ class AssignmentStore extends ChangeNotifier {
     return DaytimeCheckPolicy.normalizeIntervalMinutes(minutes);
   }
 
-  DateTime? get _latestAttemptAt {
-    final attempt = _lastSyncAttemptAt;
-    final success = _lastSyncAt;
-    if (attempt == null) return success;
-    if (success == null || attempt.isAfter(success)) return attempt;
-    return success;
-  }
-
-  DateTime? _nextBackgroundTarget(DateTime now) {
-    if (!_backgroundCheckSettings.enabled) return null;
-    var target = DaytimeCheckPolicy.nextTarget(
-      localNow: now,
-      lastAttemptAt: _latestAttemptAt,
-      intervalMinutes: _backgroundCheckSettings.intervalMinutes,
-    );
-    final backoff = _serverBackoffUntil;
-    if (backoff != null && backoff.isAfter(target)) {
-      target = backoff;
-    }
-    return target;
-  }
-
-  DateTime? _nextNotificationWindowTarget(DateTime now) {
-    if (!_backgroundCheckSettings.notificationListenerEnabled) return null;
-    var target = DaytimeCheckPolicy.isInWindow(now)
-        ? now
-        : DaytimeCheckPolicy.nextWindowStart(now);
-    final backoff = _serverBackoffUntil;
-    if (backoff != null && backoff.isAfter(target)) {
-      target = backoff;
-    }
-    return target;
-  }
-
-  Set<String> _archivedReminderCourseKeys() {
-    return {
-      for (final entry in termCatalog.entries)
-        if (entry.state == CourseCatalogState.archived || entry.isBlocked)
-          entry.courseKey,
-    };
-  }
-
-  /// Applies settings/schedule to the native side. Returns false only when a
-  /// control write was not confirmed, so callers can refuse to activate a plan
-  /// under stale settings. Health is diagnostic and never blocks that result.
-  Future<bool> _reconcileBackgroundControls({DateTime? now}) async {
-    if (!_nativeReminderAvailable) return true;
-    final current = now ?? DateTime.now();
-    final accountHash = _accountHash;
-    try {
-      if (_authenticated && accountHash != null) {
-        await backgroundReminderGateway.updateSettings(
-          accountHash,
-          _nativeSessionEpoch,
-          _backgroundCheckSettings,
-          showDetails: notificationService.showDetails,
-          reconcileSchedules: _manageBackgroundSchedule,
-          allowUrgentNightBreakthrough: _allowUrgentDeadlineNightBreakthrough,
-          deadlineChannelId: _deadlineChannelId,
-        );
-      }
-      if (_manageBackgroundSchedule) {
-        await backgroundReminderGateway.reconcileDaytimeSchedule(
-          targetAt: _authenticated ? _nextBackgroundTarget(current) : null,
-          enabled: _authenticated && _backgroundCheckSettings.enabled,
-          intervalMinutes: _backgroundCheckSettings.intervalMinutes,
-        );
-      }
-    } catch (error) {
-      _backgroundWarning =
-          '后台提醒设置未确认：${error.toString().replaceFirst('PlatformException', '后台提醒')}';
-      return false;
-    }
-    try {
-      if (accountHash != null) {
-        final health = await backgroundReminderGateway.inspectHealth(
-          accountHash: accountHash,
-          sessionEpoch: _nativeSessionEpoch,
-        );
-        _backgroundWarning = health.lastFailure;
-      }
-    } catch (error) {
-      _backgroundWarning = '后台提醒体检读取失败：$error';
-    }
-    return true;
-  }
-
   Future<void> _updateServerBackoff(
     Iterable<SyncIssue> issues, {
     _SessionSnapshot? session,
@@ -6081,119 +3793,6 @@ class AssignmentStore extends ChangeNotifier {
       throw StateError('同步结果未能保存');
     }
   }
-
-  Future<void> _cancelPrivateNotifications() async {
-    _privacyCleanupPending = true;
-    try {
-      await _persistPrivacyCleanupPending(true);
-      if (_manageBackgroundSchedule) {
-        await notificationService.cancelPrivateSchedules();
-      }
-      final nativeTargets = <String>{
-        ..._pendingNativeCleanupAccounts,
-        if (_nativeReminderAvailable && _accountHash != null) _accountHash!,
-      };
-      var pendingChanged = false;
-      for (final target in nativeTargets) {
-        final pendingAccount = _pendingNativeCleanupAccounts.contains(target);
-        if (!_nativeReminderAvailable) {
-          // No bridge means no proof the old account was cleaned. Keep the
-          // durable target; deleting it here would silently lose retry state.
-          continue;
-        }
-        if (pendingAccount) {
-          // Account-level cleanup also cancels background work and alarms;
-          // delivery cleanup alone is not enough to retry a failed logout.
-          await backgroundReminderGateway.clearActiveAccount(target);
-        }
-        await backgroundReminderGateway
-            .cancelAssignmentDeliveryKeepEvents(target);
-        if (pendingAccount && _pendingNativeCleanupAccounts.remove(target)) {
-          pendingChanged = true;
-        }
-      }
-      if (pendingChanged) {
-        // Retry evidence is only cleared after the native side confirmed the
-        // delivery cleanup for that old identity.
-        await _persistNativeCleanupAccounts();
-      }
-      if (_pendingNativeCleanupAccounts.isEmpty) {
-        await _persistPrivacyCleanupPending(false);
-        final prefs = await SharedPreferences.getInstance();
-        if (_manageBackgroundSchedule &&
-            prefs.getBool('notification_details_v1') == false) {
-          await _writeBoolPreferenceAndVerify(
-              prefs, _privacyVerifiedHiddenKey, true);
-        }
-        _privacyCleanupPending = false;
-      } else {
-        // A failed account-level cleanup is still pending even when delivery
-        // cancellation succeeded. Keep the durable marker for the next retry.
-        await _persistPrivacyCleanupPending(true);
-        _privacyCleanupPending = true;
-        throw StateError('原生提醒通道不可用，旧账号清理状态未确认');
-      }
-    } catch (error) {
-      _privacyCleanupPending = true;
-      try {
-        await _persistPrivacyCleanupPending(true);
-      } catch (_) {
-        // The in-memory state remains fail-closed even if persistence fails.
-      }
-      throw StateError(_privacyCleanupMessage(error));
-    }
-  }
-
-  Future<void> _persistPrivacyCleanupPending(bool pending) async {
-    final prefs = await SharedPreferences.getInstance();
-    if (pending) {
-      if (prefs.getBool(_privacyCleanupPendingKey) != true) {
-        final saved = await prefs.setBool(_privacyCleanupPendingKey, true);
-        if (!saved) {
-          await prefs.reload();
-          if (prefs.getBool(_privacyCleanupPendingKey) != true) {
-            throw StateError('通知隐私待清理状态未能保存');
-          }
-        }
-      }
-      return;
-    }
-    final removed = await prefs.remove(_privacyCleanupPendingKey);
-    if (!removed) {
-      await prefs.reload();
-      if (prefs.getBool(_privacyCleanupPendingKey) == true) {
-        throw StateError('通知隐私待清理状态未能清除');
-      }
-    }
-  }
-
-  Future<void> _persistNativeCleanupAccounts() async {
-    final prefs = await SharedPreferences.getInstance();
-    if (_pendingNativeCleanupAccounts.isEmpty) {
-      final removed = await prefs.remove(_nativeCleanupAccountsKey);
-      if (!removed) {
-        await prefs.reload();
-        if (prefs.getStringList(_nativeCleanupAccountsKey) != null) {
-          throw StateError('旧账号原生提醒清理目标未能清除');
-        }
-      }
-      return;
-    }
-    final values = _pendingNativeCleanupAccounts.toList()..sort();
-    if (!await prefs.setStringList(_nativeCleanupAccountsKey, values)) {
-      await prefs.reload();
-      if (!listEquals(prefs.getStringList(_nativeCleanupAccountsKey), values)) {
-        throw StateError('旧账号原生提醒清理目标未能保存');
-      }
-    }
-  }
-
-  String _privacyCleanupMessage(Object error) =>
-      notificationService.lastWarning ??
-      error
-          .toString()
-          .replaceFirst('Bad state: ', '')
-          .replaceFirst('旧账号私人通知未能完整清理：', '');
 
   Future<bool> _writePreferenceAndVerify(
       SharedPreferences prefs, String key, String value) async {

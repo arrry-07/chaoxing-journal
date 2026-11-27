@@ -115,8 +115,9 @@ void main() {
       );
 
       expect(normalStyle.duration, const Duration(milliseconds: 280));
-      expect(normalStyle.reverseDuration, const Duration(milliseconds: 210));
+      expect(normalStyle.reverseDuration, const Duration(milliseconds: 180));
       expect(normalStyle.curve, JournalMotion.criticalCurve);
+      expect(normalStyle.reverseCurve, JournalMotion.easeOut);
       expect(normalStyle.curve!.transform(0.0), 0.0);
       expect(normalStyle.curve!.transform(1.0), 1.0);
       var prevCurveValue = 0.0;

@@ -59,8 +59,12 @@ class _CalendarScreenState extends State<CalendarScreen>
   ClawdCompanionController? _clawdController;
   ClawdCompanionController? _localClawdController;
   final GlobalKey _cameoKey = GlobalKey();
+  final GlobalKey _titleRowKey = GlobalKey();
   final GlobalKey _stackKey = GlobalKey();
-  final ValueNotifier<double> _cameoCenterX = ValueNotifier<double>(162.0);
+  final ScrollController _scrollController = ScrollController();
+  final ValueNotifier<double> _scrollOffset = ValueNotifier<double>(0.0);
+  final ValueNotifier<Offset> _cameoAnchor =
+      ValueNotifier<Offset>(const Offset(156.0, 48.0));
   late int _lastAccountEpoch;
   String? _lastAccountHash;
   String? _lastAccount;
@@ -155,24 +159,64 @@ class _CalendarScreenState extends State<CalendarScreen>
     _syncClawdEnvironment();
   }
 
+  double _currentScrollOffset() {
+    if (_scrollController.hasClients &&
+        _scrollController.positions.length == 1) {
+      return _scrollController.offset;
+    }
+    return _scrollOffset.value;
+  }
+
+  void _onScroll() {
+    if (!_scrollController.hasClients ||
+        _scrollController.positions.length != 1) {
+      return;
+    }
+    final raw = _scrollController.offset;
+    if ((raw - _scrollOffset.value).abs() >= 0.5 ||
+        (raw == 0.0 && _scrollOffset.value != 0.0)) {
+      _scrollOffset.value = raw;
+    }
+  }
+
+  void _measureCameoAnchorNow() {
+    if (!mounted) return;
+    final cameoBox = _cameoKey.currentContext?.findRenderObject() as RenderBox?;
+    final stackBox = _stackKey.currentContext?.findRenderObject() as RenderBox?;
+    if (cameoBox == null ||
+        !cameoBox.attached ||
+        !cameoBox.hasSize ||
+        stackBox == null ||
+        !stackBox.attached ||
+        !stackBox.hasSize) {
+      return;
+    }
+    final scrollOffset = _currentScrollOffset();
+    if ((scrollOffset - _scrollOffset.value).abs() >= 0.5 ||
+        (scrollOffset == 0.0 && _scrollOffset.value != 0.0)) {
+      _scrollOffset.value = scrollOffset;
+    }
+    final topLeft = cameoBox.localToGlobal(Offset.zero, ancestor: stackBox);
+    var bottomInStack = topLeft.dy + cameoBox.size.height;
+    final rowBox =
+        _titleRowKey.currentContext?.findRenderObject() as RenderBox?;
+    if (rowBox != null && rowBox.attached && rowBox.hasSize) {
+      final rowTopLeft = rowBox.localToGlobal(Offset.zero, ancestor: stackBox);
+      bottomInStack =
+          math.max(bottomInStack, rowTopLeft.dy + rowBox.size.height);
+    }
+    final nextAtZero = Offset(
+      topLeft.dx + cameoBox.size.width * 0.5,
+      bottomInStack + scrollOffset,
+    );
+    if ((nextAtZero - _cameoAnchor.value).distance > 0.5) {
+      _cameoAnchor.value = nextAtZero;
+    }
+  }
+
   void _scheduleCameoAnchorMeasure() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      final cameoBox =
-          _cameoKey.currentContext?.findRenderObject() as RenderBox?;
-      final stackBox =
-          _stackKey.currentContext?.findRenderObject() as RenderBox?;
-      if (cameoBox == null ||
-          !cameoBox.hasSize ||
-          stackBox == null ||
-          !stackBox.hasSize) {
-        return;
-      }
-      final topLeft = cameoBox.localToGlobal(Offset.zero, ancestor: stackBox);
-      final centerX = topLeft.dx + cameoBox.size.width * 0.5;
-      if ((centerX - _cameoCenterX.value).abs() > 0.5) {
-        _cameoCenterX.value = centerX;
-      }
+      _measureCameoAnchorNow();
     });
   }
 
@@ -193,6 +237,7 @@ class _CalendarScreenState extends State<CalendarScreen>
     _baseMonth = DateTime(today.year, today.month);
     month = _baseMonth;
     selected = today;
+    _scrollController.addListener(_onScroll);
     _pageController = PageController(initialPage: _basePageIndex);
     _clock = Timer.periodic(const Duration(minutes: 1), (_) {
       if (!mounted) return;
@@ -236,7 +281,10 @@ class _CalendarScreenState extends State<CalendarScreen>
   void dispose() {
     widget.store.removeListener(_onStoreChanged);
     _pageController.dispose();
-    _cameoCenterX.dispose();
+    _scrollController.removeListener(_onScroll);
+    _scrollController.dispose();
+    _scrollOffset.dispose();
+    _cameoAnchor.dispose();
     _localClawdController?.dispose();
     WidgetsBinding.instance.removeObserver(this);
     _clock?.cancel();
@@ -489,6 +537,7 @@ class _CalendarScreenState extends State<CalendarScreen>
           }
 
           final listView = ListView(
+            controller: _scrollController,
             padding: EdgeInsets.fromLTRB(
               16,
               14,
@@ -506,7 +555,10 @@ class _CalendarScreenState extends State<CalendarScreen>
                           child: ClawdTabCameo(
                             key: const ValueKey('calendar-pixel-buddy'),
                             controller: controller,
-                            snapshotBuilder: () => calendarSnapshot,
+                            snapshotBuilder: () {
+                              _measureCameoAnchorNow();
+                              return calendarSnapshot;
+                            },
                           ),
                         ),
                       )
@@ -527,10 +579,13 @@ class _CalendarScreenState extends State<CalendarScreen>
                             )
                       : const Icon(Icons.sync_rounded, size: 21),
                 );
-                final agendaBtn = JournalPillButton(
-                  label: '个人待办与考试',
-                  icon: Icons.event_note_outlined,
-                  onPressed: () => context.push('/agenda'),
+                final agendaBtn = Semantics(
+                  hint: '打开个人待办与考试',
+                  child: JournalPillButton(
+                    label: '个人待办',
+                    icon: Icons.event_note_outlined,
+                    onPressed: () => context.push('/agenda'),
+                  ),
                 );
                 return LayoutBuilder(
                   builder: (context, constraints) {
@@ -544,6 +599,7 @@ class _CalendarScreenState extends State<CalendarScreen>
                             child: Align(
                               alignment: Alignment.centerLeft,
                               child: Row(
+                                key: _titleRowKey,
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
                                   Flexible(
@@ -571,6 +627,7 @@ class _CalendarScreenState extends State<CalendarScreen>
                       runSpacing: 6,
                       children: [
                         Row(
+                          key: _titleRowKey,
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             titleWidget,
@@ -1055,10 +1112,31 @@ class _CalendarScreenState extends State<CalendarScreen>
           return Stack(
             key: _stackKey,
             children: [
-              listView,
+              NotificationListener<ScrollNotification>(
+                onNotification: (notification) {
+                  if (notification.depth != 0 ||
+                      notification.metrics.axis != Axis.vertical) {
+                    return false;
+                  }
+                  if (notification is ScrollUpdateNotification &&
+                      (notification.scrollDelta ?? 0.0).abs() > 0.5) {
+                    final active = controller.activeBubble;
+                    if (active != null &&
+                        active.tab == ClawdPrimaryTab.calendar) {
+                      controller.dismissBubble();
+                    }
+                  } else if (notification is ScrollEndNotification) {
+                    _measureCameoAnchorNow();
+                  }
+                  return false;
+                },
+                child: listView,
+              ),
               Positioned.fill(
                 child: AnimatedBuilder(
-                  animation: Listenable.merge([controller, _cameoCenterX]),
+                  animation: Listenable.merge(
+                    [controller, _cameoAnchor, _scrollOffset],
+                  ),
                   builder: (context, _) {
                     final bubble = controller.activeBubble;
                     if (!showCameo ||
@@ -1072,11 +1150,15 @@ class _CalendarScreenState extends State<CalendarScreen>
                     final screenW = MediaQuery.sizeOf(context).width;
                     final maxW =
                         math.min(210.0, math.max(96.0, screenW - 32.0));
+                    final anchor = _cameoAnchor.value;
                     return ClawdAnchoredSpeechBubble(
                       bubbleKey: const ValueKey('clawd-speech-bubble'),
                       message: bubble,
-                      anchorX: _cameoCenterX.value,
-                      top: 56.0,
+                      anchorX: anchor.dx,
+                      top: math.max(
+                        8.0,
+                        anchor.dy - _scrollOffset.value + 4.0,
+                      ),
                       minLeft: 16.0,
                       safeRight: math.max(16.0, screenW - 16.0),
                       maxWidth: maxW,
