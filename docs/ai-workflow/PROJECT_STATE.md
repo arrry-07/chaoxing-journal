@@ -4,8 +4,8 @@
 
 ## 当前迭代进度（正式版 1.93.0+136；dev 与 main 已同步收口）
 
-- **1.93.0+136 正式基线（当前最新）**：PR [#72](https://github.com/arrry-07/chaoxing-journal/pull/72) 合入 `e7e3408`，annotated Tag `v1.93.0`（`5f4b3f32` → `e7e3408`），GitHub Release `460984901`（`latest`，`64,738,962` B，SHA-256 `59e54262...`）已公开并完成五方哈希核验；MuMu「学习通」（API 35）保数据覆盖双主题 12 屏审图 **`OVERALL: PASS`**（`logcat` 0 崩溃/0 溢出，4 条 `v3` 渠道就绪，真实账号本学期 0「提交未知」）；Gitee `update-manual.json` 与 `update-stable.json` 双索引已推进至 `1.93.0+136`（海外 Runner 传 61.7 MiB APK 跨境限流超时待补传，当前双清单指 GitHub 源；`site-release-dispatch` 因未配 `SITE_DISPATCH_TOKEN` 明确失败）。详见[验收与发布记录](../reviews/2026-11-28-v1.93.0-UI精修Clawd屋顶舞台统计口径性能与Gitee自动镜像正式发布验收记录.md)。
-- **dev 当前状态**：`dev` 与 `origin/main` 已按本轮收口提交对齐；下一轮 `dev` 修订自 `1.93.1+137` 起步（或按需补传 Gitee APK 后重跑 `workflow_dispatch` 切换 Gitee 主链）。详见[dev 本地状态](DEV_STATE.md)。
+- **1.93.0+136 正式基线（当前最新）**：PR [#72](https://github.com/arrry-07/chaoxing-journal/pull/72) 合入 `e7e3408`，annotated Tag `v1.93.0`（`5f4b3f32` → `e7e3408`），GitHub Release `460984901`（`latest`，`64,738,962` B，SHA-256 `59e54262...`）与 Gitee `v1.93.0` Release（`1378249`）APK 镜像均已就绪并完成匿名完整回下载与 `aapt`/`apksigner`/SHA-256 核验；MuMu「学习通」（API 35）保数据覆盖双主题 12 屏审图 **`OVERALL: PASS`**（`logcat` 0 崩溃/0 溢出，4 条 `v3` 渠道就绪，真实账号本学期 0「提交未知」）；Gitee `update-manual.json` 与 `update-stable.json` 双清单均已切至 `1.93.0+136`（Gitee 主链 + GitHub 备用，`site-release-dispatch` 因未配 `SITE_DISPATCH_TOKEN` 明确失败）。详见[验收与发布记录](../reviews/2026-11-28-v1.93.0-UI精修Clawd屋顶舞台统计口径性能与Gitee自动镜像正式发布验收记录.md)。
+- **dev 当前状态**：`dev` 与 `origin/main` 已按本轮收口提交对齐；下一轮 `dev` 修订自 `1.93.1+137` 起步。详见[dev 本地状态](DEV_STATE.md)。
 
 ## 最近 2 个正式发布版本
 

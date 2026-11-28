@@ -2,7 +2,7 @@
 
 ## 2026-11-28 当前状态校准
 
-正式基线为 **1.93.0+136**（PR `#72` 合入 `e7e3408`，`v1.93.0` 指向 `e7e3408`，Release `460984901`，Gitee `manual` & `stable` 双索引均已同步至 `1.93.0+136`，APK 二进制镜像因海外 Runner 跨境限流待补传）；上一版 **1.92.0+132**（PR `#67`–`#69` 合入 `55e5d6e`，`v1.92.0` 指向 `55e5d6e`，Release `459719737`）。版本状态与最近两版验收入口见 [PROJECT_STATE.md](ai-workflow/PROJECT_STATE.md)，已交付行为见 [CHANGELOG.md](../CHANGELOG.md)。
+正式基线为 **1.93.0+136**（PR `#72` 合入 `e7e3408`，`v1.93.0` 指向 `e7e3408`，Release `460984901`，Gitee `manual` & `stable` 双清单均已同步至 `1.93.0+136` Gitee 国内主链 + GitHub 备用）；上一版 **1.92.0+132**（PR `#67`–`#69` 合入 `55e5d6e`，`v1.92.0` 指向 `55e5d6e`，Release `459719737`）。版本状态与最近两版验收入口见 [PROJECT_STATE.md](ai-workflow/PROJECT_STATE.md)，已交付行为见 [CHANGELOG.md](../CHANGELOG.md)。
 
 - **1.93.0 已交付**（汇入 `v1.92.1` 拆缝重构、`v1.92.3` 非 UI 修复及 M1–M6）：全站卡片暖纸无阴影细边提纯与「我的」页信息降噪（「外观与交互」上提、GitHub Star 引导与统一复制提示通道）；首页 `31dp` 正向屋顶净空带 Clawd 文字舞台（含 `peekDown`/`hopBounce`/`stretchYawn` 三套新动作）及四主页主流手机统一 `34dp` 物理像素对齐；无 `courseKey` 三层可信时间与跨学年同名归档隔离根治本学期「提交未知」统计失真，纯广播 `exam.noticeOnly` 移出统计分母并完整保留「本地记录」可见性与 1:1 下钻计数，回归 `45°` 斜纹进度条与内嵌「各课程待处理 · 共 N 门」；首页单槽投影记忆化、LRU 拼音零分配自然排序、吸顶排版缓存、`> 32 KiB` HTML/通知 JSON 解析与主快照编码/写前往返校验移入顶层/静态 `Isolate.run`（恢复点复核 `sessionEpoch`/`canCommit`）与读盘校验缓存失效保护；Gitee Release 自动两步同步改造。MuMu（API 35）保数据浅/深双主题 12 屏验收 **`OVERALL: PASS`**。
 
