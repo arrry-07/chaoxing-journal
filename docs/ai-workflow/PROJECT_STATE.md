@@ -5,7 +5,7 @@
 ## 当前迭代进度（正式版 1.93.0+136；dev 预览 1.93.1+137）
 
 - **1.93.0+136 正式基线（当前最新）**：PR [#72](https://github.com/arrry-07/chaoxing-journal/pull/72) 合入 `e7e3408`，annotated Tag `v1.93.0`（`5f4b3f32` → `e7e3408`），GitHub Release `460984901`（`latest`，`64,738,962` B，SHA-256 `59e54262...`）与 Gitee `v1.93.0` Release（`1378249`）APK 镜像均已就绪并完成匿名完整回下载与 `aapt`/`apksigner`/SHA-256 核验；MuMu「学习通」（API 35）保数据覆盖双主题 12 屏审图 **`OVERALL: PASS`**（`logcat` 0 崩溃/0 溢出，4 条 `v3` 渠道就绪，真实账号本学期 0「提交未知」）；Gitee `update-manual.json` 与 `update-stable.json` 双清单均已切至 `1.93.0+136`（Gitee 主链 + GitHub 备用，`site-release-dispatch` 因未配 `SITE_DISPATCH_TOKEN` 明确失败）。详见[验收与发布记录](../reviews/2026-11-28-v1.93.0-UI精修Clawd屋顶舞台统计口径性能与Gitee自动镜像正式发布验收记录.md)。
-- **dev 当前状态**：`1.93.1+137` Wave A 完成置顶拖拽、GitHub 复制图标、Clawd 标题测量缓存和 M3a 热路径及数据一致性修复。原签名双 ABI 包通过 MuMu「学习通」保数据早预览和 Hydrogen 双主题审图。Wave B 接续 M4–M6。详见[dev 本地状态](DEV_STATE.md)。
+- **dev 当前状态**：`1.93.1+137` Wave A 已通过 MuMu 早预览与 Hydrogen 双主题审图。Wave B 本地完成两处拆分和可靠性加固、架构刷新、UTC 全量门禁及原签名终版构建，等待 MuMu 设备会话释放后完成终验和推送。详见[dev 本地状态](DEV_STATE.md)。
 
 ## 最近 2 个正式发布版本
 
