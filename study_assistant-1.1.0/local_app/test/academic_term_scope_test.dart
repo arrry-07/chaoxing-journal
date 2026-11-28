@@ -35,9 +35,14 @@ Assignment _work(
   bool deadlineTrusted = true,
   bool deadlineReadFailed = false,
   String status = 'pending',
+  int? activityType,
 }) =>
     Assignment(
-      id: 'cx:work:1:2:$id',
+      id: activityType == null ? 'cx:work:1:2:$id' : 'cx:activity:1:2:$id',
+      source: activityType == null
+          ? AssignmentSource.courseWork
+          : AssignmentSource.classroomActivity,
+      activityType: activityType,
       courseName: '合成课程',
       title: id,
       deadlineAt: deadlineAt,
@@ -123,6 +128,29 @@ void main() {
     expect(AssignmentQuery.isArchivedPastTerm(current, now), isFalse);
     expect(AssignmentQuery.isArchivedPastTerm(previous, now), isTrue);
   });
+
+  for (final type in <int?>[null, 35, 42, 77]) {
+    test(
+        'active work or activity $type without a trusted deadline stays current',
+        () {
+      final now = _beijing(2026, 10, 5, 12);
+      final noDeadline = _work('1', activityType: type);
+      final readsFailed = _work('2',
+          activityType: type,
+          deadlineAt: _beijing(2026, 8, 31),
+          deadlineReadFailed: true);
+      final untrusted = _work('3',
+          activityType: type,
+          deadlineAt: _beijing(2026, 8, 31),
+          deadlineTrusted: false);
+      final expired =
+          _work('4', activityType: type, deadlineAt: _beijing(2026, 8, 31));
+      for (final active in [noDeadline, readsFailed, untrusted]) {
+        expect(AssignmentQuery.isArchivedPastTerm(active, now), isFalse);
+      }
+      expect(AssignmentQuery.isArchivedPastTerm(expired, now), isTrue);
+    });
+  }
 
   test('recent no-deadline publication survives the term switch', () {
     final now = _beijing(2026, 9, 1, 0, 1);

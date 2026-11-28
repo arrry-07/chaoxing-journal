@@ -655,7 +655,7 @@ extension _ExamCollection on ChaoxingLocalClient {
           circuitKind: supplementEntry ? '课程考试补充' : null,
           requestKind: isCoursePage
               ? '课程入口'
-              : ChaoxingLocalClient._requestKind(uri.path));
+              : ChaoxingRequestPolicy.requestKindForPath(uri.path));
       if (generation != _sessionGeneration) return null;
       if (response == null || (response.statusCode ?? 0) < 300) return response;
       final location = response.headers.value('location');

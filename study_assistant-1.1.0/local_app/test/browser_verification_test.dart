@@ -230,6 +230,16 @@ void main() {
         c.sourceResults.singleWhere((s) => s.source == 'courseWork');
     expect(workSource.phase, SyncSourcePhase.partial);
     expect(workSource.reasonCodes, contains('verificationPaused'));
+    for (final source in [
+      'classroomActivity:35',
+      'classroomActivity:42',
+      'classroomActivity:77',
+      'exam'
+    ]) {
+      final paused = c.sourceResults.singleWhere((s) => s.source == source);
+      expect(paused.phase, SyncSourcePhase.failed);
+      expect(paused.reasonCodes, contains('verificationPaused'));
+    }
 
     expect(await c.verifyInBrowser(), isTrue);
     requests.clear();
@@ -245,55 +255,62 @@ void main() {
         isTrue);
   });
 
-  test(
-      'cancelled verification keeps target and session switch drops stale cookies',
-      () async {
-    const channel = MethodChannel('study_assistant/external_links');
-    var cancelMode = true;
-    final pendingVerify = <Completer<List<Map<String, dynamic>>?>>[];
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(channel, (call) {
-      if (cancelMode) return Future.value(null);
-      final completer = Completer<List<Map<String, dynamic>>?>();
-      pendingVerify.add(completer);
-      return completer.future;
+  for (final cancel in [false, true]) {
+    test(
+        'cancelled verification keeps target and ${cancel ? 'request cancellation' : 'session switch'} drops stale cookies',
+        () async {
+      const channel = MethodChannel('study_assistant/external_links');
+      var cancelMode = true;
+      final pendingVerify = <Completer<List<Map<String, dynamic>>?>>[];
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) {
+        if (cancelMode) return Future.value(null);
+        final completer = Completer<List<Map<String, dynamic>>?>();
+        pendingVerify.add(completer);
+        return completer.future;
+      });
+      addTearDown(() => TestDefaultBinaryMessengerBinding
+          .instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, null));
+
+      final dio = Dio()
+        ..interceptors.add(InterceptorsWrapper(onRequest: (o, h) {
+          final body = switch (o.uri.path) {
+            '/mycourse/backclazzdata' => {
+                'courses': [
+                  {'courseId': '1', 'clazzId': '2', 'courseName': '课程'}
+                ]
+              },
+            '/visit/stucoursemiddle' => '<input id="workEnc" value="w">',
+            '/mooc2/work/list' => '<html><body>请完成安全验证</body></html>',
+            _ => '',
+          };
+          h.resolve(Response(requestOptions: o, data: body, statusCode: 200));
+        }));
+
+      final c = ChaoxingLocalClient(
+          dio: dio,
+          enableExams: false,
+          enableClassroomTasks: false,
+          wait: (_) async {});
+      await expectLater(
+          c.fetchAssignments(), throwsA(isA<SyncReadException>()));
+      expect(await c.verifyInBrowser(), isFalse);
+
+      cancelMode = false;
+      final verifyFuture = c.verifyInBrowser();
+      if (cancel) {
+        c.cancelActiveRequests();
+      } else {
+        c.clearSession();
+      }
+      pendingVerify.single.complete([
+        {'url': 'https://mooc1.chaoxing.com/', 'cookies': 'stale=leak'},
+      ]);
+      expect(await verifyFuture, isFalse);
+      expect(c.needsSessionInitialization, isTrue);
     });
-    addTearDown(() => TestDefaultBinaryMessengerBinding
-        .instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(channel, null));
-
-    final dio = Dio()
-      ..interceptors.add(InterceptorsWrapper(onRequest: (o, h) {
-        final body = switch (o.uri.path) {
-          '/mycourse/backclazzdata' => {
-              'courses': [
-                {'courseId': '1', 'clazzId': '2', 'courseName': '课程'}
-              ]
-            },
-          '/visit/stucoursemiddle' => '<input id="workEnc" value="w">',
-          '/mooc2/work/list' => '<html><body>请完成安全验证</body></html>',
-          _ => '',
-        };
-        h.resolve(Response(requestOptions: o, data: body, statusCode: 200));
-      }));
-
-    final c = ChaoxingLocalClient(
-        dio: dio,
-        enableExams: false,
-        enableClassroomTasks: false,
-        wait: (_) async {});
-    await expectLater(c.fetchAssignments(), throwsA(isA<SyncReadException>()));
-    expect(await c.verifyInBrowser(), isFalse);
-
-    cancelMode = false;
-    final verifyFuture = c.verifyInBrowser();
-    c.clearSession();
-    pendingVerify.single.complete([
-      {'url': 'https://mooc1.chaoxing.com/', 'cookies': 'stale=leak'},
-    ]);
-    expect(await verifyFuture, isFalse);
-    expect(c.needsSessionInitialization, isTrue);
-  });
+  }
 
   test(
       'root chaoxing.com verification cookies apply across subdomains and subpath updates do not duplicate',
@@ -426,11 +443,18 @@ void main() {
         return [
           {
             'url': 'https://mooc1.chaoxing.com/',
-            'cookies': 'route=mooc1; antispider=cleared',
+            'cookies': 'route=mooc1',
           },
+          {'url': 'https://chaoxing.com/', 'cookies': 'antispider=cleared'},
         ];
       }
       return [
+        {'url': 'https://chaoxing.com/', 'cookies': 'antispider='},
+        {
+          'url': 'https://notice.chaoxing.com/',
+          'cookies': 'antispider=bad value'
+        },
+        {'url': 'https://mobilelearn.chaoxing.com/', 'cookies': 'antispider='},
         {
           'url': 'https://mooc1.chaoxing.com/',
           'cookies':
@@ -478,6 +502,7 @@ void main() {
     await c.fetchAssignments();
     expect(sentCookie, contains('route=mooc1'));
     expect(sentCookie, contains('recovered=ok'));
+    expect(sentCookie, contains('antispider=cleared'));
     expect(sentCookie, isNot(contains('bad value')));
     expect(sentCookie, isNot(contains('bad name')));
   });
