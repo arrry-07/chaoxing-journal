@@ -13,9 +13,8 @@ import 'package:study_assistant_mobile/src/services/secure_session_store.dart';
 import 'package:study_assistant_mobile/src/services/widget_snapshot_service.dart';
 
 class _Store extends AssignmentStore {
-  _Store({DateTime Function()? clock})
+  _Store({super.clock})
       : super(
-            clock: clock,
             sessionStore: SecureSessionStore(),
             notificationService: LocalNotificationService(),
             widgetSnapshotService: WidgetSnapshotService());
