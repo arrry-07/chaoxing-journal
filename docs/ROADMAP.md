@@ -1,8 +1,10 @@
 # 产品后续路线图
 
-## 2026-11-26 当前状态校准
+## 2026-11-28 当前状态校准
 
-正式基线为 **1.92.0+132**（PR `#67`–`#69` 最终合入 `55e5d6e`，`v1.92.0` 指向 `55e5d6e`，Release `459719737`，Gitee `manual` & `stable` 双通道已同步至 `1.92.0+132`，未传 APK 镜像）；上一版 **1.91.0+131**（PR `#66` 合入 `5ab698b`，`v1.91.0` 指向 `5ab698b`，Release `459234902`）。版本状态与最近两版验收入口见 [PROJECT_STATE.md](ai-workflow/PROJECT_STATE.md)，已交付行为见 [CHANGELOG.md](../CHANGELOG.md)。
+正式基线为 **1.93.0+136**（PR `#72` 合入 `e7e3408`，`v1.93.0` 指向 `e7e3408`，Release `460984901`，Gitee `manual` & `stable` 双索引均已同步至 `1.93.0+136`，APK 二进制镜像因海外 Runner 跨境限流待补传）；上一版 **1.92.0+132**（PR `#67`–`#69` 合入 `55e5d6e`，`v1.92.0` 指向 `55e5d6e`，Release `459719737`）。版本状态与最近两版验收入口见 [PROJECT_STATE.md](ai-workflow/PROJECT_STATE.md)，已交付行为见 [CHANGELOG.md](../CHANGELOG.md)。
+
+- **1.93.0 已交付**（汇入 `v1.92.1` 拆缝重构、`v1.92.3` 非 UI 修复及 M1–M6）：全站卡片暖纸无阴影细边提纯与「我的」页信息降噪（「外观与交互」上提、GitHub Star 引导与统一复制提示通道）；首页 `31dp` 正向屋顶净空带 Clawd 文字舞台（含 `peekDown`/`hopBounce`/`stretchYawn` 三套新动作）及四主页主流手机统一 `34dp` 物理像素对齐；无 `courseKey` 三层可信时间与跨学年同名归档隔离根治本学期「提交未知」统计失真，纯广播 `exam.noticeOnly` 移出统计分母并完整保留「本地记录」可见性与 1:1 下钻计数，回归 `45°` 斜纹进度条与内嵌「各课程待处理 · 共 N 门」；首页单槽投影记忆化、LRU 拼音零分配自然排序、吸顶排版缓存、`> 32 KiB` HTML/通知 JSON 解析与主快照编码/写前往返校验移入顶层/静态 `Isolate.run`（恢复点复核 `sessionEpoch`/`canCommit`）与读盘校验缓存失效保护；Gitee Release 自动两步同步改造。MuMu（API 35）保数据浅/深双主题 12 屏验收 **`OVERALL: PASS`**。
 
 - **1.92.0 已交付**（含 `v1.91.1`）：应用级单一真源 `ClawdCompanionController` 与三档显示设置（「全部主页面 / 仅首页 / 关闭」）、等高 `38dp` 物理像素对齐 `ClawdTitleStage`（标题右侧安全区 6 套有限巡逻、摸头眯眼爱心 600ms 驻留、拎起乱蹬弹簧落回安全区，0 遮挡标题与右侧 4 按钮）、去蓝星纯粹状态行与避让 `home-sync-status` 的暖纸反差萌气泡、四主栏紧邻标题轻客串（含 `NoTransitionPage` 切页即响应与二级页暂停主动冒泡）、零外部体积 8 项原生 `48 kHz` 8-bit 芯片音效、提醒试听 `prepareAsync()` 异步化与系统勿扰（DND）拦截反馈、`CourseStudyHubScreen` 折叠统一至 `JournalExpansionTile` 与 `AssignmentStore` 剩余 6 处会话守卫收口。MuMu（API 35）保数据浅/深双主题 6/6 项实机验收通过。
 - **1.91.0 已交付**（汇总 `v1.90.1`–`v1.90.4`）：首页悬浮顶栏浅/深双主题渐变毛玻璃与 5 色标渐隐羽化裙边、`14×12` 点阵 Clawd 像素伙伴（6 套空闲动作、3 档连击、完成/置顶欢呼、同步小跑与一键开关）、主页光学纸感层次与全站阻尼弹簧微交互；课程活动投票与同批 `clazzId` 队列学期精准归类；4 渠道内置提示音高优有声 `v3` 通知（`SQLite v10` 安全迁移）、通知音量归零告警与紧凑密度触控热区修复。MuMu（API 35）保数据浅/深双主题 7/7 项实机验收通过。
@@ -15,15 +17,16 @@
 
 <a id="dev-下一阶段"></a>
 
-### dev 下一阶段规划（2026-11-27）
+### dev 下一阶段规划（2026-11-28 · v1.94.0+）
 
-`v1.91.1`（[归档方案](archive/plans/2026-11-26-v1.91.1-Clawd2.0文字舞台8bit音效与轻量收口方案.md)）已随 `1.92.0+132` 正式交付并归档；`v1.90.1`–`v1.90.4` 与 `v1.8.32`–`v1.8.34` 亦已归档。
+`v1.93.0`（[归档方案](archive/plans/2026-11-28-v1.93.0-UI精修Clawd舞台统计口径性能热路径与Gitee自动镜像发布方案.md)）、`v1.92.1`–`v1.92.3` 与 `v1.91.1` 方案均已归档。
 
 后续独立阶段候选方向（按价值排序，开工前复核真源）：
 
-1. **P0 · `v1.92.1` 全量拆缝与 UI/交互精修（已完成并经 PR `#70` 集成至 `main`）**：`M1` 补齐 `CalendarScreen` 零滚动气泡锚点与垂直滚动收起、精简顶栏右钮并校准 5 份文档旧口径；`M2`/`M5` 按领域拆分 `AssignmentStore`（6,292 → 1,077 行）清晰接缝；`M3` 统一全站 Sheet 动效与卡片层级并补齐按压微缩；`M4` 拆分 `AssignmentListScreen`（3,483 → 1,480 行）组件、落地首页排序轻菜单与全仓 Sheet 静态守卫；`M6` 刷新架构导航图。已完成 `1.92.1+133` MuMu 双主题 6/6 项核验与 PR `#70`（`4da4c02`）集成，方案已归档至 [v1.92.1 归档方案](archive/plans/2026-11-27-v1.92.1-全量拆缝重构与UI交互精修方案.md)。
-2. **P1 · 独立大版本云端后端（Supabase 反馈直发 `FB-017` + 跨设备端到端加密云同步 `FB-015`）**：采用免费 Supabase（500MB 库 + 1GB 存储 + 网页后台）配 GitHub Actions 每日保活、按需前置 Cloudflare Worker 域名反代，统一承接 App 内直发反馈与多端加密同步；`FB-015` 以 Supabase 端到端加密为主方案、WebDAV 保留为无服务端备选（前置 `PersonalWorkspace` 迁移与 `ManualEntry.updatedAt` 已于 `1.8.31` 落地，详见[长期功能分期](#long-term-phases)）。
-3. **P2 · 真实样本与物理 OEM 通知/音画复核**：在实体真机复测 `v3` 有声渠道（`@raw/journal_chime` + `SQLite v10`）锁屏/Doze/120Hz 高刷/8-bit 外放/国产后台限流表现，补充自然 `9010`、`backclazzdata` 新字段存在率与官方活动课精度、缺年改期/`completeTime` 真实样本；界面定型后按维护者确认评估 Wave B-2 浅/深 Golden 与 Wave C-2 官网截图产线。
+1. **P0 · 独立大版本云端后端（Supabase 反馈直发 `FB-017` + 跨设备端到端加密云同步 `FB-015`）**：UI 与性能底盘已趋稳；分 Phase A（免费 Supabase + GitHub Actions 每日保活 + 按需 Cloudflare Worker 反代 + App 内一键脱敏直发反馈 `FB-017`）与 Phase B（严守不上传学习通账号密码/Cookie 红线、本机端到端加密、`updatedAt` 冲突合并与删除墓碑的 `FB-015` 加密云同步）推进（详见[长期功能分期](#long-term-phases)）。
+2. **P1 · 收口 `v1.93.0` 留存热路径与一致性轻债（可作 `dev` 小步维护）**：为 `chaoxing_local_client.dart:1729`（`parseSignedWorkList`）等同步高频解析补齐 `Isolate.run` 并合并 `chaoxing_exam_client.dart:461-478` 同页通知 JSON 单次解码；`saveNotebook`/`savePersonalWorkspace` 统一走 `_writeVerified`；缓存 `ClawdTitleStage` 标题/逐字中心 `TextPainter` 测量结果消除动画帧重建；对齐安卓原生桌面小组件 `AssignmentWidgetProvider.kt` 次日自然日差；为 `scripts/gitee_release_sync.py` 重试上传前增加 `find_release` 附件幂等回查。
+3. **P1 · 采集与通知大文件领域拆缝 + 架构图谱刷新**：沿用 `v1.92.1` `AssignmentStore` 拆缝经验，拆解 `chaoxing_local_client.dart`（3,311 行）与 `local_notification_service.dart`（2,464 行）耦合职责，收口后同步基于 `docs/architecture/*.json` 刷新 `ARCHITECTURE.md` 图谱与基线 Commit。
+4. **P2 · 真实样本驱动补证与波次 B-2 / C-2（需维护者确认）**：取得真实脱敏样本后再推进 `FB-002`（课程群云历史）、30 天可信官方发布时间与自然 `9010` 续接，并顺带在实体真机复测 `v3` 有声渠道/Doze/120Hz；`v1.93.0` 界面经日常确认定型后，按维护者授权评估 Wave B-2（4 主页浅/深 Golden）与 Wave C-2（官网截图产线）。
 
 ## 1.8.26+ 治理基线与产品排期
 
@@ -43,7 +46,7 @@
 | **Phase 3（已并入总方案阶段三，已随 1.8.26 发布）** | **完整 `FB-008`** | **阶段三（`3A–3E`）已随 `1.8.26+120` 正式发布**：`3A` 只读取证定型、课程元数据透传与 `schema 9` 备份、`CourseTermCatalog` 统一学期归属/归档/召回、`current / all / targeted / historicalSweep` 精选同步与系统提醒折叠/单课聚合；`backclazzdata` 在网 `teacherfactor`/`state`/`isEnd` 字段存在率留档待补证 |
 | **Phase 4（已并入五阶段总方案随业务消化/后置）** | **按需工程化与随业务自然消化** | **五阶段界面与功能（`1A–5C`）已随 `1.8.26+120` 发布**[（详见归档总方案）](archive/plans/2026-11-22-v1.8.25-产品与体验分期升级方案.md#governance-consolidation)，新增能力已按大文件止增纪律拆分为独立模型/服务接缝；剩余后置工程化 **Wave C-1** 及界面定型后评估的 **Wave B-2（8 张 Golden）与 Wave C-2（官网截图产线）** 均保留维护者确认门禁 |
 
-常规正式发版收束为**低频攒批（原则上每周最多 1 个扎实版本）**，版本号按[版本号与迭代规则](ai-workflow/VALIDATION.md#版本号与迭代分级规则)推进（`dev` 打 MuMu 自测包升 `Z`，正式版一律升 `Y` 并归零 `Z`、`Y` 上限 `99` 满后进位升 `X`，已自 `1.90.0` 起进入当前序列（现为 `1.92.0+`）、禁用前导零）；日常 `dev` 进度以 [PROJECT_STATE.md](ai-workflow/PROJECT_STATE.md#dev-当前迭代进度) 为准，需真实样本/实机补证边界见[反馈台账](待处理体验反馈.md)。
+常规正式发版收束为**低频攒批（原则上每周最多 1 个扎实版本）**，版本号按[版本号与迭代规则](ai-workflow/VALIDATION.md#版本号与迭代分级规则)推进（`dev` 打 MuMu 自测包升 `Z`，正式版一律升 `Y` 并归零 `Z`、`Y` 上限 `99` 满后进位升 `X`，已自 `1.90.0` 起进入当前序列（现为 `1.93.0+`）、禁用前导零）；日常 `dev` 进度以 [PROJECT_STATE.md](ai-workflow/PROJECT_STATE.md#dev-当前迭代进度) 为准，需真实样本/实机补证边界见[反馈台账](待处理体验反馈.md)。
 
 ## 后续优先级
 

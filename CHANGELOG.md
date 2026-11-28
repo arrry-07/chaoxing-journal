@@ -20,6 +20,7 @@
   - 发布工作流升级为两阶段渐进式同步：GitHub Release 发布后先零依赖极速刷新保底索引，再安装校验工具并自动执行 `--mode latest --upload-missing` 校验签名与 SHA-256、上传 APK 至 Gitee Release 并在匿名完整回下载验证后将 `update-manual.json` 切换为「Gitee 主链 + GitHub 备用」；完善 `HTTP 000`/瞬时网络失败重试、上传防重与双通道回下载验证。
 - **同步汇入前期架构拆缝与非 UI 修复（整合 `v1.92.1` / `v1.92.3`）**：
   - 包含 `AssignmentStore` 与首页列表/筛选的深模块拆缝重构、北京时间自然日差 UTC 跨夏令时统一口径、置顶/按课程/整月完整日期展示、日历说明文案修正以及课程关注取消/恢复的 `operationError` 与 `accountEpoch` 撤销守卫。
+- PR [#72](https://github.com/arrry-07/chaoxing-journal/pull/72) 合入 `e7e3408`，已发布 [v1.93.0](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.93.0)。[验收与发布记录](docs/reviews/2026-11-28-v1.93.0-UI精修Clawd屋顶舞台统计口径性能与Gitee自动镜像正式发布验收记录.md)
 
 ## 1.92.0（132） — Clawd 2.0 文字舞台、暖纸反差萌气泡、8-bit 芯片音效与轻量收口（正式发布，2026-11-26）
 
@@ -47,7 +48,7 @@
   - 作业截止、新增作业、每日摘要与个人日程 4 条渠道全面升级为内置提示音的高优有声 `v3` 渠道（原生提醒数据库升至 `SQLite v10`，先重排再安全退役旧 `v1`/`v2` 渠道，不覆盖用户手动降级）；提醒体检新增系统「通知音量 = 0」独立告警、清铃试听反馈与 3 秒测试待办提醒。
   - 修复紧凑卡片密度 `minHeight: 48` 触控热区兜底与静音横幅去重。
   - **重要迁移说明**：首次升级安装本版本时，原生提醒数据库自动升至 `v10` 并将 4 条通知渠道自动迁移至内置提示音的高优有声 `v3` 渠道；若此前曾在系统设置中自定义过旧通知渠道的铃声或免打扰规则，可在系统通知设置中按需微调。
-- PR [#66](https://github.com/arrry-07/chaoxing-journal/pull/66) 合入 `5ab698b`，已发布 [v1.91.0](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.91.0)。[验收与发布记录](docs/reviews/2026-11-26-v1.91.0-悬浮顶栏羽化Clawd像素伙伴光学质感与有声v3正式发布验收记录.md)
+- PR [#66](https://github.com/arrry-07/chaoxing-journal/pull/66) 合入 `5ab698b`，已发布 [v1.91.0](https://github.com/arrry-07/chaoxing-journal/releases/tag/v1.91.0)。[验收与发布记录](docs/archive/reviews/2026-11-26-v1.91.0-悬浮顶栏羽化Clawd像素伙伴光学质感与有声v3正式发布验收记录.md)
 
 ## 1.90.0（127） — 配色统一、无重叠转场、悬浮详情顶栏、课程治理与全渠道有声提醒（正式发布，2026-11-26）
 

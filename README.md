@@ -45,7 +45,7 @@
 <details>
 <summary>已经安装：如何升级到 1.93.0？</summary>
 
-1.7.56 起默认同时检查 Gitee 小索引与 GitHub 正式 Release；`1.93.0+136` 发布时自动执行 Gitee 双步镜像同步并同步推进 `update-manual.json` 与 `update-stable.json`（Gitee 主链 + GitHub 备用）。详见[更新渠道指南](docs/guides/更新渠道与国内分发.md)。
+1.7.56 起默认同时检查 Gitee 小索引与 GitHub 正式 Release；`1.93.0+136` 已通过自动同步及手动晋升推进 `update-manual.json` 与 `update-stable.json`（优先 Gitee 已校验镜像或保留 GitHub 官方下载源）。详见[更新渠道指南](docs/guides/更新渠道与国内分发.md)。
 
 </details>
 

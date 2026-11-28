@@ -1,7 +1,7 @@
 # 学习通课业手记 · 架构导航（人机共用）
 
-- **基线 Commit**：`a33f066`（`architecture.json` 与 `sync-reminder.dataflow.json` 锚定 `a33f066`，`reminder-db.erd.json` 与 `architecture-tour.story.json` 仍锚定 `d8b7f47`。各 JSON 清单记录完整 40 位修订号。可用 `git log a33f066..HEAD --stat` 核对后续代码变更）
-- **更新日期**：2026-11-27
+- **基线 Commit**：图谱与 ERD 仍锚定 `a33f066` / `d8b7f47`（`architecture.json` 与 `sync-reminder.dataflow.json` 锚定 `a33f066`，`reminder-db.erd.json` 与 `architecture-tour.story.json` 锚定 `d8b7f47`）；最新正式代码基线已推进至 `e7e3408`（`v1.93.0+136`，新增 `Isolate.run` 大文本解析与主快照编码/校验、`HomeTimelineList` 单槽重投影缓存、无 `courseKey` 三层学期推导、`ClawdTitleStage` 屋顶舞台及 Gitee 两步同步）。可用 `git log a33f066..HEAD --stat` 核对图文之后的代码演进。
+- **更新日期**：2026-11-28
 - **适用范围**：`study_assistant-1.1.0/local_app/`（Flutter 业务层与 Android 原生宿主/后台层）、`scripts/` 与 `.github/workflows/` 门禁及分发链路；`references/xuexitong-cli/` 仅作只读上游协议参考
 
 ## 架构与数据流图入口
