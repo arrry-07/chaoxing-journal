@@ -2278,6 +2278,179 @@ void main() {
       expect(homeStage.allowStageMotion, isTrue);
     });
   });
+
+  group('v1.93.1 M3b · ClawdTitleStage TextPainter 5-tuple metrics cache', () {
+    testWidgets(
+        'reuses cached rawW/rawH/scale/charCenters across animations & identical rebuilds and invalidates on any of the 5 key inputs',
+        (tester) async {
+      final controller = ClawdCompanionController();
+      addTearDown(controller.dispose);
+      final anchor = ValueNotifier<ClawdStageAnchor>(
+        const ClawdStageAnchor(centerX: 0, bottomY: 0, safeWidth: 0),
+      );
+      addTearDown(anchor.dispose);
+
+      Future<void> pumpStage({
+        required String title,
+        required TextStyle style,
+        required TextDirection direction,
+        required TextScaler textScaler,
+        required double width,
+        required int pulseTick,
+      }) async {
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: StudyAssistantTheme.light,
+            home: Scaffold(
+              body: Directionality(
+                textDirection: direction,
+                child: MediaQuery(
+                  data: MediaQueryData(
+                    size: Size(width, 800),
+                    textScaler: textScaler,
+                  ),
+                  child: Center(
+                    child: SizedBox(
+                      width: width,
+                      child: ClawdTitleStage(
+                        key: ValueKey('cached-stage-$pulseTick'),
+                        title: title,
+                        titleStyle: style,
+                        controller: controller,
+                        showBuddy: true,
+                        buddySize: 34.0,
+                        interactive: true,
+                        allowStageMotion: true,
+                        anchorNotifier: anchor,
+                        snapshotBuilder: () => const ClawdPageContextSnapshot(
+                          tab: ClawdPrimaryTab.home,
+                          dueToday: 0,
+                          dueIn3Days: 0,
+                          completedToday: 0,
+                          followedCourseCount: 1,
+                          activeAgendaCount: 0,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      }
+
+      const baseStyle = TextStyle(fontSize: 24, fontWeight: FontWeight.w700);
+      ClawdTitleStage.debugTitleMetricsComputeCountForTesting = 0;
+
+      // 1. Initial build computes once.
+      await pumpStage(
+        title: '课业手记',
+        style: baseStyle,
+        direction: TextDirection.ltr,
+        textScaler: TextScaler.noScaling,
+        width: 320.0,
+        pulseTick: 0,
+      );
+      await tester.pump();
+      final countAfterInitial =
+          ClawdTitleStage.debugTitleMetricsComputeCountForTesting;
+      expect(countAfterInitial, 1);
+      final initialRestX = anchor.value.centerX;
+
+      // 2. Controller notification + choreo animation ticks must reuse cache (0 extra layouts).
+      controller.notifyListenersIfAlive();
+      await tester.pump(const Duration(milliseconds: 2800));
+      for (var i = 0; i < 6; i++) {
+        await tester.pump(const Duration(milliseconds: 60));
+      }
+      // Rebuild with identical 5-tuple (same Global/ValueKey keeps State).
+      await pumpStage(
+        title: '课业手记',
+        style: baseStyle,
+        direction: TextDirection.ltr,
+        textScaler: TextScaler.noScaling,
+        width: 320.0,
+        pulseTick: 0,
+      );
+      await tester.pump();
+      expect(
+        ClawdTitleStage.debugTitleMetricsComputeCountForTesting,
+        countAfterInitial,
+        reason:
+            'Animation frames & identical rebuilds must not re-run TextPainter',
+      );
+
+      // Finish active patrol so buddy returns to rest before measuring rest X shift.
+      await tester.pumpAndSettle();
+      expect(
+        ClawdTitleStage.debugTitleMetricsComputeCountForTesting,
+        countAfterInitial,
+      );
+
+      // 3a. Invalidate by title -> recomputes and shifts buddy rest X.
+      await pumpStage(
+        title: '课业手记加长标题',
+        style: baseStyle,
+        direction: TextDirection.ltr,
+        textScaler: TextScaler.noScaling,
+        width: 320.0,
+        pulseTick: 0,
+      );
+      await tester.pump();
+      expect(ClawdTitleStage.debugTitleMetricsComputeCountForTesting, 2);
+      expect(anchor.value.centerX, greaterThan(initialRestX));
+
+      // 3b. Invalidate by titleStyle -> recomputes.
+      await pumpStage(
+        title: '课业手记加长标题',
+        style: baseStyle.copyWith(fontSize: 18),
+        direction: TextDirection.ltr,
+        textScaler: TextScaler.noScaling,
+        width: 320.0,
+        pulseTick: 0,
+      );
+      await tester.pump();
+      expect(ClawdTitleStage.debugTitleMetricsComputeCountForTesting, 3);
+
+      // 3c. Invalidate by direction -> recomputes.
+      await pumpStage(
+        title: '课业手记加长标题',
+        style: baseStyle.copyWith(fontSize: 18),
+        direction: TextDirection.rtl,
+        textScaler: TextScaler.noScaling,
+        width: 320.0,
+        pulseTick: 0,
+      );
+      await tester.pump();
+      expect(ClawdTitleStage.debugTitleMetricsComputeCountForTesting, 4);
+
+      // 3d. Invalidate by textScaler -> recomputes.
+      await pumpStage(
+        title: '课业手记加长标题',
+        style: baseStyle.copyWith(fontSize: 18),
+        direction: TextDirection.rtl,
+        textScaler: const TextScaler.linear(1.3),
+        width: 320.0,
+        pulseTick: 0,
+      );
+      await tester.pump();
+      expect(ClawdTitleStage.debugTitleMetricsComputeCountForTesting, 5);
+
+      // 3e. Invalidate by availableTitleW (width shrink forces scale < 1.0) -> recomputes.
+      await pumpStage(
+        title: '课业手记加长标题',
+        style: baseStyle.copyWith(fontSize: 18),
+        direction: TextDirection.rtl,
+        textScaler: const TextScaler.linear(1.3),
+        width: 140.0,
+        pulseTick: 0,
+      );
+      await tester.pump();
+      expect(ClawdTitleStage.debugTitleMetricsComputeCountForTesting, 6);
+      await tester.pumpAndSettle();
+    });
+  });
 }
 
 class _WarningStore extends AssignmentStore {

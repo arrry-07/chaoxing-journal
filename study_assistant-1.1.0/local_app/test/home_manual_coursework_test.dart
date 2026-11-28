@@ -513,7 +513,7 @@ void main() {
                 dragHandle: pinned
                     ? const SizedBox(
                         key: ValueKey('manual-drag-handle'),
-                        width: 34,
+                        width: 44,
                         height: 48,
                       )
                     : null,
@@ -539,7 +539,7 @@ void main() {
         final handleRect = tester.getRect(
           find.byKey(const ValueKey('manual-drag-handle')),
         );
-        expect(handleRect.right, closeTo(cardRect.right - 2, 0.01));
+        expect(handleRect.right, closeTo(cardRect.right - 8, 0.01));
         expect(completeRect.right, closeTo(handleRect.left, 0.01));
       } else {
         expect(completeRect.right, closeTo(cardRect.right - 2, 0.01));

@@ -458,28 +458,21 @@ extension _ExamCollection on ChaoxingLocalClient {
               verificationProbe:
                   Uri.parse('https://notice.chaoxing.com/pc/notice/myNotice'));
           if (!current()) return const [];
-          final rawNoticeData = response?.data;
-          final rawNoticeLen =
-              rawNoticeData is String ? rawNoticeData.length : 0;
-          final parsed = await ChaoxingExamParser.noticesAsync(
-            rawNoticeData,
-            rawLengthHint: rawNoticeLen,
+          final parsed = await ChaoxingExamParser.parseNoticePageBothAsync(
+            response?.data,
+            courses: pageFeedsCourseNotices ? (noticeCatalog ?? refs) : null,
           );
           if (!current()) return const [];
           if (parsed == null) throw StateError('examNoticeSchema');
           for (final a in parsed.rows) {
             if (ids.add(a.id)) notices.add(a);
           }
-          if (collectCourseNotices && page < 5) {
-            final decodedPayload = _decodeJsonPayload(rawNoticeData);
-            final parsedCourseNotices = ChaoxingNoticeParser.parsePage(
-              decodedPayload,
-              courses: noticeCatalog ?? refs,
-            );
-            if (parsedCourseNotices == null) {
+          if (pageFeedsCourseNotices) {
+            final courseRows = parsed.courseRows;
+            if (courseRows == null) {
               courseNoticeFailed = true;
             } else {
-              for (final item in parsedCourseNotices.rows) {
+              for (final item in courseRows) {
                 if (courseNoticeIds.add(item.id)) courseNotices.add(item);
               }
             }

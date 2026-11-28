@@ -6,6 +6,33 @@ import 'package:study_assistant_mobile/src/local/chaoxing_assignment_parser.dart
 import 'package:study_assistant_mobile/src/local/chaoxing_exam_parser.dart';
 
 void main() {
+  test('large signed work HTML round-trips through the async parser', () async {
+    final html = '''
+<!--${'padding' * 5000}-->
+<li onclick="goTask(this);" data="/work/doHomeWorkNew?workId=333">
+  <p class="overHidden2 fl">签名作业</p><p class="status fl">未提交</p>
+</li>
+''';
+    final now = DateTime.utc(2026, 11, 28);
+    expect(html.length,
+        greaterThan(ChaoxingAssignmentParser.isolateParseThreshold));
+    final rows = await ChaoxingAssignmentParser.parseSignedWorkListAsync(
+      html,
+      courseId: '111',
+      clazzId: '222',
+      courseName: '计算机网络',
+      baseUri: Uri.parse('https://mooc1.chaoxing.com/mooc2/work/list'),
+      now: now,
+    );
+    final row = rows!.single;
+    expect(row.id, 'cx:work:111:222:333');
+    expect(row.title, '签名作业');
+    expect(row.courseName, '计算机网络');
+    expect(row.submitUrl,
+        'https://mooc1.chaoxing.com/work/doHomeWorkNew?workId=333');
+    expect(row.lastSyncedAt.toUtc(), now);
+  });
+
   test('parses Chaoxing work HTML into local assignments', () {
     const html = '''
       <div class="course-name">软件工程</div>

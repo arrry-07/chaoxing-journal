@@ -652,8 +652,7 @@ class LocalAssignmentRepository {
           _encodeAndVerifyNotebookStatic,
         );
         _checkOwner(p, account);
-        await _require(p.setString(_notebookKey, raw));
-        _lastVerifiedRawByKey[_notebookKey] = raw;
+        await _writeVerified(p, _notebookKey, raw, '个人待办与学期归档保存失败');
       });
 
   Future<PersonalWorkspace> loadPersonalWorkspace() => _serialized(() async {
@@ -681,8 +680,7 @@ class LocalAssignmentRepository {
           _encodeAndVerifyPersonalStatic,
         );
         _checkOwner(p, account);
-        await _require(p.setString(_personalKey, raw));
-        _lastVerifiedRawByKey[_personalKey] = raw;
+        await _writeVerified(p, _personalKey, raw, '个人计划与记录保存失败');
       });
 
   Future<CourseNoticeCollection> loadCourseNotices() => _serialized(() async {

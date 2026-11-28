@@ -7,10 +7,60 @@ import 'package:shared_preferences_platform_interface/shared_preferences_platfor
 import 'package:study_assistant_mobile/src/local/local_assignment_repository.dart';
 import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/models/course.dart';
+import 'package:study_assistant_mobile/src/models/personal_workspace.dart';
 import 'package:study_assistant_mobile/src/models/pinned_assignments.dart';
 import 'package:study_assistant_mobile/src/models/study_notebook.dart';
 
 void main() {
+  for (final persisted in [false, true]) {
+    test(
+        'personal writes reload when the platform reports failure (durable: $persisted)',
+        () async {
+      SharedPreferences.setMockInitialValues({});
+      final repository = LocalAssignmentRepository();
+      await repository.activateAccount('alice');
+      StudyNotebook notebook(String title) => StudyNotebook(entries: [
+            ManualEntry(id: 'todo', title: title, kind: 'todo'),
+          ]);
+      await repository.saveNotebook(notebook('旧待办'), 'alice');
+      await repository.savePersonalWorkspace(
+        PersonalWorkspace(summaryHour: 19),
+        'alice',
+      );
+      final prefs = await SharedPreferences.getInstance();
+      final originalStore = SharedPreferencesStorePlatform.instance;
+      addTearDown(
+          () => SharedPreferencesStorePlatform.instance = originalStore);
+      SharedPreferencesStorePlatform.instance = _UncertainPersonalPreferences(
+        {for (final key in prefs.getKeys()) 'flutter.$key': prefs.get(key)!},
+        persisted: persisted,
+      );
+
+      final saveNotebook = repository.saveNotebook(notebook('新待办'), 'alice');
+      if (persisted) {
+        await saveNotebook;
+      } else {
+        await expectLater(
+            saveNotebook, throwsA(isA<LocalStorageWriteException>()));
+      }
+      expect((await repository.loadNotebook()).entries.single.title,
+          persisted ? '新待办' : '旧待办');
+
+      final saveWorkspace = repository.savePersonalWorkspace(
+        PersonalWorkspace(summaryHour: 21),
+        'alice',
+      );
+      if (persisted) {
+        await saveWorkspace;
+      } else {
+        await expectLater(
+            saveWorkspace, throwsA(isA<LocalStorageWriteException>()));
+      }
+      expect((await repository.loadPersonalWorkspace()).summaryHour,
+          persisted ? 21 : 19);
+    });
+  }
+
   test('local pins follow the active account and clear with local data',
       () async {
     SharedPreferences.setMockInitialValues({});
@@ -554,5 +604,22 @@ class _FailingPinPreferences extends InMemorySharedPreferencesStore {
   Future<bool> setValue(String valueType, String key, Object value) async {
     if (key == 'flutter.pinned_assignments_v2') return false;
     return super.setValue(valueType, key, value);
+  }
+}
+
+class _UncertainPersonalPreferences extends InMemorySharedPreferencesStore {
+  _UncertainPersonalPreferences(super.data, {required this.persisted})
+      : super.withData();
+
+  final bool persisted;
+
+  @override
+  Future<bool> setValue(String valueType, String key, Object value) async {
+    final notebook = key == 'flutter.notebook_v1';
+    final workspace = key == 'flutter.personal_workspace_v1';
+    if (!notebook && !workspace) return super.setValue(valueType, key, value);
+    if (persisted) await super.setValue(valueType, key, value);
+    if (workspace) throw StateError('platform did not acknowledge the write');
+    return false;
   }
 }

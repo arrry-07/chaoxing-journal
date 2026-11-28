@@ -111,6 +111,36 @@ void main() {
         deadline.toUtc());
   });
 
+  test('widget countdown uses Beijing dates from exactly 24 hours', () async {
+    final today = DateTime.parse('2026-12-31T09:00:00+08:00');
+    final snapshot = _Snapshot(clock: () => today.toLocal());
+    await snapshot.saveAssignments([
+      work('next-year', DateTime.parse('2027-01-01T23:59:00+08:00')),
+      work('two-days', DateTime.parse('2027-01-02T00:00:00+08:00')),
+      work('under-24h',
+          today.add(const Duration(hours: 23, minutes: 59, seconds: 30))),
+      exam('exam', today.add(const Duration(days: 1))),
+    ]);
+    expect(
+      {
+        for (final item in snapshot.items) item.assignmentId: item.remainingText
+      },
+      {
+        'cx:work:1:2:next-year': '1天',
+        'cx:work:1:2:two-days': '2天',
+        'cx:work:1:2:under-24h': '24小时',
+        'cx:exam:1:2:exam': '距开考 1天',
+      },
+    );
+
+    final evening = DateTime.parse('2027-01-31T22:00:00+08:00');
+    final monthBoundary = _Snapshot(clock: () => evening.toLocal());
+    await monthBoundary.saveAssignments([
+      work('after-tomorrow', DateTime.parse('2027-02-02T08:00:00+08:00')),
+    ]);
+    expect(monthBoundary.items.single.remainingText, '2天');
+  });
+
   test('old or unknown widget snapshots fall back to a deadline', () {
     final base = <String, dynamic>{
       'assignmentId': 'cx:work:1:2:5',

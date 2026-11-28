@@ -228,11 +228,13 @@ class ManualHomeCard extends StatelessWidget {
     ];
 
     final inlineActions = !largeText;
+    final hasInlineDrag = inlineActions && dragHandle != null;
+    final dragRightInset = hasInlineDrag ? 8.0 : 2.0;
     final contentRight =
         contentPadding.resolve(Directionality.of(context)).right;
     final topRightReserve = (inlineActions ? 48.0 : 0.0) +
-        (inlineActions && dragHandle != null ? 34.0 : 0.0) +
-        (inlineActions ? 6.0 : 0.0);
+        (hasInlineDrag ? 44.0 : 0.0) +
+        (inlineActions ? (dragRightInset + 4.0) : 0.0);
     final titlePadding = EdgeInsets.only(
       right: inlineActions
           ? (topRightReserve - contentRight)
@@ -446,7 +448,7 @@ class ManualHomeCard extends StatelessWidget {
           if (inlineActions)
             Positioned(
               top: compact ? 0 : 2,
-              right: 2,
+              right: dragRightInset,
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [

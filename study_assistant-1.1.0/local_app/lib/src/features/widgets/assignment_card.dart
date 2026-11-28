@@ -513,9 +513,10 @@ class AssignmentCard extends StatelessWidget {
         contentPadding.resolve(Directionality.of(context)).right;
     final hasInlineLaunch = onOpenAssignment != null && !largeText;
     final hasInlineDrag = dragHandle != null && !largeText;
+    final dragRightInset = hasInlineDrag ? 8.0 : 2.0;
     final topRightReserve = (hasInlineLaunch ? 48.0 : 0.0) +
-        (hasInlineDrag ? 34.0 : 0.0) +
-        ((hasInlineLaunch || hasInlineDrag) ? 6.0 : 0.0);
+        (hasInlineDrag ? 44.0 : 0.0) +
+        ((hasInlineLaunch || hasInlineDrag) ? (dragRightInset + 4.0) : 0.0);
     final titlePadding = EdgeInsets.only(
       right: (hasInlineLaunch || hasInlineDrag)
           ? (topRightReserve - contentRight)
@@ -669,7 +670,9 @@ class AssignmentCard extends StatelessWidget {
         Padding(
           padding: contentPadding,
           child: ConstrainedBox(
-            constraints: BoxConstraints(minHeight: hasInlineLaunch ? 48 : 0),
+            constraints: BoxConstraints(
+              minHeight: (hasInlineLaunch || hasInlineDrag) ? 48 : 0,
+            ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -797,7 +800,7 @@ class AssignmentCard extends StatelessWidget {
         if (hasInlineLaunch || hasInlineDrag)
           Positioned(
             top: compact ? 0 : 2,
-            right: 2,
+            right: dragRightInset,
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [

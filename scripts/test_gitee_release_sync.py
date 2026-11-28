@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import base64
 from dataclasses import replace
+import hashlib
+import io
 from pathlib import Path
 import subprocess
 import tempfile
@@ -585,6 +587,77 @@ class RetentionTests(unittest.TestCase):
         self.assertEqual(result, {"id": 42})
         self.assertEqual(run.call_count, 2)
         sleep.assert_called_once()
+
+    def _verify_gitee_timeout_retry(self, *, uploaded_despite_timeout: bool) -> None:
+        apk_bytes = b"verified synthetic APK"
+        release = replace(
+            artifact("1.93.0", 136),
+            size=len(apk_bytes),
+            sha256=hashlib.sha256(apk_bytes).hexdigest(),
+        )
+        client = sync.HttpClient(github_token="", gitee_token="mock-token")
+        gitee = sync.GiteeReleaseClient(client)
+        empty = sync.GiteeRelease(99, release.tag, ())
+        with_apk = replace(empty, assets=({"name": release.apk_name},))
+        retry_lookup = with_apk if uploaded_despite_timeout else empty
+        public_url = sync.canonical_gitee_apk_url(
+            "arrry-07/chaoxing-journal-updates", release
+        )
+        public_response = mock.MagicMock(
+            status=200, headers={"Content-Length": str(release.size)}
+        )
+        public_response.__enter__.return_value = public_response
+        public_response.geturl.return_value = public_url
+        public_response.read.side_effect = io.BytesIO(apk_bytes).read
+
+        with tempfile.TemporaryDirectory() as directory:
+            work_dir = Path(directory)
+            apk = work_dir / release.apk_name
+            apk.write_bytes(apk_bytes)
+            with (
+                mock.patch.object(
+                    gitee, "find_release", side_effect=[empty, retry_lookup, with_apk]
+                ) as find,
+                mock.patch.object(sync.shutil, "which", return_value="/usr/bin/curl"),
+                mock.patch.object(
+                    sync.subprocess,
+                    "run",
+                    side_effect=[
+                        subprocess.TimeoutExpired("curl", 20),
+                        subprocess.CompletedProcess([], 0, '{"id": 42}\n201 21 100', ""),
+                    ],
+                ) as run,
+                mock.patch.object(sync.time, "sleep"),
+                mock.patch.object(
+                    sync.urllib.request, "urlopen", return_value=public_response
+                ) as download,
+            ):
+                verified = sync.verify_gitee_release(
+                    gitee,
+                    client,
+                    release,
+                    full_download=False,
+                    work_dir=work_dir,
+                    upload_missing=True,
+                    apk_path=apk,
+                )
+            self.assertEqual(verified, with_apk)
+            self.assertEqual(run.call_count, 1 if uploaded_despite_timeout else 2)
+            lookups = 2 if uploaded_despite_timeout else 3
+            self.assertEqual(find.call_args_list, [mock.call(release.tag)] * lookups)
+            download.assert_called_once()
+            public_request = download.call_args.args[0]
+            self.assertEqual(public_request.full_url, public_url)
+            self.assertIsNone(public_request.get_header("Authorization"))
+            self.assertEqual(
+                (work_dir / "gitee-download" / apk.name).read_bytes(), apk_bytes
+            )
+
+    def test_upload_timeout_with_existing_attachment_skips_retry_and_verifies_download(self) -> None:
+        self._verify_gitee_timeout_retry(uploaded_despite_timeout=True)
+
+    def test_upload_timeout_without_attachment_retries_and_verifies_download(self) -> None:
+        self._verify_gitee_timeout_retry(uploaded_despite_timeout=False)
 
     def test_prune_allows_unmirrored_github_only_stable_release(self) -> None:
         class FakeGitee:

@@ -1,9 +1,61 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:study_assistant_mobile/src/local/chaoxing_api_parser.dart';
+import 'package:study_assistant_mobile/src/local/chaoxing_exam_parser.dart';
 import 'package:study_assistant_mobile/src/local/chaoxing_notice_parser.dart';
 import 'package:study_assistant_mobile/src/models/course_notice.dart';
 
 void main() {
+  const examNotice = {
+    'uuid': 'exam-notice',
+    'title': '考试通知',
+    'content': '考试名称：计算机网络期末\n考试时间：2026-12-21 09:00 至 2026-12-21 11:00',
+  };
+  Map<String, Object> noticePage(Map<String, Object> courseNotice) => {
+        'status': true,
+        'notices': {
+          'lastGetId': 'next',
+          'list': [examNotice, courseNotice],
+        },
+      };
+
+  test('large raw notice page returns both projections and the exam cursor',
+      () async {
+    final raw = jsonEncode(noticePage({
+      'uuid': 'course-notice',
+      'title': '《计算机网络》课程安排',
+      'content': 'padding' * 5000,
+    }));
+    expect(raw.length, greaterThan(ChaoxingExamParser.isolateParseThreshold));
+    final parsed = await ChaoxingExamParser.parseNoticePageBothAsync(
+      raw,
+      courses: const [
+        ChaoxingCourseRef(courseId: '42', clazzId: '7', courseName: '计算机网络'),
+      ],
+    );
+    expect(parsed!.rows.single.title, '计算机网络期末');
+    expect(parsed.cursor, 'next');
+    expect(parsed.courseRows, hasLength(2));
+    final course = parsed.courseRows!.last;
+    expect((course.courseId, course.clazzId), ('42', '7'));
+    expect(course.summary, hasLength(4000));
+  });
+
+  test('invalid non-exam notice only fails the course notice projection',
+      () async {
+    final raw = jsonEncode(noticePage({'title': '上课安排'}));
+    final parsed = await ChaoxingExamParser.parseNoticePageBothAsync(
+      raw,
+      courses: const [],
+    );
+    expect(parsed!.rows.single.title, '计算机网络期末');
+    expect(parsed.cursor, 'next');
+    expect(parsed.courseRows, isNull);
+    expect(
+        await ChaoxingExamParser.parseNoticePageBothAsync('{broken'), isNull);
+  });
+
   CourseNotice parseNotice(Map<String, dynamic> fields) =>
       ChaoxingNoticeParser.parsePage({
         'status': true,

@@ -18,7 +18,6 @@ import 'chaoxing_chapter_parser.dart';
 import 'chaoxing_classroom_parser.dart';
 import 'chaoxing_exam_parser.dart';
 import 'chaoxing_exam_visibility.dart';
-import 'chaoxing_notice_parser.dart';
 import 'chaoxing_param_helper.dart';
 
 part 'chaoxing_exam_client.dart';
@@ -1723,15 +1722,24 @@ class ChaoxingLocalClient {
         });
     final list = await _courseGet(uri,
         generation: generation, verificationProbe: courseUri);
-    if (generation != _sessionGeneration) return null;
-    final parsed = _measureParse(
-        '作业列表',
-        () => ChaoxingAssignmentParser.parseSignedWorkList(
-            list?.data?.toString() ?? '',
-            courseId: course.courseId,
-            clazzId: course.clazzId,
-            courseName: course.courseName,
-            baseUri: uri));
+    if (generation != _sessionGeneration || _stopRequested) return null;
+    final parseWatch = Stopwatch()..start();
+    final List<Assignment>? parsed;
+    try {
+      parsed = await ChaoxingAssignmentParser.parseSignedWorkListAsync(
+        list?.data?.toString() ?? '',
+        courseId: course.courseId,
+        clazzId: course.clazzId,
+        courseName: course.courseName,
+        baseUri: uri,
+      );
+    } catch (_) {
+      if (generation != _sessionGeneration || _stopRequested) return null;
+      _recordParse('作业列表', parseWatch.elapsedMilliseconds, failed: true);
+      rethrow;
+    }
+    if (generation != _sessionGeneration || _stopRequested) return null;
+    _recordParse('作业列表', parseWatch.elapsedMilliseconds);
     if (parsed == null) {
       _noteParseFailure('作业列表');
       return null;
