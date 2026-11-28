@@ -19,7 +19,7 @@
 ## 2026-11-28 · v1.93.1 (1.93.1+137) Wave A / B 与终验进度
 
 - 已完成改动：[v1.93.1 方案](../plans/2026-11-28-v1.93.1-置顶拖拽精修热路径轻债两大文件拆缝与架构图刷新方案.md) 的 Wave A 已于 `c27894f` 推送。Wave B 将学习通客户端 `3319 → 219` 行、通知服务 `2464 → 243` 行，补齐 `9010` 止损和活动、学期边界，保留 v3 渠道与双代 Journal，同步刷新总图、数据流和漫游。
-- 当前 commit 与状态：构建源码 `13d2a94`，架构产物 `9484c2e`，UTC Flutter `+2224 ~1`、Python `146`、Dart 分析 0 问题，Android JVM `83`、仪器代码编译及 Lint 通过。GPT 首审 `BLOCK` 的两项 P1 已补回归，Pro-1 Hydrogen 复审已发起。候选原签名双 ABI APK SHA-256 `a7a934afd33386b090f20770efcaedda4aaa2805d0ce4c6e8aefd48224751366`，构建与校验证据见 `D:/cx_build_1931_final/`。
+- 当前 commit 与状态：构建源码 `13d2a94`，架构产物 `9484c2e`，UTC Flutter `+2224 ~1`、Python `146`、Dart 分析 0 问题，Android JVM `83`、仪器代码编译及 Lint 通过。GPT 首审两项 P1 和四项 P2 已修复，Pro-1 Hydrogen 复审 `CODE PASS / VISUAL BLOCK`，未发现新 P0/P1。候选原签名双 ABI APK SHA-256 `a7a934afd33386b090f20770efcaedda4aaa2805d0ce4c6e8aefd48224751366`，审查、构建与校验证据见 `D:/cx_build_1931_final/`。
 - 下一步待办：MuMu 因旧会话占用仍待终验。设备上的审查前包已验证保数据覆装，设备释放后以终版包复核一次真实刷新、置顶拖拽冷启、浅深主题首页与 Star 复制，再完成视觉复审和 `origin/dev` 收口。
 
 ## 2026-11-28 · v1.93.0 (1.93.0+136) 正式发布、MuMu 终验 PASS、Gitee APK 主链双同步与全套文档收口
