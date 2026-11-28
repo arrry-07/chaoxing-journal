@@ -1511,14 +1511,14 @@ svg[data-theme="light"][data-archify-bake] :is(#story-caption-4){animation:sf-li
         <text data-detail="fine" x="100" y="407.6" class="t-frontend" font-size="7" text-anchor="middle">增量触发</text>
         </g>
 
-        <g id="native-light-flow-node-parsers_merge" data-node-id="parsers_merge" data-node-label="多源解析与身份归并" tabindex="0" role="button" aria-label="聚焦多源解析与身份归并，同步编排 · Parser / Grouping, 02 / 采集与门禁" aria-pressed="false" data-node-kind="backend" data-node-sublabel="同步编排 · Parser / Grouping" data-node-tag="防空覆盖" data-node-context="02 / 采集与门禁" data-emphasis="">
-          <title>多源解析与身份归并 · 同步编排 · Parser / Grouping · 02 / 采集与门禁 · 防空覆盖</title>
+        <g id="native-light-flow-node-parsers_merge" data-node-id="parsers_merge" data-node-label="逐条校验与身份归并" tabindex="0" role="button" aria-label="聚焦逐条校验与身份归并，同步编排 · Parser / Grouping, 02 / 采集与门禁" aria-pressed="false" data-node-kind="backend" data-node-sublabel="同步编排 · Parser / Grouping" data-node-tag="防空覆盖" data-node-context="02 / 采集与门禁" data-emphasis="">
+          <title>逐条校验与身份归并 · 同步编排 · Parser / Grouping · 02 / 采集与门禁 · 防空覆盖</title>
           <rect x="252" y="128" width="126" height="58" rx="6" class="c-mask"/>
           <rect x="252" y="128" width="126" height="58" rx="6" class="c-backend" data-animate="node" style="--step:1" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(258 134) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="315" y="159" class="t-primary" font-size="10" font-weight="600" text-anchor="middle">多源解析与身份归并</text>
+          <text data-node-label="" data-detail-anchor="" x="315" y="159" class="t-primary" font-size="10" font-weight="600" text-anchor="middle">逐条校验与身份归并</text>
           <text data-detail="context" x="315" y="170" class="t-muted" font-size="7" text-anchor="middle">同步编排 · Parser / Grouping</text>
         <text data-detail="fine" x="315" y="180.1" class="t-backend" font-size="7" text-anchor="middle">防空覆盖</text>
         </g>

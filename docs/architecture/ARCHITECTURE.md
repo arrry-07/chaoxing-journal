@@ -1,6 +1,6 @@
 # 学习通课业手记 · 架构导航（人机共用）
 
-- **基线 Commit**　架构总图、同步数据流及漫游源码定位锚定 `e12c75c`（`v1.93.1+137` Wave B）。SQLite v10 物理表图锚定 `d8b7f47`。正式版本 `v1.93.0+136` 对应 `e7e3408`。
+- **基线 Commit**　架构总图、同步数据流及漫游源码定位锚定 `13d2a94`（`v1.93.1+137` Wave B）。SQLite v10 物理表图锚定 `d8b7f47`。正式版本 `v1.93.0+136` 对应 `e7e3408`。
 - **更新日期**：2026-11-28
 - **适用范围**：`study_assistant-1.1.0/local_app/`（Flutter 业务层与 Android 原生宿主/后台层）、`scripts/` 与 `.github/workflows/` 门禁及分发链路；`references/xuexitong-cli/` 仅作只读上游协议参考
 
@@ -55,7 +55,7 @@
 | Store · 提醒 | `assignment_store_reminders.dart`、`assignment_reminder_coordinator.dart` | 编排提醒计划、历史、通知补偿和桌面小组件刷新。协调器提供提醒判断、取消结果和提醒解释 |
 | Store · 同步 | `assignment_store_sync.dart`、`assignment_sync_coordinator.dart` | 编排多源同步与跨引擎同步租约。协调器计算同步选课、历史补扫、服务端退避和报告 |
 | Store · 会话 | `assignment_store_session.dart`、`assignment_session_coordinator.dart` | 编排恢复、登录、账号切换、退出和备份恢复。协调器提供会话转换及恢复决策 |
-| 学习通公共接口与采集 | `lib/src/local/chaoxing_local_client.dart`、`chaoxing_coursework_client.dart`、`chaoxing_exam_client.dart`、`chaoxing_*_parser.dart` | 公共类持有状态并保留可覆写接口。采集实现读取正式作业、课程章节、课堂活动、考试与通知。签名作业大文本交给 `Isolate.run`，同页通知共享解码 |
+| 学习通公共接口与采集 | `lib/src/local/chaoxing_local_client.dart`、`chaoxing_coursework_client.dart`、`chaoxing_exam_client.dart`、`chaoxing_*_parser.dart` | 公共类持有状态并保留可覆写接口。采集读取正式作业、课程章节、课堂活动、考试与通知。大文本移入 `Isolate.run`，通知响应判定与两个通知投影共用一次解码 |
 | 学习通会话与传输 | `lib/src/local/chaoxing_session_client.dart`、`chaoxing_transport_client.dart`、`chaoxing_request_policy.dart` | 处理登录和验证回写、请求取消和熔断。纯策略判定 `9010` 与退避，安全验证返回时校对会话代次和 Cookie 域 |
 | 本机课业与安全凭据仓 | `lib/src/local/local_assignment_repository.dart`、`lib/src/services/secure_session_store.dart` | 按账号保存课业、待办、课程设置快照与恢复副本。大快照在 isolate 中编码并校验。登录凭据由安全存储管理 |
 | Flutter 本地通知 | `lib/src/services/local_notification_service.dart`、`local_notification_channels.dart`、`local_notification_transactions.dart`、`local_notification_schedulers.dart`、`notification_schedule_policy.dart` | 公共类保留渠道与排期入口。渠道负责迁移和系统兼容，事务通过两代 Journal 执行补偿恢复，纯策略负责时间窗、类别和隐私规则 |

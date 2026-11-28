@@ -10,7 +10,7 @@
     "repository": {
       "url": "https://github.com/arrry-07/chaoxing-journal.git",
       "provider": "github",
-      "revision": "e12c75c7ebbdf20d519812bc3eed854d98c31309"
+      "revision": "13d2a94f92a0633ac346c35867c93e3611cb2421"
     }
   },
   "stages": [
@@ -69,7 +69,7 @@
       "id": "parsers_merge",
       "type": "backend",
       "emphasis": true,
-      "label": "多源解析与身份归并",
+      "label": "逐条校验与身份归并",
       "sublabel": "同步编排 · Parser / Grouping",
       "tag": "防空覆盖",
       "stage": 1,
@@ -87,11 +87,11 @@
         },
         {
           "path": "study_assistant-1.1.0/local_app/lib/src/local/chaoxing_exam_parser.dart",
-          "line": 283,
-          "label": "共享通知页一次解码"
+          "line": 311,
+          "label": "同一 isolate 完成判定与通知投影"
         }
       ],
-      "explanation": "课业逐条校验与按身份归并。签名作业大文本移入 isolate，同一通知页解码一次后分流。"
+      "explanation": "课业逐条校验与按身份归并。大文本在 isolate 中解析。通知响应分类与考试、课程通知共用一次解码。"
     },
     {
       "id": "session_lease_gate",
