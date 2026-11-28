@@ -26,7 +26,9 @@ import 'package:study_assistant_mobile/src/services/secure_session_store.dart';
 import 'package:study_assistant_mobile/src/services/widget_snapshot_service.dart';
 
 void main() {
-  testWidgets('source open is an independent labeled button', (t) async {
+  testWidgets(
+      'github copy control is a 48x48 frameless muted icon button with tooltip',
+      (t) async {
     SharedPreferences.setMockInitialValues({});
     final store = AssignmentStore(
         sessionStore: _MemorySessionStore(),
@@ -36,8 +38,22 @@ void main() {
     await t.pumpWidget(
         MaterialApp(home: Scaffold(body: ProfileScreen(store: store))));
     await t.scrollUntilVisible(find.text('GitHub 项目'), 400);
-    expect(find.byKey(const ValueKey('profile-github-copy')), findsOneWidget);
-    expect(find.text('复制链接'), findsOneWidget);
+    final copyFinder = find.byKey(const ValueKey('profile-github-copy'));
+    expect(copyFinder, findsOneWidget);
+    final button = t.widget<IconButton>(copyFinder);
+    expect(button.tooltip, '复制仓库链接');
+    expect(t.getSize(copyFinder), const Size(48, 48));
+    final icon = t.widget<Icon>(
+      find.descendant(of: copyFinder, matching: find.byType(Icon)),
+    );
+    expect(icon.icon, Icons.copy_rounded);
+    expect(icon.size, 18);
+    expect(icon.color, JournalPalette.light.muted);
+    expect(
+      find.ancestor(of: copyFinder, matching: find.byType(OutlinedButton)),
+      findsNothing,
+    );
+    expect(find.text('复制链接'), findsNothing);
   });
 
   testWidgets('profile uses tinted groups and berry destructive actions',
@@ -418,6 +434,8 @@ void main() {
         widgetSnapshotService: _NoopWidgetSnapshotService());
     addTearDown(store.dispose);
     final copied = <String>[];
+    final feedbackCalls = <Map<Object?, Object?>>[];
+    const soundChannel = MethodChannel('study_assistant/interaction_sound');
     t.binding.defaultBinaryMessenger
         .setMockMethodCallHandler(SystemChannels.platform, (call) async {
       if (call.method == 'Clipboard.setData') {
@@ -425,8 +443,19 @@ void main() {
       }
       return null;
     });
-    addTearDown(() => t.binding.defaultBinaryMessenger
-        .setMockMethodCallHandler(SystemChannels.platform, null));
+    t.binding.defaultBinaryMessenger.setMockMethodCallHandler(soundChannel,
+        (call) async {
+      if (call.method == 'feedback' && call.arguments is Map) {
+        feedbackCalls.add(Map<Object?, Object?>.from(call.arguments as Map));
+      }
+      return null;
+    });
+    addTearDown(() {
+      t.binding.defaultBinaryMessenger
+          .setMockMethodCallHandler(SystemChannels.platform, null);
+      t.binding.defaultBinaryMessenger
+          .setMockMethodCallHandler(soundChannel, null);
+    });
     await t.pumpWidget(MaterialApp(
         home: Scaffold(
             body: ProfileScreen(store: store, externalLinkService: external))));
@@ -437,10 +466,29 @@ void main() {
     expect(
         external.openedUrls, ['https://github.com/arrry-07/chaoxing-journal']);
     expect(copied, isEmpty);
+    feedbackCalls.clear();
     await t.tap(find.byKey(const ValueKey('profile-github-copy')));
     await t.pumpAndSettle();
     expect(copied, ['https://github.com/arrry-07/chaoxing-journal']);
+    expect(feedbackCalls, isNotEmpty);
+    expect(feedbackCalls.last['kind'], 'tap');
+    expect(find.text('链接已复制'), findsOneWidget);
     expect(external.openedUrls.length, 1);
+
+    // When opening external link fails, snackbar offers fallback '复制链接' action.
+    external.openUrlResult = false;
+    await t.tap(find.text('GitHub 项目'));
+    await t.pumpAndSettle();
+    expect(find.text('无法打开 GitHub 链接，请检查浏览器或网络'), findsOneWidget);
+    expect(find.text('复制链接'), findsOneWidget);
+    await t.tap(find.text('复制链接'));
+    await t.pumpAndSettle();
+    expect(copied, [
+      'https://github.com/arrry-07/chaoxing-journal',
+      'https://github.com/arrry-07/chaoxing-journal',
+    ]);
+    expect(find.text('链接已复制'), findsOneWidget);
+
     await t.ensureVisible(find.text('关于我们'));
     await t.tap(find.text('关于我们'));
     await t.pumpAndSettle();
@@ -759,6 +807,7 @@ class _SlowUpdateService extends AppUpdateService {
 class _FakeExternalLinkService extends ExternalLinkService {
   final openedUrls = <String>[];
   final installedApkPaths = <String>[];
+  bool openUrlResult = true;
 
   @override
   Future<Map<String, dynamic>> inspectApk(String filePath) async =>
@@ -766,7 +815,7 @@ class _FakeExternalLinkService extends ExternalLinkService {
   @override
   Future<bool> openUrl(String url) async {
     openedUrls.add(url);
-    return true;
+    return openUrlResult;
   }
 
   @override

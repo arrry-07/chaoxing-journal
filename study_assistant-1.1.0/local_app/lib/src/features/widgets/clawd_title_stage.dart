@@ -54,6 +54,58 @@ enum _StageChoreoKind {
   returnRest,
 }
 
+@immutable
+class _TitleMetricsKey {
+  const _TitleMetricsKey({
+    required this.title,
+    required this.titleStyle,
+    required this.direction,
+    required this.textScaler,
+    required this.availableTitleW,
+  });
+
+  final String title;
+  final TextStyle titleStyle;
+  final TextDirection direction;
+  final TextScaler textScaler;
+  final double availableTitleW;
+
+  @override
+  bool operator ==(Object other) =>
+      other is _TitleMetricsKey &&
+      other.title == title &&
+      other.titleStyle == titleStyle &&
+      other.direction == direction &&
+      other.textScaler == textScaler &&
+      other.availableTitleW == availableTitleW;
+
+  @override
+  int get hashCode => Object.hash(
+        title,
+        titleStyle,
+        direction,
+        textScaler,
+        availableTitleW,
+      );
+}
+
+@immutable
+class _TitleMetrics {
+  const _TitleMetrics({
+    required this.key,
+    required this.rawW,
+    required this.rawH,
+    required this.scale,
+    required this.charCenters,
+  });
+
+  final _TitleMetricsKey key;
+  final double rawW;
+  final double rawH;
+  final double scale;
+  final List<double> charCenters;
+}
+
 class ClawdTitleStage extends StatefulWidget {
   const ClawdTitleStage({
     super.key,
@@ -69,6 +121,8 @@ class ClawdTitleStage extends StatefulWidget {
     this.renderBubbleInline = false,
     this.moodOverride,
   });
+
+  static int debugTitleMetricsComputeCountForTesting = 0;
 
   static double resolvedBuddySize(BuildContext context, {double? maxWidth}) {
     if (JournalLayout.isLargeText(context)) return 24.0;
@@ -217,6 +271,7 @@ class _ClawdTitleStageState extends State<ClawdTitleStage>
   double _stageWidth = 200.0;
   double _stageBaseHeight = 44.0;
   bool _hasLayout = false;
+  _TitleMetrics? _titleMetricsCache;
 
   bool _appResumed = true;
   bool _tickerEnabled = true;
@@ -716,6 +771,7 @@ class _ClawdTitleStageState extends State<ClawdTitleStage>
 
   @override
   void dispose() {
+    _titleMetricsCache = null;
     WidgetsBinding.instance.removeObserver(this);
     widget.controller.removeListener(_onControllerChanged);
     _patrolTimer?.cancel();
@@ -727,6 +783,68 @@ class _ClawdTitleStageState extends State<ClawdTitleStage>
     _dropController.removeStatusListener(_onDropStatus);
     _dropController.dispose();
     super.dispose();
+  }
+
+  _TitleMetrics _resolveTitleMetrics({
+    required String title,
+    required TextStyle titleStyle,
+    required TextDirection direction,
+    required TextScaler textScaler,
+    required double availableTitleW,
+  }) {
+    final key = _TitleMetricsKey(
+      title: title,
+      titleStyle: titleStyle,
+      direction: direction,
+      textScaler: textScaler,
+      availableTitleW: availableTitleW,
+    );
+    final cached = _titleMetricsCache;
+    if (cached != null && cached.key == key) {
+      return cached;
+    }
+
+    final tp = TextPainter(
+      text: TextSpan(text: title, style: titleStyle),
+      textDirection: direction,
+      textScaler: textScaler,
+      maxLines: 1,
+    )..layout();
+    ClawdTitleStage.debugTitleMetricsComputeCountForTesting++;
+    final rawW = tp.width.ceilToDouble();
+    final rawH = tp.height;
+    final scale =
+        rawW > availableTitleW && rawW > 0 ? availableTitleW / rawW : 1.0;
+
+    final centers = <double>[];
+    if (title.isNotEmpty) {
+      for (var i = 0; i < title.length; i++) {
+        final boxes = tp.getBoxesForSelection(
+          TextSelection(baseOffset: i, extentOffset: i + 1),
+        );
+        if (boxes.isNotEmpty) {
+          final box = boxes.first;
+          centers.add(((box.left + box.right) * 0.5) * scale);
+        }
+      }
+      if (centers.isEmpty && rawW > 0) {
+        final stepW = (rawW * scale) / title.length;
+        for (var i = 0; i < title.length; i++) {
+          centers.add((i + 0.5) * stepW);
+        }
+      }
+    }
+    tp.dispose();
+
+    final metrics = _TitleMetrics(
+      key: key,
+      rawW: rawW,
+      rawH: rawH,
+      scale: scale,
+      charCenters: List<double>.unmodifiable(centers),
+    );
+    _titleMetricsCache = metrics;
+    return metrics;
   }
 
   @override
@@ -741,36 +859,17 @@ class _ClawdTitleStageState extends State<ClawdTitleStage>
         final reservedTail = widget.showBuddy ? _hitWidth : 0.0;
         final availableTitleW = math.max(40.0, maxW - reservedTail);
 
-        final tp = TextPainter(
-          text: TextSpan(text: widget.title, style: widget.titleStyle),
-          textDirection: direction,
+        final metrics = _resolveTitleMetrics(
+          title: widget.title,
+          titleStyle: widget.titleStyle,
+          direction: direction,
           textScaler: textScaler,
-          maxLines: 1,
-        )..layout();
-        final rawW = tp.width.ceilToDouble();
-        final rawH = tp.height;
-        final scale =
-            rawW > availableTitleW && rawW > 0 ? availableTitleW / rawW : 1.0;
-
-        final charCenters = <double>[];
-        if (widget.title.isNotEmpty) {
-          for (var i = 0; i < widget.title.length; i++) {
-            final boxes = tp.getBoxesForSelection(
-              TextSelection(baseOffset: i, extentOffset: i + 1),
-            );
-            if (boxes.isNotEmpty) {
-              final box = boxes.first;
-              charCenters.add(((box.left + box.right) * 0.5) * scale);
-            }
-          }
-          if (charCenters.isEmpty && rawW > 0) {
-            final stepW = (rawW * scale) / widget.title.length;
-            for (var i = 0; i < widget.title.length; i++) {
-              charCenters.add((i + 0.5) * stepW);
-            }
-          }
-        }
-        tp.dispose();
+          availableTitleW: availableTitleW,
+        );
+        final rawW = metrics.rawW;
+        final rawH = metrics.rawH;
+        final scale = metrics.scale;
+        final charCenters = metrics.charCenters;
 
         final renderedTitleW = rawW * scale;
         final renderedTitleH = rawH * scale;

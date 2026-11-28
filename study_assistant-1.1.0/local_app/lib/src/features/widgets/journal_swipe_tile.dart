@@ -1,10 +1,37 @@
 import 'dart:math' as math;
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import '../../app/journal.dart';
 import '../../app/journal_motion.dart';
 import '../../models/display_preferences.dart';
+
+class JournalSwipeExclusionNotification extends Notification {
+  const JournalSwipeExclusionNotification({
+    required this.pointer,
+    required this.excluded,
+  });
+
+  final int pointer;
+  final bool excluded;
+}
+
+class _SwipeHorizontalDragGestureRecognizer
+    extends HorizontalDragGestureRecognizer {
+  _SwipeHorizontalDragGestureRecognizer({
+    super.debugOwner,
+    required this.isPointerBlocked,
+  });
+
+  final bool Function(int pointer) isPointerBlocked;
+
+  @override
+  bool isPointerAllowed(PointerEvent event) {
+    if (isPointerBlocked(event.pointer)) return false;
+    return super.isPointerAllowed(event);
+  }
+}
 
 class JournalSwipeAction {
   const JournalSwipeAction({
@@ -58,6 +85,7 @@ class _JournalSwipeTileState extends State<JournalSwipeTile>
   bool _crossedRight = false;
   bool _crossedLeft = false;
   bool _ignoredEdgeDrag = false;
+  final Set<int> _excludedPointers = <int>{};
 
   @override
   void initState() {
@@ -85,11 +113,15 @@ class _JournalSwipeTileState extends State<JournalSwipeTile>
       _rawOffset = 0.0;
       _crossedRight = false;
       _crossedLeft = false;
+      if (!widget.enabled) {
+        _excludedPointers.clear();
+      }
     }
   }
 
   @override
   void dispose() {
+    _excludedPointers.clear();
     _snapController.dispose();
     super.dispose();
   }
@@ -229,85 +261,117 @@ class _JournalSwipeTileState extends State<JournalSwipeTile>
     final iconScale =
         reduced ? 1.0 : (reached ? 1.20 : (0.86 + 0.14 * progress));
 
-    return GestureDetector(
-      behavior: HitTestBehavior.translucent,
-      onHorizontalDragStart: _handleDragStart,
-      onHorizontalDragUpdate: _handleDragUpdate,
-      onHorizontalDragEnd: _handleDragEnd,
-      onHorizontalDragCancel: () => _snapBack(0.0),
-      child: ClipRect(
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            if (activeAction != null)
-              Positioned.fill(
-                child: ColoredBox(
-                  color: Color.lerp(
-                    journal.sheet,
-                    activeAction.backgroundColor,
-                    0.45 + 0.55 * progress,
-                  )!,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 18),
-                    child: Align(
-                      alignment: showingRight
-                          ? Alignment.centerLeft
-                          : Alignment.centerRight,
-                      child: Opacity(
-                        opacity: math.min(1.0, progress * 1.2),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            if (showingLeft) ...[
-                              Text(
-                                activeAction.label,
-                                style: journal.pillLabel.copyWith(
-                                  color: activeAction.color,
-                                  fontWeight: FontWeight.w600,
+    return NotificationListener<JournalSwipeExclusionNotification>(
+      onNotification: (notification) {
+        if (notification.excluded) {
+          _excludedPointers.add(notification.pointer);
+        } else {
+          _excludedPointers.remove(notification.pointer);
+        }
+        return true;
+      },
+      child: Listener(
+        behavior: HitTestBehavior.translucent,
+        onPointerUp: (event) => _excludedPointers.remove(event.pointer),
+        onPointerCancel: (event) => _excludedPointers.remove(event.pointer),
+        child: RawGestureDetector(
+          behavior: HitTestBehavior.translucent,
+          gestures: <Type, GestureRecognizerFactory>{
+            _SwipeHorizontalDragGestureRecognizer:
+                GestureRecognizerFactoryWithHandlers<
+                    _SwipeHorizontalDragGestureRecognizer>(
+              () => _SwipeHorizontalDragGestureRecognizer(
+                debugOwner: this,
+                isPointerBlocked: (pointer) =>
+                    !widget.enabled || _excludedPointers.contains(pointer),
+              ),
+              (_SwipeHorizontalDragGestureRecognizer instance) {
+                instance
+                  ..onStart = _handleDragStart
+                  ..onUpdate = _handleDragUpdate
+                  ..onEnd = _handleDragEnd
+                  ..onCancel = () => _snapBack(0.0);
+              },
+            ),
+          },
+          child: ClipRect(
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                if (activeAction != null)
+                  Positioned.fill(
+                    child: ColoredBox(
+                      color: Color.lerp(
+                        journal.sheet,
+                        activeAction.backgroundColor,
+                        0.45 + 0.55 * progress,
+                      )!,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 18),
+                        child: Align(
+                          alignment: showingRight
+                              ? Alignment.centerLeft
+                              : Alignment.centerRight,
+                          child: Opacity(
+                            opacity: math.min(1.0, progress * 1.2),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                if (showingLeft) ...[
+                                  Text(
+                                    activeAction.label,
+                                    style: journal.pillLabel.copyWith(
+                                      color: activeAction.color,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                ],
+                                AnimatedScale(
+                                  scale: iconScale,
+                                  duration: reduced
+                                      ? Duration.zero
+                                      : Duration(
+                                          milliseconds: reached ? 160 : 90),
+                                  curve: reached
+                                      ? Curves.easeOutBack
+                                      : JournalMotion.easeOut,
+                                  child: Icon(
+                                    activeAction.icon,
+                                    size: 20,
+                                    color: activeAction.color,
+                                  ),
                                 ),
-                              ),
-                              const SizedBox(width: 8),
-                            ],
-                            AnimatedScale(
-                              scale: iconScale,
-                              duration: reduced
-                                  ? Duration.zero
-                                  : Duration(milliseconds: reached ? 160 : 90),
-                              curve: reached
-                                  ? Curves.easeOutBack
-                                  : JournalMotion.easeOut,
-                              child: Icon(
-                                activeAction.icon,
-                                size: 20,
-                                color: activeAction.color,
-                              ),
+                                if (showingRight) ...[
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    activeAction.label,
+                                    style: journal.pillLabel.copyWith(
+                                      color: activeAction.color,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ],
+                              ],
                             ),
-                            if (showingRight) ...[
-                              const SizedBox(width: 8),
-                              Text(
-                                activeAction.label,
-                                style: journal.pillLabel.copyWith(
-                                  color: activeAction.color,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ],
-                          ],
+                          ),
                         ),
                       ),
                     ),
                   ),
+                Transform.translate(
+                  key: const ValueKey('journal-swipe-foreground'),
+                  offset: Offset(_offset, 0),
+                  child: ColoredBox(
+                    color: _offset.abs() > 0.5
+                        ? journal.sheet
+                        : Colors.transparent,
+                    child: widget.child,
+                  ),
                 ),
-              ),
-            Transform.translate(
-              key: const ValueKey('journal-swipe-foreground'),
-              offset: Offset(_offset, 0),
-              child: ColoredBox(
-                color: _offset.abs() > 0.5 ? journal.sheet : Colors.transparent,
-                child: widget.child,
-              ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );

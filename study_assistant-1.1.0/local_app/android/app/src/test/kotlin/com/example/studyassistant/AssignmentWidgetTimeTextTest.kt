@@ -1,5 +1,6 @@
 package com.example.studyassistant
 
+import java.time.OffsetDateTime
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -7,6 +8,23 @@ class AssignmentWidgetTimeTextTest {
     private val now = 1_000_000_000L
     private val minute = 60_000L
     private val hour = 60 * minute
+
+    @Test
+    fun countdownUsesBeijingDatesAcrossMonthAndYearBoundaries() {
+        fun remaining(now: String, anchor: String, kind: String = "deadline"): String =
+            AssignmentWidgetTimeText.remainingText(
+                anchorAtMillis = OffsetDateTime.parse(anchor).toInstant().toEpochMilli(),
+                eventKind = kind,
+                nowMillis = OffsetDateTime.parse(now).toInstant().toEpochMilli(),
+                fallback = "截止时间待确认",
+            )
+
+        val yearEnd = "2026-12-31T01:00:00Z"
+        assertEquals("1天", remaining(yearEnd, "2027-01-01T07:59:00-08:00"))
+        assertEquals("2天", remaining("2027-01-31T22:00:00+08:00", "2027-02-02T08:00:00+08:00"))
+        assertEquals("24小时", remaining(yearEnd, "2027-01-01T00:59:30Z"))
+        assertEquals("距开考 1天", remaining(yearEnd, "2027-01-01T01:00:00Z", "examStart"))
+    }
 
     @Test
     fun examBeforeOpeningShowsOpeningCountdown() {

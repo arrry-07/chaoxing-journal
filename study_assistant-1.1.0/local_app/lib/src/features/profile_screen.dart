@@ -23,6 +23,7 @@ import '../services/app_update_service.dart';
 import '../services/assignment_store.dart';
 import '../services/clawd_companion_controller.dart';
 import '../services/external_link_service.dart';
+import '../services/interaction_feedback_service.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({
@@ -461,31 +462,25 @@ class _ProfileScreenState extends State<ProfileScreen>
                               subtitle: '如果课业手记帮到你，欢迎去 GitHub 点个 Star 支持',
                               compactSubtitle: true,
                               onTap: () => _openGithub(context),
-                              trailingWidget: OutlinedButton(
-                                key: const ValueKey('profile-github-copy'),
-                                onPressed: () => _copyGithubUrl(context),
-                                style: OutlinedButton.styleFrom(
-                                  foregroundColor: journal.ink,
-                                  side: BorderSide(
-                                    color: journal.ruleStrong,
-                                    width: 0.8,
+                              trailingWidget: JournalPressableScale(
+                                pressScale: 0.92,
+                                child: IconButton(
+                                  key: const ValueKey('profile-github-copy'),
+                                  tooltip: '复制仓库链接',
+                                  constraints: const BoxConstraints.tightFor(
+                                    width: 48,
+                                    height: 48,
                                   ),
-                                  tapTargetSize: MaterialTapTargetSize.padded,
-                                  minimumSize: const Size(0, 34),
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 10,
-                                    vertical: 6,
-                                  ),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(10),
-                                  ),
-                                ),
-                                child: Text(
-                                  '复制链接',
-                                  style: journal.pillLabel.copyWith(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w500,
-                                    color: journal.ink,
+                                  padding: EdgeInsets.zero,
+                                  visualDensity: VisualDensity.standard,
+                                  onPressed: () {
+                                    InteractionFeedback.trigger(store.display);
+                                    unawaited(_copyGithubUrl(context));
+                                  },
+                                  icon: Icon(
+                                    Icons.copy_rounded,
+                                    size: 18,
+                                    color: journal.muted,
                                   ),
                                 ),
                               ),

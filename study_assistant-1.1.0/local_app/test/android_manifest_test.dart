@@ -35,16 +35,20 @@ void main() {
   );
 
   test('local notifications prefer exact alarm scheduling', () {
-    final service = File(
-      'lib/src/services/local_notification_service.dart',
-    ).readAsStringSync();
-
-    expect(service, isNot(contains('requestExactAlarmsPermission')));
+    final service = File('lib/src/services/local_notification_service.dart');
+    final library = service.readAsStringSync();
+    final parts = RegExp(r"^part '([^']+)';", multiLine: true)
+        .allMatches(library)
+        .map((m) => File.fromUri(service.uri.resolve(m[1]!)).readAsStringSync())
+        .toList();
+    expect([library, ...parts],
+        everyElement(isNot(contains('requestExactAlarmsPermission'))));
     final settings = File(
       'lib/src/services/permission_settings_service.dart',
     ).readAsStringSync();
     expect(settings, contains('openExactAlarmSettings'));
-    expect(service, contains('AndroidScheduleMode.exactAllowWhileIdle'));
+    expect(
+        parts.join('\n'), contains('AndroidScheduleMode.exactAllowWhileIdle'));
   });
 
   test('Android host exposes reminder permission settings actions', () {

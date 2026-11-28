@@ -564,18 +564,21 @@ void main() {
   });
 
   test('Android notifications default to private lock screen visibility', () {
-    final service = File(
+    final main = File(
       'lib/src/services/local_notification_service.dart',
     ).readAsStringSync();
+    final channels = File(
+      'lib/src/services/local_notification_channels.dart',
+    ).readAsStringSync();
 
-    expect(service, contains('bool showDetails = false'));
-    expect(service, contains('NotificationVisibility.private'));
-    expect(service, contains('AndroidNotificationCategory.reminder'));
+    expect(main, contains('bool showDetails = false'));
+    expect(channels, contains('NotificationVisibility.private'));
+    expect(channels, contains('AndroidNotificationCategory.reminder'));
   });
 
   test('Darwin notifications are presented immediately', () {
     final service = File(
-      'lib/src/services/local_notification_service.dart',
+      'lib/src/services/local_notification_schedulers.dart',
     ).readAsStringSync();
 
     expect(service, contains('presentBanner: true'));
@@ -585,17 +588,21 @@ void main() {
 
   test('scheduled assignment notifications use cancellable payload prefix', () {
     final service = File(
-      'lib/src/services/local_notification_service.dart',
+      'lib/src/services/local_notification_schedulers.dart',
+    ).readAsStringSync();
+    final transactions = File(
+      'lib/src/services/local_notification_transactions.dart',
     ).readAsStringSync();
 
     expect(service, contains("'a:studyassistant:///assignments/"));
     expect(service, contains("payload?.startsWith('a:')"));
-    expect(service, contains('_isPrivatePayload(item.payload)'));
+    expect(transactions,
+        contains('NotificationSchedulePolicy.isPrivatePayload(item.payload)'));
   });
 
   test('notification taps are wired to route payloads', () {
     final service = File(
-      'lib/src/services/local_notification_service.dart',
+      'lib/src/services/local_notification_schedulers.dart',
     ).readAsStringSync();
 
     expect(service, contains('onDidReceiveNotificationResponse'));

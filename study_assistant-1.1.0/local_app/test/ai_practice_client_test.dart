@@ -4,6 +4,8 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:study_assistant_mobile/src/local/chaoxing_local_client.dart';
+import 'package:study_assistant_mobile/src/local/local_assignment_repository.dart';
+import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/models/sync_report.dart';
 import 'package:study_assistant_mobile/src/services/assignment_query.dart';
 import 'package:study_assistant_mobile/src/services/assignment_web_link.dart';
@@ -19,9 +21,11 @@ const studentUrl =
 
 class AiFixture {
   bool mixed = false;
+  final extraActivities = <Map<String, Object>>[];
   int personalHttp = 200;
   final legacy = ClassroomFixture();
   bool completed = false, wrongUser = false, failPersonal = false;
+  bool verifyClassroomDetail = false;
   bool wrongPerson = false, wrongRelation = false, missingEntry = false;
   final paths = <String>[];
   Completer<void>? gate;
@@ -57,6 +61,7 @@ class AiFixture {
             'result': 1,
             'data': {
               'activeList': [
+                ...extraActivities,
                 if (mixed) ...[
                   {'id': '35', 'activeType': 35, 'nameOne': '个人任务'},
                   {'id': '42', 'activeType': 42, 'nameOne': '随堂练习'}
@@ -111,6 +116,12 @@ class AiFixture {
             }
           };
         default:
+          if (verifyClassroomDetail &&
+              o.uri.path == '/v2/apis/taskStu/getActiveInfoForMe') {
+            status = 202;
+            body = {'status': false, 'code': 9010};
+            break;
+          }
           if (mixed) {
             h.resolve(await legacy.dio.fetch(o));
             return;
@@ -126,6 +137,101 @@ class AiFixture {
 }
 
 void main() {
+  for (final type in [35, 42, 77]) {
+    test('type $type malformed list row leaves its valid sibling readable',
+        () async {
+      final f = AiFixture()
+        ..mixed = true
+        ..extraActivities.addAll([
+          {'id': '100', 'activeType': type},
+          {'activeType': type, 'nameOne': '身份缺失'},
+          {'id': '101', 'activeType': type, 'nameOne': '缺少匹配详情'},
+        ]);
+      final c = ChaoxingLocalClient(enableExams: false, dio: f.dio);
+      final rows = await c.fetchAssignments();
+      for (final siblingType in [35, 42, 77]) {
+        final task = rows.singleWhere((a) => a.activityId == '$siblingType');
+        expect(task.status, 'pending');
+        final source = c.sourceResults
+            .singleWhere((s) => s.source == 'classroomActivity:$siblingType');
+        expect(
+            source.phase,
+            siblingType == type
+                ? SyncSourcePhase.partial
+                : SyncSourcePhase.success);
+      }
+      final unnamed = rows.singleWhere((a) => a.activityId == '100');
+      expect(unnamed.status, 'unknown');
+      expect(unnamed.deadlineTrusted, isFalse);
+      expect(rows.singleWhere((a) => a.activityId == '101').status, 'unknown');
+      expect(
+          c.sourceResults.singleWhere((s) => s.source == 'groupHistory').phase,
+          SyncSourcePhase.notEnabled);
+    });
+
+    test('type $type missing title preserves the archived cached observation',
+        () async {
+      final fixture = AiFixture()
+        ..mixed = true
+        ..extraActivities.add({'id': '100', 'activeType': type});
+      final old = Assignment(
+        id: 'cx:activity:7:11:100',
+        source: AssignmentSource.classroomActivity,
+        activityType: type,
+        courseName: '合成课程',
+        title: '历史活动',
+        deadlineAt: DateTime.utc(2026, 7, 1),
+        deadlineTrusted: true,
+        requirementsText: '',
+        status: 'pending',
+        lastSyncedAt: DateTime.utc(2026, 7, 1),
+      );
+      final client = ChaoxingLocalClient(enableExams: false, dio: fixture.dio)
+        ..previousAssignments = {old.id: old};
+      final rows = await client.fetchAssignments();
+      expect(
+          rows.singleWhere((a) => a.activityId == '$type').status, 'pending');
+      final merged = LocalAssignmentRepository.mergeAssignments([old], rows);
+      final cached = merged.singleWhere((a) => a.activityId == '100');
+      expect(cached.title, old.title);
+      expect(cached.deadlineTrusted, isTrue);
+      expect(
+          AssignmentQuery.isArchivedPastTerm(
+              cached, DateTime.utc(2026, 11, 28)),
+          isTrue);
+      expect(
+          client.sourceResults
+              .singleWhere((s) => s.source == 'classroomActivity:$type')
+              .phase,
+          SyncSourcePhase.partial);
+    });
+  }
+
+  test('9010 in a classroom detail keeps the remaining observations untouched',
+      () async {
+    final f = AiFixture()
+      ..mixed = true
+      ..verifyClassroomDetail = true;
+    final client = ChaoxingLocalClient(dio: f.dio);
+    final rows = await client.fetchAssignmentsWithOptions(
+        collectCourseNotices: true, enableTaskEngineProbe: true);
+    expect(rows.map((a) => a.activityType), everyElement(isNull));
+    expect(f.paths, isNot(contains('/v2/apis/quiz/quizDetail2')));
+    expect(f.paths, isNot(contains(studentPath)));
+    expect(f.paths, isNot(contains('/phone/moocAnalysis/examList')));
+    for (final source in [
+      'classroomActivity:35',
+      'classroomActivity:42',
+      'classroomActivity:77',
+      'exam'
+    ]) {
+      final paused =
+          client.sourceResults.singleWhere((s) => s.source == source);
+      expect(paused.phase, SyncSourcePhase.failed);
+      expect(paused.reasonCodes, contains('verificationPaused'));
+    }
+  });
+
   for (final code in [200, 429]) {
     test('AI personal failure $code preserves formal, task and quiz sources',
         () async {

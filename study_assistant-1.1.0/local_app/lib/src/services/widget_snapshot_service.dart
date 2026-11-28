@@ -200,20 +200,20 @@ class WidgetSnapshotService {
   }
 
   String _remainingText(DateTime deadlineAt, DateTime now) {
-    final minutes = (deadlineAt.difference(now).inMilliseconds /
-            Duration.millisecondsPerMinute)
-        .ceil();
+    final remaining = deadlineAt.difference(now);
+    final minutes =
+        (remaining.inMilliseconds / Duration.millisecondsPerMinute).ceil();
     if (minutes <= 0) {
       return '已截止';
     }
     if (minutes < 60) {
       return '$minutes分钟';
     }
-    final hours = (minutes / 60).ceil();
-    if (hours < 24) {
-      return '$hours小时';
+    if (remaining.inHours < 24) {
+      return '${(minutes / 60).ceil()}小时';
     }
-    return '${(hours / 24).ceil()}天';
+    final days = DisplayPreferences.beijingDayDiff(deadlineAt, now);
+    return '${days < 1 ? 1 : days}天';
   }
 
   String _urgencyLevel(DateTime? deadlineAt, DateTime now) {

@@ -20,6 +20,23 @@ List<Assignment> _parseWorkHtmlIsolateEntry(
       now: DateTime.fromMillisecondsSinceEpoch(parsedAtMs),
     );
 
+List<Assignment>? _parseSignedWorkListIsolateEntry(
+  String html,
+  String courseId,
+  String clazzId,
+  String courseName,
+  Uri baseUri,
+  DateTime now,
+) =>
+    ChaoxingAssignmentParser.parseSignedWorkList(
+      html,
+      courseId: courseId,
+      clazzId: clazzId,
+      courseName: courseName,
+      baseUri: baseUri,
+      now: now,
+    );
+
 class DeadlineEvidence {
   const DeadlineEvidence(
       {this.deadlineAt,
@@ -455,6 +472,35 @@ class ChaoxingAssignmentParser {
 
   // Work list and answer-period formats adapted from xuexitong-cli.
   // Copyright (c) 2026 Wu Jiale, MIT (references/xuexitong-cli/LICENSE).
+  static Future<List<Assignment>?> parseSignedWorkListAsync(
+    String html, {
+    required String courseId,
+    required String clazzId,
+    required String courseName,
+    required Uri baseUri,
+    DateTime? now,
+  }) {
+    final parsedAt = now ?? DateTime.now();
+    if (html.length <= isolateParseThreshold || _isFakeAsyncWidgetTestZone()) {
+      return Future.value(parseSignedWorkList(
+        html,
+        courseId: courseId,
+        clazzId: clazzId,
+        courseName: courseName,
+        baseUri: baseUri,
+        now: parsedAt,
+      ));
+    }
+    return Isolate.run(() => _parseSignedWorkListIsolateEntry(
+          html,
+          courseId,
+          clazzId,
+          courseName,
+          baseUri,
+          parsedAt,
+        ));
+  }
+
   static List<Assignment>? parseSignedWorkList(String html,
       {required String courseId,
       required String clazzId,

@@ -15,11 +15,13 @@ import android.util.SizeF
 import android.view.View
 import android.widget.RemoteViews
 import java.time.DateTimeException
+import java.time.Instant
 import java.time.LocalDateTime
 import java.time.OffsetDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.DateTimeParseException
+import java.time.temporal.ChronoUnit
 import kotlin.math.ceil
 import org.json.JSONArray
 import org.json.JSONException
@@ -456,6 +458,9 @@ internal object AssignmentWidgetLayoutPolicy {
 }
 
 internal object AssignmentWidgetTimeText {
+    private const val MILLIS_PER_DAY = 86_400_000L
+    private val beijing = ZoneId.of("Asia/Shanghai")
+
     fun remainingText(
         anchorAtMillis: Long?,
         eventKind: String,
@@ -463,17 +468,19 @@ internal object AssignmentWidgetTimeText {
         fallback: String,
     ): String {
         if (anchorAtMillis == null) return fallback
-        val minutes = ceil((anchorAtMillis - nowMillis) / 60000.0).toLong()
-        if (eventKind == "examStart") {
-            if (minutes <= 0) return "已开考"
-            return "距开考 ${remainingLabel(minutes)}"
+        val examStart = eventKind == "examStart"
+        val remainingMillis = anchorAtMillis - nowMillis
+        if (remainingMillis <= 0) return if (examStart) "已开考" else "已截止"
+        val minutes = ceil(remainingMillis / 60000.0).toLong()
+        val label = when {
+            minutes < 60 -> "${minutes}分钟"
+            remainingMillis < MILLIS_PER_DAY -> "${ceil(minutes / 60.0).toLong()}小时"
+            else -> {
+                val start = Instant.ofEpochMilli(nowMillis).atZone(beijing).toLocalDate()
+                val end = Instant.ofEpochMilli(anchorAtMillis).atZone(beijing).toLocalDate()
+                "${ChronoUnit.DAYS.between(start, end).coerceAtLeast(1)}天"
+            }
         }
-        return if (minutes <= 0) "已截止" else remainingLabel(minutes)
-    }
-
-    private fun remainingLabel(minutes: Long): String = when {
-        minutes < 60 -> "${minutes}分钟"
-        minutes < 1440 -> "${ceil(minutes / 60.0).toLong()}小时"
-        else -> "${ceil(minutes / 1440.0).toLong()}天"
+        return if (examStart) "距开考 $label" else label
     }
 }

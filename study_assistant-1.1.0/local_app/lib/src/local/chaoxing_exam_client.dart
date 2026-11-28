@@ -434,52 +434,57 @@ extension _ExamCollection on ChaoxingLocalClient {
           pageFeedsCourseNotices =
               collectCourseNotices && !courseNoticeWindowDone && page < 5;
           checkWindow();
+          ParsedNoticePage? noticePage;
           final response = await _safeGet<dynamic>(
-              'https://notice.chaoxing.com/pc/notice/getNoticeList',
-              method: 'POST',
-              requestKind: '考试通知',
-              form: {
-                'type': '0',
-                'notice_type': '0',
-                'lastValue': cursor,
-                'sort': '0',
-                'folderUUID': '',
-                'kw': '',
-                'startTime': '',
-                'endTime': '',
-                'gKw': '',
-                'gName': '',
-                'year': '',
-                'tag': '',
-                'fidsCode': '',
-                'filterSenderPuids': '',
-                'filterTags': ''
-              },
-              verificationProbe:
-                  Uri.parse('https://notice.chaoxing.com/pc/notice/myNotice'));
-          if (!current()) return const [];
-          final rawNoticeData = response?.data;
-          final rawNoticeLen =
-              rawNoticeData is String ? rawNoticeData.length : 0;
-          final parsed = await ChaoxingExamParser.noticesAsync(
-            rawNoticeData,
-            rawLengthHint: rawNoticeLen,
+            'https://notice.chaoxing.com/pc/notice/getNoticeList',
+            method: 'POST',
+            requestKind: '考试通知',
+            form: {
+              'type': '0',
+              'notice_type': '0',
+              'lastValue': cursor,
+              'sort': '0',
+              'folderUUID': '',
+              'kw': '',
+              'startTime': '',
+              'endTime': '',
+              'gKw': '',
+              'gName': '',
+              'year': '',
+              'tag': '',
+              'fidsCode': '',
+              'filterSenderPuids': '',
+              'filterTags': '',
+            },
+            classify: (response, uri) async {
+              final result =
+                  await ChaoxingExamParser.evaluateNoticeResponseAsync(
+                data: response.data,
+                uri: uri,
+                status: response.statusCode ?? 0,
+                location: response.headers.value('location') ?? '',
+                retryAfterRaw: response.headers['retry-after']?.singleOrNull,
+                courses:
+                    pageFeedsCourseNotices ? (noticeCatalog ?? refs) : null,
+              );
+              noticePage = result.page;
+              return result.decision;
+            },
+            verificationProbe:
+                Uri.parse('https://notice.chaoxing.com/pc/notice/myNotice'),
           );
-          if (!current()) return const [];
+          if (!current() || response == null) return const [];
+          final parsed = noticePage;
           if (parsed == null) throw StateError('examNoticeSchema');
           for (final a in parsed.rows) {
             if (ids.add(a.id)) notices.add(a);
           }
-          if (collectCourseNotices && page < 5) {
-            final decodedPayload = _decodeJsonPayload(rawNoticeData);
-            final parsedCourseNotices = ChaoxingNoticeParser.parsePage(
-              decodedPayload,
-              courses: noticeCatalog ?? refs,
-            );
-            if (parsedCourseNotices == null) {
+          if (pageFeedsCourseNotices) {
+            final courseRows = parsed.courseRows;
+            if (courseRows == null) {
               courseNoticeFailed = true;
             } else {
-              for (final item in parsedCourseNotices.rows) {
+              for (final item in courseRows) {
                 if (courseNoticeIds.add(item.id)) courseNotices.add(item);
               }
             }
@@ -662,7 +667,7 @@ extension _ExamCollection on ChaoxingLocalClient {
           circuitKind: supplementEntry ? '课程考试补充' : null,
           requestKind: isCoursePage
               ? '课程入口'
-              : ChaoxingLocalClient._requestKind(uri.path));
+              : ChaoxingRequestPolicy.requestKindForPath(uri.path));
       if (generation != _sessionGeneration) return null;
       if (response == null || (response.statusCode ?? 0) < 300) return response;
       final location = response.headers.value('location');

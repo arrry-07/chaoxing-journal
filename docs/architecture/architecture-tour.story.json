@@ -50,7 +50,7 @@
         "title": "main.dart · 会话恢复挂载与 backgroundMain",
         "note": "前台先 restoreSession() 再 runApp；后台无界面入口复用 AssignmentStore",
         "path": "study_assistant-1.1.0/local_app/lib/main.dart",
-        "revision": "d8b7f47c4dcb3ef44c7d719d6c76d7bef4fa9a97",
+        "revision": "13d2a94f92a0633ac346c35867c93e3611cb2421",
         "lines": [86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104],
         "highlight": [86, 98, 99, 102, 103]
       }
@@ -63,8 +63,14 @@
         "from": "arch",
         "duration": 0.9,
         "shared": [
-          { "id": "chaoxing_remote", "targetId": "chaoxing_api" },
-          { "id": "assignment_store", "targetId": "time_trust_query" }
+          {
+            "id": "chaoxing_remote",
+            "targetId": "chaoxing_api"
+          },
+          {
+            "id": "assignment_store",
+            "targetId": "time_trust_query"
+          }
         ]
       },
       "title": "超星多源采集与时间信任 / FB-005 隔离",
@@ -82,7 +88,7 @@
         "title": "coursework_deadline.dart · 考试范围隔离与官方优先",
         "note": "仅展示的时间范围归入 unconfirmed，官方可信截止自动接管",
         "path": "study_assistant-1.1.0/local_app/lib/src/services/coursework_deadline.dart",
-        "revision": "d8b7f47c4dcb3ef44c7d719d6c76d7bef4fa9a97",
+        "revision": "13d2a94f92a0633ac346c35867c93e3611cb2421",
         "lines": [145, 146, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 157, 158, 159, 160, 161],
         "highlight": [145, 146, 154, 159, 160]
       }
@@ -106,7 +112,7 @@
         "title": "background_reminder_gateway.dart · 代次与版本契约",
         "note": "sessionEpoch、pendingUpdate 与 mutationVersion 杜绝前后台互相覆盖",
         "path": "study_assistant-1.1.0/local_app/lib/src/services/background_reminder_gateway.dart",
-        "revision": "d8b7f47c4dcb3ef44c7d719d6c76d7bef4fa9a97",
+        "revision": "13d2a94f92a0633ac346c35867c93e3611cb2421",
         "lines": [90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104],
         "highlight": [93, 99, 100]
       }
@@ -119,7 +125,10 @@
         "from": "flow",
         "duration": 0.9,
         "shared": [
-          { "id": "sqlite_reminder_db", "targetId": "accounts" }
+          {
+            "id": "sqlite_reminder_db",
+            "targetId": "accounts"
+          }
         ]
       },
       "title": "SQLite v10 物理表锁定账号代次与 v3 渠道",
@@ -133,7 +142,7 @@
         "title": "ReminderDatabase.kt · accounts 表核心门禁列 (SQLite v10)",
         "note": "pending_update / mutation_version / allow_urgent_night_breakthrough / deadline_channel_id",
         "path": "study_assistant-1.1.0/local_app/android/app/src/main/kotlin/com/example/studyassistant/ReminderDatabase.kt",
-        "revision": "d8b7f47c4dcb3ef44c7d719d6c76d7bef4fa9a97",
+        "revision": "13d2a94f92a0633ac346c35867c93e3611cb2421",
         "lines": [212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 228, 229],
         "highlight": [212, 213, 226, 227]
       }
@@ -146,7 +155,10 @@
         "from": "erd",
         "duration": 0.9,
         "shared": [
-          { "id": "events", "targetId": "native_alarm_pub" }
+          {
+            "id": "events",
+            "targetId": "native_alarm_pub"
+          }
         ]
       },
       "title": "原生闹钟夜间静音窗与二次校验投递",
@@ -164,7 +176,7 @@
         "title": "AssignmentNotificationPublisher.kt · 到期复核与静音策略",
         "note": "先校验 deadlineSource 与夜间静音窗，再决定投递、拦截或顺延",
         "path": "study_assistant-1.1.0/local_app/android/app/src/main/kotlin/com/example/studyassistant/AssignmentNotificationPublisher.kt",
-        "revision": "d8b7f47c4dcb3ef44c7d719d6c76d7bef4fa9a97",
+        "revision": "13d2a94f92a0633ac346c35867c93e3611cb2421",
         "lines": [211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 228],
         "highlight": [211, 215, 216, 220, 221]
       }

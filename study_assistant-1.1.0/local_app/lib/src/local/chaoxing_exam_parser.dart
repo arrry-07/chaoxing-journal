@@ -3,8 +3,11 @@ import 'dart:convert';
 import 'dart:isolate';
 import 'package:crypto/crypto.dart';
 import '../models/assignment.dart';
+import '../models/course_notice.dart';
 import 'chaoxing_api_parser.dart';
+import 'chaoxing_notice_parser.dart';
 import 'chaoxing_param_helper.dart';
+import 'chaoxing_request_policy.dart';
 
 const int _kExamIsolateThreshold = 32 * 1024;
 
@@ -50,14 +53,41 @@ const int _kExamIsolateThreshold = 32 * 1024;
           now: DateTime.fromMillisecondsSinceEpoch(nowMs),
         );
 
-({List<Assignment> rows, String? cursor})? _parseExamNoticesIsolateEntry(
+typedef ParsedNoticePage = ({
+  List<Assignment> rows,
+  String? cursor,
+  List<CourseNotice>? courseRows,
+});
+
+ParsedNoticePage? _parseNoticePage(
   dynamic payload,
-  int nowMs,
-) =>
-    ChaoxingExamParser.notices(
-      payload,
-      now: DateTime.fromMillisecondsSinceEpoch(nowMs),
-    );
+  List<ChaoxingCourseRef>? courses,
+  DateTime now,
+) {
+  return _parseDecodedNoticePage(
+      ChaoxingExamParser._decodeNotices(payload), courses, now);
+}
+
+ParsedNoticePage? _parseDecodedNoticePage(
+  Object? decoded,
+  List<ChaoxingCourseRef>? courses,
+  DateTime now,
+) {
+  final exam = ChaoxingExamParser._parseExamNotices(decoded, now: now);
+  if (exam == null) return null;
+
+  List<CourseNotice>? courseRows;
+  if (courses != null) {
+    try {
+      courseRows =
+          ChaoxingNoticeParser.parsePage(decoded, courses: courses, now: now)
+              ?.rows;
+    } catch (_) {
+      // Course notices have a separate source status from exam notices.
+    }
+  }
+  return (rows: exam.rows, cursor: exam.cursor, courseRows: courseRows);
+}
 
 /// List-only parsing. Scores, paper links and question content are discarded.
 class ChaoxingExamParser {
@@ -248,18 +278,70 @@ class ChaoxingExamParser {
     dynamic payload, {
     DateTime? now,
     int? rawLengthHint,
+  }) async {
+    final page = await parseNoticePageBothAsync(
+      payload,
+      now: now,
+      rawLengthHint: rawLengthHint,
+    );
+    return page == null ? null : (rows: page.rows, cursor: page.cursor);
+  }
+
+  /// A null [courses] skips the course projection. If requested, null
+  /// courseRows means that projection failed independently of exam parsing.
+  static Future<ParsedNoticePage?> parseNoticePageBothAsync(
+    dynamic payload, {
+    List<ChaoxingCourseRef>? courses,
+    DateTime? now,
+    int? rawLengthHint,
   }) {
     final at = now ?? DateTime.now();
     final shouldIsolate = !_isFakeAsyncWidgetTestZone() &&
         ((rawLengthHint ?? 0) > isolateParseThreshold ||
             (payload is String && payload.length > isolateParseThreshold));
     if (!shouldIsolate) {
-      return Future<({List<Assignment> rows, String? cursor})?>.value(
-        notices(payload, now: at),
+      return Future.value(_parseNoticePage(payload, courses, at));
+    }
+    return Isolate.run(() => _parseNoticePage(payload, courses, at));
+  }
+
+  /// Classify the response before trusting any notice rows. The classifier and
+  /// both projections share the decoded payload in the same isolate.
+  static Future<({ChaoxingResponseDecision decision, ParsedNoticePage? page})>
+      evaluateNoticeResponseAsync({
+    required Object? data,
+    required Uri uri,
+    required int status,
+    required String location,
+    required String? retryAfterRaw,
+    required List<ChaoxingCourseRef>? courses,
+  }) {
+    final now = DateTime.now();
+    ({ChaoxingResponseDecision decision, ParsedNoticePage? page}) evaluate() {
+      final payload = ChaoxingRequestPolicy.decodeJsonPayload(data);
+      final decision = ChaoxingRequestPolicy.evaluateDecodedResponse(
+        status: status,
+        uri: uri,
+        kind: '考试通知',
+        body: data is String ? data : '',
+        payload: payload,
+        location: location,
+        retryAfterRaw: retryAfterRaw,
+        now: now,
+      );
+      return (
+        decision: decision,
+        page: !decision.authExpired && decision.issue == null
+            ? _parseDecodedNoticePage(payload, courses, now)
+            : null,
       );
     }
-    final nowMs = at.millisecondsSinceEpoch;
-    return Isolate.run(() => _parseExamNoticesIsolateEntry(payload, nowMs));
+
+    return data is String &&
+            data.length > isolateParseThreshold &&
+            !_isFakeAsyncWidgetTestZone()
+        ? Isolate.run(evaluate)
+        : Future.value(evaluate());
   }
 
   static String entities(String raw) => raw
@@ -782,16 +864,21 @@ class ChaoxingExamParser {
   }
 
   static ({List<Assignment> rows, String? cursor})? notices(dynamic payload,
+          {DateTime? now}) =>
+      _parseExamNotices(_decodeNotices(payload), now: now);
+
+  static dynamic _decodeNotices(dynamic payload) {
+    if (payload is! String) return payload;
+    try {
+      return jsonDecode(payload);
+    } on FormatException {
+      return null;
+    }
+  }
+
+  static ({List<Assignment> rows, String? cursor})? _parseExamNotices(
+      dynamic decoded,
       {DateTime? now}) {
-    final decoded = payload is String
-        ? () {
-            try {
-              return jsonDecode(payload);
-            } catch (_) {
-              return null;
-            }
-          }()
-        : payload;
     if (decoded is! Map || decoded['status'] != true) return null;
     final box = decoded['notices'];
     if (box == null) return (rows: <Assignment>[], cursor: null);

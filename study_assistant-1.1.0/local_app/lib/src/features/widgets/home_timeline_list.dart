@@ -632,7 +632,7 @@ HomeViewData prepareHomeViewData({
   return (mood: mood, snapshot: snapshot);
 }
 
-class HomeTimelineList extends StatelessWidget {
+class HomeTimelineList extends StatefulWidget {
   const HomeTimelineList({
     super.key,
     required this.scrollController,
@@ -708,7 +708,70 @@ class HomeTimelineList extends StatelessWidget {
   }) onOpenContextMenu;
 
   @override
+  State<HomeTimelineList> createState() => _HomeTimelineListState();
+}
+
+class _HomeTimelineListState extends State<HomeTimelineList> {
+  List<String>? _optimisticPinnedKeys;
+  int? _optimisticEpoch;
+  int _optimisticGeneration = 0;
+
+  void _clearOptimisticPins() {
+    _optimisticPinnedKeys = null;
+    _optimisticEpoch = null;
+  }
+
+  void _reconcileOptimisticPins() {
+    if (_optimisticPinnedKeys == null) return;
+    if (widget.store.accountEpoch != _optimisticEpoch) {
+      _clearOptimisticPins();
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant HomeTimelineList oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.store != oldWidget.store) {
+      _clearOptimisticPins();
+    } else {
+      _reconcileOptimisticPins();
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    _reconcileOptimisticPins();
+    final store = widget.store;
+    final now = widget.now;
+    final recoveryQueryParameter = widget.recoveryQueryParameter;
+    final recoveryQueryValue = widget.recoveryQueryValue;
+    final headerBlock = widget.headerBlock;
+    final topPadding = widget.topPadding;
+    final catalogAssignments = widget.catalogAssignments;
+    final displayAssignments = widget.displayAssignments;
+    final displayIndex = widget.displayIndex;
+    final coursework = widget.coursework;
+    final courseOptions = widget.courseOptions;
+    final sortedTimelineItems = widget.sortedTimelineItems;
+    final plannedIds = widget.plannedIds;
+    final openingAssignments = widget.openingAssignments;
+    final pinPulseByKey = widget.pinPulseByKey;
+    final completingPinnedKeyById = widget.completingPinnedKeyById;
+    final completingPinnedSnapshot = widget.completingPinnedSnapshot;
+    final manualActions = widget.manualActions;
+    final courseKey = widget.courseKey;
+    final typeFilter = widget.typeFilter;
+    final sortOrder = widget.sortOrder;
+    final filtersActive = widget.filtersActive;
+    final selectedCourseIdle = widget.selectedCourseIdle;
+    final busy = widget.busy;
+    final onClearCourseFilter = widget.onClearCourseFilter;
+    final onClearAllFilters = widget.onClearAllFilters;
+    final onOpenAssignment = widget.onOpenAssignment;
+    final onToggleTodayPlan = widget.onToggleTodayPlan;
+    final onTogglePin = widget.onTogglePin;
+    final onOpenContextMenu = widget.onOpenContextMenu;
+
     final journal = Journal.of(context);
     final isRecovery = recoveryQueryValue != null;
     final compactDensity = store.display.compact;
@@ -980,7 +1043,7 @@ class HomeTimelineList extends StatelessWidget {
           );
 
     return ListView.builder(
-      controller: scrollController,
+      controller: widget.scrollController,
       physics: const BouncingScrollPhysics(
         parent: AlwaysScrollableScrollPhysics(),
       ),
@@ -999,9 +1062,27 @@ class HomeTimelineList extends StatelessWidget {
         if (timelineSections.isEmpty) return buildEmptyState();
         final sectionIndex = index - 1;
         final section = timelineSections[sectionIndex];
+        final List<HomeTimelineItem> sectionItems;
+        if (section.pinned && _optimisticPinnedKeys != null) {
+          final byKey = <String, HomeTimelineItem>{
+            for (final item in section.items) item.pinKey: item,
+          };
+          final reordered = [
+            for (final key in _optimisticPinnedKeys!)
+              if (!completingPinnedKeys.contains(key))
+                if (byKey.remove(key) case final item?) item,
+          ];
+          var cursor = 0;
+          sectionItems = [
+            for (final item in section.items)
+              byKey.containsKey(item.pinKey) ? item : reordered[cursor++],
+          ];
+        } else {
+          sectionItems = section.items;
+        }
         final isEmphasizedSection = section.pinned || section.badge == '今天';
         final useReorderablePinned = section.pinned &&
-            (section.items.length >= 2 ||
+            (sectionItems.length >= 2 ||
                 (completingPinnedKeys.isNotEmpty &&
                     (completingPinnedSnapshot?.keys.length ?? 0) >= 2));
         final groupCard = useReorderablePinned
@@ -1011,13 +1092,15 @@ class HomeTimelineList extends StatelessWidget {
                   Builder(
                     builder: (context) {
                       final visualKeys = [
-                        for (final item in section.items) item.pinKey,
+                        for (final item in sectionItems) item.pinKey,
                       ];
                       final activePinnedKeys = [
                         for (final key in visualKeys)
                           if (!completingPinnedKeys.contains(key)) key,
                       ];
+                      final accountEpoch = store.accountEpoch;
                       return ReorderableListView.builder(
+                        key: ValueKey((store, accountEpoch)),
                         shrinkWrap: true,
                         primary: false,
                         physics: const NeverScrollableScrollPhysics(),
@@ -1033,7 +1116,11 @@ class HomeTimelineList extends StatelessWidget {
                         onReorderStart: (_) =>
                             JournalMotion.selectionTick(store.display),
                         onReorderItem: (oldIndex, newIndex) {
-                          if (oldIndex == newIndex) return;
+                          if (oldIndex == newIndex ||
+                              widget.store != store ||
+                              store.accountEpoch != accountEpoch) {
+                            return;
+                          }
                           final nextVisualKeys = List<String>.of(visualKeys);
                           final moved = nextVisualKeys.removeAt(oldIndex);
                           nextVisualKeys.insert(newIndex, moved);
@@ -1041,35 +1128,100 @@ class HomeTimelineList extends StatelessWidget {
                             for (final key in nextVisualKeys)
                               if (!completingPinnedKeys.contains(key)) key,
                           ];
-                          if (nextActiveKeys.length >= 2) {
-                            unawaited(store.reorderPinned(nextActiveKeys));
-                          }
+                          if (nextActiveKeys.length < 2) return;
+                          final currentPins = _optimisticPinnedKeys == null
+                              ? store.pinnedAssignments
+                              : PinnedAssignments(keys: _optimisticPinnedKeys!);
+                          final nextPins = currentPins.reorderVisible(
+                            nextActiveKeys,
+                            nextActiveKeys.toSet(),
+                          );
+                          if (nextPins == null) return;
+                          final opGen = ++_optimisticGeneration;
+                          setState(() {
+                            _optimisticPinnedKeys = nextPins.keys;
+                            _optimisticEpoch = accountEpoch;
+                          });
+                          unawaited(
+                            store.reorderPinned(nextActiveKeys).then(
+                              (_) {
+                                if (!mounted ||
+                                    opGen != _optimisticGeneration) {
+                                  return;
+                                }
+                                setState(_clearOptimisticPins);
+                              },
+                              onError: (_) {
+                                if (!mounted ||
+                                    opGen != _optimisticGeneration) {
+                                  return;
+                                }
+                                setState(_clearOptimisticPins);
+                              },
+                            ),
+                          );
                         },
-                        itemCount: section.items.length,
+                        itemCount: sectionItems.length,
                         itemBuilder: (context, itemIndex) {
-                          final item = section.items[itemIndex];
+                          final item = sectionItems[itemIndex];
                           final isCompletingItem =
                               completingPinnedKeys.contains(item.pinKey);
-                          final dragHandle =
-                              isCompletingItem || activePinnedKeys.length < 2
-                                  ? null
-                                  : ReorderableDragStartListener(
-                                      index: itemIndex,
-                                      child: Tooltip(
-                                        message: '拖动调整置顶顺序',
-                                        child: SizedBox(
-                                          width: 34,
-                                          height: 48,
-                                          child: Center(
-                                            child: Icon(
-                                              Icons.drag_indicator_rounded,
-                                              size: 18,
-                                              color: journal.muted,
+                          final dragHandle = isCompletingItem ||
+                                  activePinnedKeys.length < 2
+                              ? null
+                              : Semantics(
+                                  container: true,
+                                  label: '拖动调整置顶顺序',
+                                  hint: '上下拖动调整置顶卡片顺序',
+                                  excludeSemantics: true,
+                                  child: ReorderableDragStartListener(
+                                    key: ValueKey(
+                                      'pinned-drag-handle-${item.pinKey}',
+                                    ),
+                                    index: itemIndex,
+                                    child: Builder(
+                                      builder: (handleContext) => Listener(
+                                        behavior: HitTestBehavior.opaque,
+                                        onPointerDown: (event) {
+                                          JournalSwipeExclusionNotification(
+                                            pointer: event.pointer,
+                                            excluded: true,
+                                          ).dispatch(handleContext);
+                                        },
+                                        onPointerUp: (event) {
+                                          JournalSwipeExclusionNotification(
+                                            pointer: event.pointer,
+                                            excluded: false,
+                                          ).dispatch(handleContext);
+                                        },
+                                        onPointerCancel: (event) {
+                                          JournalSwipeExclusionNotification(
+                                            pointer: event.pointer,
+                                            excluded: false,
+                                          ).dispatch(handleContext);
+                                        },
+                                        child: MouseRegion(
+                                          cursor: SystemMouseCursors.grab,
+                                          opaque: true,
+                                          child: SizedBox(
+                                            width: 44,
+                                            height: 48,
+                                            child: ColoredBox(
+                                              color: Colors.transparent,
+                                              child: Center(
+                                                child: Icon(
+                                                  Icons.drag_indicator_rounded,
+                                                  size: 18,
+                                                  color: journal.muted,
+                                                ),
+                                              ),
                                             ),
                                           ),
                                         ),
                                       ),
-                                    );
+                                    ),
+                                  ),
+                                );
                           return Column(
                             key: ValueKey('pinned-reorder-${item.pinKey}'),
                             mainAxisSize: MainAxisSize.min,
@@ -1080,7 +1232,7 @@ class HomeTimelineList extends StatelessWidget {
                                 dragHandle: dragHandle,
                                 pinnedVisibleKeys: activePinnedKeys,
                               ),
-                              if (itemIndex < section.items.length - 1)
+                              if (itemIndex < sectionItems.length - 1)
                                 Padding(
                                   padding: const EdgeInsets.only(left: 70),
                                   child: Divider(
@@ -1101,7 +1253,7 @@ class HomeTimelineList extends StatelessWidget {
                 emphasized: isEmphasizedSection,
                 dividerIndent: 70.0,
                 children: [
-                  for (final item in section.items)
+                  for (final item in sectionItems)
                     timelineCard(item, pinned: section.pinned),
                 ],
               );

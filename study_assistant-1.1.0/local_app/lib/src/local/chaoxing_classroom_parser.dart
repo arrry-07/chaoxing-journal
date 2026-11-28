@@ -4,24 +4,64 @@ import '../models/assignment.dart';
 
 /// Read-only classroom metadata. Lifecycle status never proves submission.
 class ChaoxingClassroomParser {
-  static List<dynamic> readActivityList(dynamic payload) {
-    final data = responseData(payload);
-    final rows = data['activeList'];
-    if (rows is! List || rows.any((row) => row is! Map)) {
+  static const activityTypes = {35, 42, 77};
+
+  static ({
+    List<({Assignment seed, bool canHydrate})> entries,
+    Set<int> incompleteTypes,
+  }) readActivityList(
+    dynamic payload, {
+    required String courseId,
+    required String clazzId,
+    required String courseName,
+  }) {
+    final rows = responseData(payload)['activeList'];
+    if (rows is! List) {
       throw const FormatException('activityListSchema');
     }
-    final identities = <String>{};
-    for (final row in rows) {
+    final candidates = <({int type, String id, Map<String, dynamic> row})>[];
+    final incompleteTypes = <int>{};
+    final identities = <String>{}, duplicates = <String>{};
+    for (final value in rows) {
+      final row = _map(value);
       final type = _integer(row['activeType']);
-      if (type == null) throw const FormatException('activityTypeSchema');
-      if (const {35, 42, 77}.contains(type)) {
-        final id = _text(row['id'] ?? row['activeId']);
-        if (id == null || !identities.add(id)) {
-          throw const FormatException('activityIdentity');
-        }
+      if (type == null) {
+        incompleteTypes.addAll(activityTypes);
+        continue;
+      }
+      if (!activityTypes.contains(type)) continue;
+      final id = _text(row['id'] ?? row['activeId']);
+      if (id == null || id.contains(':')) {
+        incompleteTypes.add(type);
+        continue;
+      }
+      if (!identities.add(id)) duplicates.add(id);
+      candidates.add((type: type, id: id, row: row));
+    }
+    // A shared ID is ambiguous even when its candidates claim different types.
+    if (duplicates.isNotEmpty) incompleteTypes.addAll(activityTypes);
+    final entries = <({Assignment seed, bool canHydrate})>[];
+    for (final candidate in candidates) {
+      final (:type, :id, :row) = candidate;
+      if (duplicates.contains(id)) continue;
+      final title = _text(row['nameOne'] ?? row['name'] ?? row['title']);
+      try {
+        final seed = _activitySeed(
+          row,
+          id: id,
+          title: title ?? '课堂任务（名称待确认）',
+          courseId: courseId,
+          clazzId: clazzId,
+          courseName: courseName,
+          activityType: type,
+        );
+        if (title == null) incompleteTypes.add(type);
+        entries.add((seed: seed, canHydrate: title != null));
+      } on FormatException {
+        incompleteTypes.add(type);
       }
     }
-    return rows;
+    return (entries: entries, incompleteTypes: incompleteTypes);
   }
 
   static List<Assignment> parseActivities(List<dynamic> rows,
@@ -40,25 +80,45 @@ class ChaoxingClassroomParser {
       if (id == null || id.contains(':') || title == null || !seen.add(id)) {
         throw const FormatException('activityIdentity');
       }
-      final seed = Assignment(
-        id: 'cx:activity:$courseId:$clazzId:$id',
-        source: AssignmentSource.classroomActivity,
-        activityType: activityType,
-        availability: AssignmentAvailability.unknown,
-        courseName: courseName,
-        title: title,
-        deadlineAt: null,
-        deadlineTrusted: false,
-        requirementsText: '',
-        status: 'unknown',
-        lastSyncedAt: now ?? DateTime.now(),
-      );
-      checkIdentity(row, seed);
-      result.add(activityType == 77
-          ? ChaoxingAiPracticeParser.seedEntry(seed, row['content'])
-          : seed);
+      result.add(_activitySeed(row,
+          id: id,
+          title: title,
+          courseId: courseId,
+          clazzId: clazzId,
+          courseName: courseName,
+          activityType: activityType,
+          now: now));
     }
     return result;
+  }
+
+  static Assignment _activitySeed(
+    Map<String, dynamic> row, {
+    required String id,
+    required String title,
+    required String courseId,
+    required String clazzId,
+    required String courseName,
+    required int activityType,
+    DateTime? now,
+  }) {
+    final seed = Assignment(
+      id: 'cx:activity:$courseId:$clazzId:$id',
+      source: AssignmentSource.classroomActivity,
+      activityType: activityType,
+      availability: AssignmentAvailability.unknown,
+      courseName: courseName,
+      title: title,
+      deadlineAt: null,
+      deadlineTrusted: false,
+      requirementsText: '',
+      status: 'unknown',
+      lastSyncedAt: now ?? DateTime.now(),
+    );
+    checkIdentity(row, seed);
+    return activityType == 77
+        ? ChaoxingAiPracticeParser.seedEntry(seed, row['content'])
+        : seed;
   }
 
   static Map<String, dynamic> responseData(dynamic payload) {

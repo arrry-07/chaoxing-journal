@@ -28,7 +28,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -451,6 +451,7 @@ class HttpClient:
         path: str,
         *,
         file_path: Path,
+        already_uploaded: Callable[[], bool] | None = None,
     ) -> Any:
         curl = shutil.which("curl")
         if curl is None:
@@ -482,6 +483,12 @@ class HttpClient:
             url,
         ]
         for attempt in range(GITEE_UPLOAD_RETRIES + 1):
+            if (
+                attempt > 0
+                and already_uploaded is not None
+                and already_uploaded()
+            ):
+                return None
             try:
                 result = subprocess.run(
                     command,
@@ -535,6 +542,11 @@ class HttpClient:
                     raise SyncError(
                         "Gitee returned invalid JSON after upload."
                     ) from None
+            if status in (200, 201) and already_uploaded is not None:
+                # The server confirmed the POST before the response failed.
+                # Check the attachment without issuing another POST.
+                if already_uploaded():
+                    return None
             transient = status is None or status == 0 or status == 429 or status >= 500
             if transient and attempt < GITEE_UPLOAD_RETRIES:
                 time.sleep(GITEE_UPLOAD_RETRY_BACKOFF_SECONDS * (attempt + 1))
@@ -958,13 +970,34 @@ class GiteeReleaseClient:
             assets=(),
         )
 
-    def upload_apk(self, release: GiteeRelease, apk_path: Path) -> None:
+    def upload_apk(
+        self, release: GiteeRelease, apk_path: Path
+    ) -> GiteeRelease | None:
+        recovered: GiteeRelease | None = None
+
+        def already_uploaded() -> bool:
+            nonlocal recovered
+            current = self.find_release(release.tag)
+            if current is None:
+                return False
+            if current.release_id != release.release_id:
+                raise SyncError(
+                    f"Gitee release {release.tag} changed before upload retry."
+                )
+            if any(asset.get("name") == apk_path.name for asset in current.assets):
+                recovered = current
+            return recovered is not None
+
         value = self.client.gitee_upload(
             f"/repos/{self.repository}/releases/{release.release_id}/attach_files",
             file_path=apk_path,
+            already_uploaded=already_uploaded,
         )
+        if recovered is not None:
+            return recovered
         if not isinstance(value, (dict, list)):
             raise SyncError("Gitee did not return an upload result.")
+        return None
 
     def delete_release(self, release: GiteeRelease) -> None:
         self.client.gitee_json(
@@ -1431,9 +1464,9 @@ def verify_gitee_release(
                 f"Verified APK for {artifact.tag} is required before uploading to Gitee."
             )
         created = gitee.create_release(artifact)
-        gitee.upload_apk(created, apk_path)
+        recovered = gitee.upload_apk(created, apk_path)
         uploaded_now = True
-        refreshed = gitee.find_release(artifact.tag)
+        refreshed = recovered or gitee.find_release(artifact.tag)
         if refreshed is not None and any(
             isinstance(a.get("name"), str) and a["name"] == artifact.apk_name
             for a in refreshed.assets
@@ -1459,8 +1492,9 @@ def verify_gitee_release(
             raise SyncError(
                 f"Verified APK for {artifact.tag} is required before uploading to Gitee."
             )
-        gitee.upload_apk(release, apk_path)
-        refreshed = gitee.find_release(artifact.tag)
+        recovered = gitee.upload_apk(release, apk_path)
+        uploaded_now = True
+        refreshed = recovered or gitee.find_release(artifact.tag)
         if refreshed is not None and any(
             isinstance(a.get("name"), str) and a["name"] == artifact.apk_name
             for a in refreshed.assets
@@ -1481,7 +1515,7 @@ def verify_gitee_release(
         ]
     if len(apk_assets) != 1 or apk_assets[0].get("name") != artifact.apk_name:
         raise SyncError("Gitee release APK identity did not match.")
-    if full_download:
+    if full_download or uploaded_now:
         _download_public_apk(client, artifact, work_dir=work_dir)
     return release
 

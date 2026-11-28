@@ -13,7 +13,7 @@ import 'package:study_assistant_mobile/src/services/secure_session_store.dart';
 import 'package:study_assistant_mobile/src/services/widget_snapshot_service.dart';
 
 class _Store extends AssignmentStore {
-  _Store()
+  _Store({super.clock})
       : super(
             sessionStore: SecureSessionStore(),
             notificationService: LocalNotificationService(),
@@ -85,6 +85,9 @@ Future<void> tapSheetOption(WidgetTester tester, String label,
   await tester.pumpAndSettle();
 }
 
+// Keep these filter interactions outside Clawd's scheduled greeting windows.
+DateTime _filterTestClock() => DateTime(2030, 1, 15, 14);
+
 void main() {
   testWidgets(
       'expanded cards share exact list bounds and keep numeric course titles',
@@ -134,8 +137,8 @@ void main() {
   });
   testWidgets('home supports search deadline filters and visible freshness',
       (t) async {
-    final now = DateTime.now();
-    final s = _Store()
+    final now = _filterTestClock();
+    final s = _Store(clock: _filterTestClock)
       ..replaceAssignmentsForTest([
         work(1, title: '高等数学练习', due: now.add(const Duration(days: 2))),
         work(2, title: 'English Essay', due: now.add(const Duration(days: 20))),
@@ -147,7 +150,12 @@ void main() {
           lastDataSuccessAt: now.subtract(const Duration(hours: 25)));
     addTearDown(s.dispose);
     await t.pumpWidget(
-        MaterialApp(home: Scaffold(body: AssignmentListScreen(store: s))));
+      MaterialApp(
+        home: Scaffold(
+          body: AssignmentListScreen(store: s, clock: _filterTestClock),
+        ),
+      ),
+    );
     await t.pumpAndSettle();
 
     expect(find.text('1天前更新'), findsOneWidget);
@@ -209,21 +217,27 @@ void main() {
   testWidgets(
       'time sort uses one chronological list and survives clearing filters',
       (t) async {
-    final now = DateTime.now();
+    final now = _filterTestClock();
     final alpha =
         work(1, title: 'Alpha 作业', due: now.add(const Duration(days: 2)));
     final mike =
         work(2, title: 'Mike 作业', due: now.add(const Duration(days: 1)));
     final zulu =
         work(3, title: 'Zulu 作业', due: now.add(const Duration(days: 10)));
-    final s = _Store()..replaceAssignmentsForTest([zulu, mike, alpha]);
+    final s = _Store(clock: _filterTestClock)
+      ..replaceAssignmentsForTest([zulu, mike, alpha]);
     addTearDown(s.dispose);
     t.view.devicePixelRatio = 1;
     t.view.physicalSize = const Size(1000, 2000);
     addTearDown(t.view.resetDevicePixelRatio);
     addTearDown(t.view.resetPhysicalSize);
     await t.pumpWidget(
-        MaterialApp(home: Scaffold(body: AssignmentListScreen(store: s))));
+      MaterialApp(
+        home: Scaffold(
+          body: AssignmentListScreen(store: s, clock: _filterTestClock),
+        ),
+      ),
+    );
     await t.pumpAndSettle();
 
     await t.tap(find.text('搜索与筛选'));
