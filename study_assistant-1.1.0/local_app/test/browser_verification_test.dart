@@ -188,7 +188,7 @@ void main() {
           case '/mooc2/work/doHomeWorkNew':
             if (!verified) {
               status = 202;
-              body = {'status': false, 'code': 9010, 'msg': '【9010】操作异常'};
+              body = {'status': false, 'code': 9010, 'msg': '请先登录'};
             } else {
               body = '<div>截止时间：2030-05-01 12:00</div>';
             }
@@ -211,7 +211,18 @@ void main() {
           default:
             throw StateError('unexpected ${o.uri.path}');
         }
-        h.resolve(Response(requestOptions: o, data: body, statusCode: status));
+        h.resolve(Response(
+          requestOptions: o,
+          data: body,
+          statusCode: status,
+          // Gateways may duplicate this header. A valid challenge must still
+          // pause the remaining sources, even with no usable retry time.
+          headers: status == 202
+              ? Headers.fromMap({
+                  'retry-after': ['1', '2']
+                })
+              : null,
+        ));
       }));
 
     final c = ChaoxingLocalClient(dio: dio, wait: (_) async {});
@@ -226,6 +237,7 @@ void main() {
     expect(requests, isNot(contains('/v2/apis/active/student/activelist')));
     expect(requests, isNot(contains('/phone/moocAnalysis/examList')));
     expect(requests, isNot(contains('/v2/apis/active/getData')));
+    expect(requests, isNot(contains('/v11/loginregister')));
     final workSource =
         c.sourceResults.singleWhere((s) => s.source == 'courseWork');
     expect(workSource.phase, SyncSourcePhase.partial);

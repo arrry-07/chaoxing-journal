@@ -7,6 +7,7 @@ import '../models/course_notice.dart';
 import 'chaoxing_api_parser.dart';
 import 'chaoxing_notice_parser.dart';
 import 'chaoxing_param_helper.dart';
+import 'chaoxing_request_policy.dart';
 
 const int _kExamIsolateThreshold = 32 * 1024;
 
@@ -63,7 +64,15 @@ ParsedNoticePage? _parseNoticePage(
   List<ChaoxingCourseRef>? courses,
   DateTime now,
 ) {
-  final decoded = ChaoxingExamParser._decodeNotices(payload);
+  return _parseDecodedNoticePage(
+      ChaoxingExamParser._decodeNotices(payload), courses, now);
+}
+
+ParsedNoticePage? _parseDecodedNoticePage(
+  Object? decoded,
+  List<ChaoxingCourseRef>? courses,
+  DateTime now,
+) {
   final exam = ChaoxingExamParser._parseExamNotices(decoded, now: now);
   if (exam == null) return null;
 
@@ -294,6 +303,45 @@ class ChaoxingExamParser {
       return Future.value(_parseNoticePage(payload, courses, at));
     }
     return Isolate.run(() => _parseNoticePage(payload, courses, at));
+  }
+
+  /// Classify the response before trusting any notice rows. The classifier and
+  /// both projections share the decoded payload in the same isolate.
+  static Future<({ChaoxingResponseDecision decision, ParsedNoticePage? page})>
+      evaluateNoticeResponseAsync({
+    required Object? data,
+    required Uri uri,
+    required int status,
+    required String location,
+    required String? retryAfterRaw,
+    required List<ChaoxingCourseRef>? courses,
+  }) {
+    final now = DateTime.now();
+    ({ChaoxingResponseDecision decision, ParsedNoticePage? page}) evaluate() {
+      final payload = ChaoxingRequestPolicy.decodeJsonPayload(data);
+      final decision = ChaoxingRequestPolicy.evaluateDecodedResponse(
+        status: status,
+        uri: uri,
+        kind: '考试通知',
+        body: data is String ? data : '',
+        payload: payload,
+        location: location,
+        retryAfterRaw: retryAfterRaw,
+        now: now,
+      );
+      return (
+        decision: decision,
+        page: !decision.authExpired && decision.issue == null
+            ? _parseDecodedNoticePage(payload, courses, now)
+            : null,
+      );
+    }
+
+    return data is String &&
+            data.length > isolateParseThreshold &&
+            !_isFakeAsyncWidgetTestZone()
+        ? Isolate.run(evaluate)
+        : Future.value(evaluate());
   }
 
   static String entities(String raw) => raw

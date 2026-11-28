@@ -234,12 +234,14 @@ extension _TransportClient on ChaoxingLocalClient {
     String method = 'GET',
     Map<String, dynamic>? form,
     Uri? verificationProbe,
+    Future<ChaoxingResponseDecision> Function(Response<T>, Uri)? classify,
   }) async {
     final parsedUri = Uri.parse(uri);
     final kind =
         requestKind ?? ChaoxingRequestPolicy.requestKindForPath(parsedUri.path);
     final breakerKind = circuitKind ?? kind;
     final generation = _sessionGeneration;
+    final requestToken = _activeRequestToken;
     var attempt = 0;
     while (true) {
       if (_stopRequested) {
@@ -249,7 +251,10 @@ extension _TransportClient on ChaoxingLocalClient {
           stage: 'request',
         ));
       }
-      if (generation != _sessionGeneration) return null;
+      if (generation != _sessionGeneration ||
+          requestToken?.isCancelled == true) {
+        return null;
+      }
       // The exam collector stops the group immediately once its circuit opens.
       final reportExamCircuit =
           breakerKind == '课程考试' || breakerKind == '课程考试补充';
@@ -276,7 +281,7 @@ extension _TransportClient on ChaoxingLocalClient {
             validateStatus: (status) => status != null,
             headers: _headers(parsedUri, headers),
           ),
-          cancelToken: _activeRequestToken,
+          cancelToken: requestToken,
         );
       } on DioException catch (error) {
         if (CancelToken.isCancel(error)) {
@@ -325,13 +330,28 @@ extension _TransportClient on ChaoxingLocalClient {
       final parseWatch = Stopwatch()..start();
       ChaoxingResponseDecision outcome;
       try {
-        outcome = _evaluateResponse(received, parsedUri, kind,
-            verificationProbe: verificationProbe);
+        outcome = classify == null
+            ? _evaluateResponse(received, parsedUri, kind)
+            : await classify(received, parsedUri);
       } catch (_) {
         outcome = ChaoxingResponseDecision.issue(SyncIssue(
             SyncIssueKind.schemaChanged, '学习通响应无法解析，请稍后重试',
             stage: ChaoxingRequestPolicy.stageForKind(kind),
             httpStatus: received.statusCode));
+      }
+      if (_stopRequested) {
+        throw const SyncReadException(SyncIssue(
+          SyncIssueKind.cancelled,
+          '本次同步已取消',
+          stage: 'request',
+        ));
+      }
+      if (generation != _sessionGeneration ||
+          requestToken?.isCancelled == true) {
+        return null;
+      }
+      if (outcome.issue?.kind == SyncIssueKind.verificationRequired) {
+        _verificationTarget ??= verificationProbe ?? parsedUri;
       }
       final parseElapsedMs = parseWatch.elapsedMilliseconds;
       final status = received.statusCode ?? 0;
@@ -378,8 +398,7 @@ extension _TransportClient on ChaoxingLocalClient {
   }
 
   ChaoxingResponseDecision _evaluateResponse(
-      Response<dynamic> response, Uri uri, String kind,
-      {Uri? verificationProbe}) {
+      Response<dynamic> response, Uri uri, String kind) {
     final status = response.statusCode ?? 0;
     final decision = ChaoxingRequestPolicy.evaluateResponse(
       status: status,
@@ -387,12 +406,11 @@ extension _TransportClient on ChaoxingLocalClient {
       kind: kind,
       data: response.data,
       location: response.headers.value('location') ?? '',
-      retryAfterRaw: response.headers.value('retry-after'),
+      retryAfterRaw: response.headers['retry-after']?.singleOrNull,
       now: DateTime.now(),
     );
     final challenge =
         decision.issue?.kind == SyncIssueKind.verificationRequired;
-    if (challenge) _verificationTarget ??= verificationProbe ?? uri;
     if (kDebugMode && uri.path.contains('stucoursemiddle')) {
       final body = response.data is String ? response.data as String : '';
       debugPrint(
@@ -405,7 +423,7 @@ extension _TransportClient on ChaoxingLocalClient {
     final response = error.response;
     if (response != null && response.statusCode != null) {
       final status = response.statusCode!;
-      final retryAfterRaw = response.headers.value('retry-after');
+      final retryAfterRaw = response.headers['retry-after']?.singleOrNull;
       final retryAfter = ChaoxingRequestPolicy.parseRetryAfter(retryAfterRaw,
           now: DateTime.now());
       final issue = ChaoxingRequestPolicy.httpIssueForStatus(status, kind,

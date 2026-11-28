@@ -5,6 +5,7 @@ import 'package:study_assistant_mobile/src/local/chaoxing_api_parser.dart';
 import 'package:study_assistant_mobile/src/local/chaoxing_exam_parser.dart';
 import 'package:study_assistant_mobile/src/local/chaoxing_notice_parser.dart';
 import 'package:study_assistant_mobile/src/models/course_notice.dart';
+import 'package:study_assistant_mobile/src/models/sync_report.dart';
 
 void main() {
   const examNotice = {
@@ -28,18 +29,47 @@ void main() {
       'content': 'padding' * 5000,
     }));
     expect(raw.length, greaterThan(ChaoxingExamParser.isolateParseThreshold));
-    final parsed = await ChaoxingExamParser.parseNoticePageBothAsync(
-      raw,
+    final result = await ChaoxingExamParser.evaluateNoticeResponseAsync(
+      data: raw,
+      uri: Uri.https('notice.chaoxing.com', '/pc/notice/getNoticeList'),
+      status: 200,
+      location: '',
+      retryAfterRaw: null,
       courses: const [
         ChaoxingCourseRef(courseId: '42', clazzId: '7', courseName: '计算机网络'),
       ],
     );
-    expect(parsed!.rows.single.title, '计算机网络期末');
+    expect(result.decision.issue, isNull);
+    final parsed = result.page!;
+    expect(parsed.rows.single.title, '计算机网络期末');
     expect(parsed.cursor, 'next');
     expect(parsed.courseRows, hasLength(2));
     final course = parsed.courseRows!.last;
     expect((course.courseId, course.clazzId), ('42', '7'));
     expect(course.summary, hasLength(4000));
+  });
+
+  test('challenge code invalidates an otherwise valid large notice page',
+      () async {
+    final raw = jsonEncode({
+      ...noticePage({
+        'uuid': 'course-notice',
+        'title': '课程安排',
+        'content': 'padding' * 5000
+      }),
+      'code': '9010',
+      'message': '请先登录',
+    });
+    final result = await ChaoxingExamParser.evaluateNoticeResponseAsync(
+      data: raw,
+      uri: Uri.https('notice.chaoxing.com', '/pc/notice/getNoticeList'),
+      status: 202,
+      location: '',
+      retryAfterRaw: null,
+      courses: const [],
+    );
+    expect(result.decision.issue?.kind, SyncIssueKind.verificationRequired);
+    expect(result.page, isNull);
   });
 
   test('invalid non-exam notice only fails the course notice projection',

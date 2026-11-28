@@ -667,5 +667,79 @@ void main() {
       expect(store.isAuthenticated, isFalse);
       expect(tester.takeException(), isNull);
     });
+
+    testWidgets(
+        'clearing the filter during a pin save preserves hidden pin slots',
+        (tester) async {
+      tester.view.physicalSize = const Size(412, 1000);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      SharedPreferences.setMockInitialValues({'auto_sync_interval_minutes': 0});
+      FlutterSecureStorage.setMockInitialValues({});
+      final repo = _ControllablePinRepo();
+      final entries = [
+        for (final (i, title) in ['分组 A', '隐藏 B', '分组 C'].indexed)
+          _work('slot-$i',
+              title: title,
+              due: fixedMorning.add(Duration(hours: 4 + i)),
+              syncedAt: fixedMorning),
+      ];
+      final store = AssignmentStore(
+        repository: repo,
+        sessionStore: _MemorySessionStore(),
+        notificationService: _Notifications(),
+        widgetSnapshotService: _Snapshot(),
+      );
+      addTearDown(store.dispose);
+      await store.restoreSession();
+      await repo.mergeAndSave(entries);
+      await store.restoreSession();
+      for (final entry in entries) {
+        await store.togglePin(entry);
+      }
+      final keys = entries.map(AssignmentStore.pinKeyOf).toList();
+      await tester.pumpWidget(MaterialApp(
+        theme: StudyAssistantTheme.light,
+        home: Scaffold(
+          body: AssignmentListScreen(store: store, clock: () => fixedMorning),
+        ),
+      ));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('搜索与筛选'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), '分组');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('应用'));
+      await tester.tap(find.text('应用'));
+      await tester.pumpAndSettle();
+
+      final started = Completer<void>(), save = Completer<void>();
+      repo.saveStarted = started;
+      repo.saveGate = save;
+      final handle = find.byKey(ValueKey('pinned-drag-handle-${keys.first}'));
+      final cards = [
+        for (final a in entries) find.byKey(ValueKey('assignment-${a.id}'))
+      ];
+      expect(cards[1], findsNothing);
+      await dragHandleByOffset(tester, handle,
+          startOffsetFromCenter: Offset.zero,
+          dragDelta: Offset(0, tester.getSize(cards[0]).height + 28));
+      await tester.pump(const Duration(milliseconds: 350));
+      await tester.pump();
+      await started.future;
+      await tester.tap(find.text('关键词：分组'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 350));
+      expect(store.pinnedKeys, keys);
+      final coordinates = [
+        for (final card in cards) tester.getTopLeft(card).dy
+      ];
+      expect(coordinates[2], lessThan(coordinates[1]));
+      expect(coordinates[1], lessThan(coordinates[0]));
+      save.complete();
+      await tester.pumpAndSettle();
+      expect(store.pinnedKeys, [keys[2], keys[1], keys[0]]);
+    });
   });
 }

@@ -542,6 +542,11 @@ class HttpClient:
                     raise SyncError(
                         "Gitee returned invalid JSON after upload."
                     ) from None
+            if status in (200, 201) and already_uploaded is not None:
+                # The server confirmed the POST before the response failed.
+                # Check the attachment without issuing another POST.
+                if already_uploaded():
+                    return None
             transient = status is None or status == 0 or status == 429 or status >= 500
             if transient and attempt < GITEE_UPLOAD_RETRIES:
                 time.sleep(GITEE_UPLOAD_RETRY_BACKOFF_SECONDS * (attempt + 1))

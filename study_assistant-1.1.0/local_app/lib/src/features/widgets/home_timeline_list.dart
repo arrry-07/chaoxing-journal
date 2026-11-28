@@ -1067,10 +1067,15 @@ class _HomeTimelineListState extends State<HomeTimelineList> {
           final byKey = <String, HomeTimelineItem>{
             for (final item in section.items) item.pinKey: item,
           };
-          sectionItems = [
+          final reordered = [
             for (final key in _optimisticPinnedKeys!)
-              if (byKey.remove(key) case final item?) item,
-            ...byKey.values,
+              if (!completingPinnedKeys.contains(key))
+                if (byKey.remove(key) case final item?) item,
+          ];
+          var cursor = 0;
+          sectionItems = [
+            for (final item in section.items)
+              byKey.containsKey(item.pinKey) ? item : reordered[cursor++],
           ];
         } else {
           sectionItems = section.items;
@@ -1124,9 +1129,17 @@ class _HomeTimelineListState extends State<HomeTimelineList> {
                               if (!completingPinnedKeys.contains(key)) key,
                           ];
                           if (nextActiveKeys.length < 2) return;
+                          final currentPins = _optimisticPinnedKeys == null
+                              ? store.pinnedAssignments
+                              : PinnedAssignments(keys: _optimisticPinnedKeys!);
+                          final nextPins = currentPins.reorderVisible(
+                            nextActiveKeys,
+                            nextActiveKeys.toSet(),
+                          );
+                          if (nextPins == null) return;
                           final opGen = ++_optimisticGeneration;
                           setState(() {
-                            _optimisticPinnedKeys = nextVisualKeys;
+                            _optimisticPinnedKeys = nextPins.keys;
                             _optimisticEpoch = accountEpoch;
                           });
                           unawaited(

@@ -4,6 +4,8 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:study_assistant_mobile/src/local/chaoxing_local_client.dart';
+import 'package:study_assistant_mobile/src/local/local_assignment_repository.dart';
+import 'package:study_assistant_mobile/src/models/assignment.dart';
 import 'package:study_assistant_mobile/src/models/sync_report.dart';
 import 'package:study_assistant_mobile/src/services/assignment_query.dart';
 import 'package:study_assistant_mobile/src/services/assignment_web_link.dart';
@@ -165,6 +167,43 @@ void main() {
       expect(
           c.sourceResults.singleWhere((s) => s.source == 'groupHistory').phase,
           SyncSourcePhase.notEnabled);
+    });
+
+    test('type $type missing title preserves the archived cached observation',
+        () async {
+      final fixture = AiFixture()
+        ..mixed = true
+        ..extraActivities.add({'id': '100', 'activeType': type});
+      final old = Assignment(
+        id: 'cx:activity:7:11:100',
+        source: AssignmentSource.classroomActivity,
+        activityType: type,
+        courseName: '合成课程',
+        title: '历史活动',
+        deadlineAt: DateTime.utc(2026, 7, 1),
+        deadlineTrusted: true,
+        requirementsText: '',
+        status: 'pending',
+        lastSyncedAt: DateTime.utc(2026, 7, 1),
+      );
+      final client = ChaoxingLocalClient(enableExams: false, dio: fixture.dio)
+        ..previousAssignments = {old.id: old};
+      final rows = await client.fetchAssignments();
+      expect(
+          rows.singleWhere((a) => a.activityId == '$type').status, 'pending');
+      final merged = LocalAssignmentRepository.mergeAssignments([old], rows);
+      final cached = merged.singleWhere((a) => a.activityId == '100');
+      expect(cached.title, old.title);
+      expect(cached.deadlineTrusted, isTrue);
+      expect(
+          AssignmentQuery.isArchivedPastTerm(
+              cached, DateTime.utc(2026, 11, 28)),
+          isTrue);
+      expect(
+          client.sourceResults
+              .singleWhere((s) => s.source == 'classroomActivity:$type')
+              .phase,
+          SyncSourcePhase.partial);
     });
   }
 

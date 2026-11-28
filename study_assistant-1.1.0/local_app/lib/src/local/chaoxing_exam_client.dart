@@ -434,7 +434,8 @@ extension _ExamCollection on ChaoxingLocalClient {
           pageFeedsCourseNotices =
               collectCourseNotices && !courseNoticeWindowDone && page < 5;
           checkWindow();
-          final response = await _safeGet<dynamic>(
+          ParsedNoticePage? noticePage;
+          await _safeGet<dynamic>(
               'https://notice.chaoxing.com/pc/notice/getNoticeList',
               method: 'POST',
               requestKind: '考试通知',
@@ -454,15 +455,22 @@ extension _ExamCollection on ChaoxingLocalClient {
                 'fidsCode': '',
                 'filterSenderPuids': '',
                 'filterTags': ''
-              },
+              }, classify: (response, uri) async {
+            final result = await ChaoxingExamParser.evaluateNoticeResponseAsync(
+              data: response.data,
+              uri: uri,
+              status: response.statusCode ?? 0,
+              location: response.headers.value('location') ?? '',
+              retryAfterRaw: response.headers['retry-after']?.singleOrNull,
+              courses: pageFeedsCourseNotices ? (noticeCatalog ?? refs) : null,
+            );
+            noticePage = result.page;
+            return result.decision;
+          },
               verificationProbe:
                   Uri.parse('https://notice.chaoxing.com/pc/notice/myNotice'));
           if (!current()) return const [];
-          final parsed = await ChaoxingExamParser.parseNoticePageBothAsync(
-            response?.data,
-            courses: pageFeedsCourseNotices ? (noticeCatalog ?? refs) : null,
-          );
-          if (!current()) return const [];
+          final parsed = noticePage;
           if (parsed == null) throw StateError('examNoticeSchema');
           for (final a in parsed.rows) {
             if (ids.add(a.id)) notices.add(a);

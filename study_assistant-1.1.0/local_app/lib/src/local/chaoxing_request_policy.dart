@@ -157,14 +157,37 @@ abstract final class ChaoxingRequestPolicy {
     required String location,
     required String? retryAfterRaw,
     required DateTime now,
+  }) =>
+      evaluateDecodedResponse(
+        status: status,
+        uri: uri,
+        kind: kind,
+        body: data is String ? data : '',
+        payload: decodeJsonPayload(data),
+        location: location,
+        retryAfterRaw: retryAfterRaw,
+        now: now,
+      );
+
+  static ChaoxingResponseDecision evaluateDecodedResponse({
+    required int status,
+    required Uri uri,
+    required String kind,
+    required String body,
+    required Object? payload,
+    required String location,
+    required String? retryAfterRaw,
+    required DateTime now,
   }) {
     final stage = stageForKind(kind);
-    final body = data is String ? data : '';
-    final payload = decodeJsonPayload(data);
     final message = payload is Map
         ? (payload['msg'] ?? payload['message'] ?? payload['errorMsg'] ?? '')
             .toString()
         : '';
+    // The explicit challenge code takes precedence over generic login text.
+    if (payload is Map && payload['code']?.toString() == '9010') {
+      return _verificationRequired(status, stage);
+    }
     if (payload is Map &&
         (payload['result'] == false || payload['status'] == false) &&
         RegExp(r'未登录|请先登录|登录已失效|登录失效|登录超时|login required|unauthorized',
@@ -173,14 +196,11 @@ abstract final class ChaoxingRequestPolicy {
       return const ChaoxingResponseDecision.authExpired();
     }
     if (payload is Map &&
-        (payload['code']?.toString() == '9010' ||
-            (message.contains('9010') && message.contains('验证码')) ||
+        ((message.contains('9010') && message.contains('验证码')) ||
             RegExp(r'请输入验证码|请完成.{0,12}(?:验证|校验)|安全验证|访问异常|人机验证|verify\.chaoxing',
                     caseSensitive: false)
                 .hasMatch(message))) {
-      return ChaoxingResponseDecision.issue(SyncIssue(
-          SyncIssueKind.verificationRequired, '学习通要求人工验证，请点击完成安全验证',
-          stage: stage, httpStatus: status));
+      return _verificationRequired(status, stage);
     }
     if (status == 401 ||
         (status >= 300 &&
@@ -214,11 +234,7 @@ abstract final class ChaoxingRequestPolicy {
             .hasMatch(visibleText) ||
         (visibleText.contains('9010') && visibleText.contains('验证码')) ||
         location.contains('antispider');
-    if (challenge) {
-      return ChaoxingResponseDecision.issue(SyncIssue(
-          SyncIssueKind.verificationRequired, '学习通要求人工验证，请点击完成安全验证',
-          stage: stage, httpStatus: status));
-    }
+    if (challenge) return _verificationRequired(status, stage);
     if (status >= 200 && status < 400) {
       return const ChaoxingResponseDecision.success();
     }
@@ -226,6 +242,12 @@ abstract final class ChaoxingRequestPolicy {
         SyncIssueKind.network, '接口返回 HTTP $status，请稍后重试',
         stage: stage, httpStatus: status));
   }
+
+  static ChaoxingResponseDecision _verificationRequired(
+          int status, String stage) =>
+      ChaoxingResponseDecision.issue(SyncIssue(
+          SyncIssueKind.verificationRequired, '学习通要求人工验证，请点击完成安全验证',
+          stage: stage, httpStatus: status));
 
   static Uri? trustedVerificationUri(String? raw) {
     final uri = Uri.tryParse(raw ?? '');

@@ -716,6 +716,30 @@ class RetentionTests(unittest.TestCase):
         self.assertEqual(run.call_count, 2)
         sleep.assert_called_once()
 
+    def test_gitee_upload_checks_attachment_after_http_201_response_timeout(self) -> None:
+        client = sync.HttpClient(github_token="", gitee_token="synthetic")
+        with tempfile.TemporaryDirectory() as directory:
+            apk = Path(directory) / "test.apk"
+            apk.write_bytes(b"apk")
+            for visible in (True, False):
+                with self.subTest(visible=visible), mock.patch.object(
+                    sync.shutil, "which", return_value="/usr/bin/curl"
+                ), mock.patch.object(
+                    sync.subprocess,
+                    "run",
+                    return_value=subprocess.CompletedProcess([], 28, "\n201 3 100", "timeout"),
+                ) as run:
+                    check = mock.Mock(return_value=visible)
+                    arguments = dict(file_path=apk, already_uploaded=check)
+                    endpoint = "/repos/owner/repo/releases/1/attach_files"
+                    if visible:
+                        self.assertIsNone(client.gitee_upload(endpoint, **arguments))
+                    else:
+                        with self.assertRaises(sync.SyncError):
+                            client.gitee_upload(endpoint, **arguments)
+                    check.assert_called_once_with()
+                    run.assert_called_once()
+
     def test_upload_missing_does_not_double_post_when_list_lags(self) -> None:
         release = artifact("1.93.0", 136)
         uploads: list[str] = []

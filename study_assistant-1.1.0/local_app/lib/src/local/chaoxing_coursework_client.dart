@@ -777,6 +777,10 @@ extension _CourseworkClient on ChaoxingLocalClient {
       }
     }
     final blockedTypes = <int>{};
+    final cachedActivityKeys = {
+      for (final activity in previousAssignments.values)
+        if (activity.isSupportedClassroomTask) activity.courseTaskKey!,
+    };
     SyncIssueKind? listBlockedBy;
     final failedCourseKeys = <String>{};
     var recognized = refs.isEmpty && unreadCourses == 0;
@@ -856,7 +860,10 @@ extension _CourseworkClient on ChaoxingLocalClient {
             '${course.courseId}:${course.clazzId}:classroomActivity:$type';
         try {
           final entries = activities.entries
-              .where((entry) => entry.seed.activityType == type)
+              .where((entry) =>
+                  entry.seed.activityType == type &&
+                  (entry.canHydrate ||
+                      !cachedActivityKeys.contains(entry.seed.courseTaskKey)))
               .toList();
           if (listBlockedBy == SyncIssueKind.verificationRequired) {
             complete = false;
