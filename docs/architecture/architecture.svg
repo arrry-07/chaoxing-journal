@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg viewBox="0 0 1684 1086" role="img" lang="zh-CN" aria-labelledby="archify-diagram-title archify-diagram-description" data-preset="classic" data-quality-profile="showcase" data-node-ui="" data-reader-fit="intrinsic-height" data-reader-min-text="7.5" data-reader-primary-text="14" xmlns="http://www.w3.org/2000/svg" width="1684" height="1086" data-theme="light" data-archify-bake="static">
         <title id="archify-diagram-title">学习通课业手记 · 系统架构与模块边界</title>
-        <desc id="archify-diagram-description">更新于 2026-11-27</desc>
+        <desc id="archify-diagram-description">v1.93.1 dev · 2026-11-28</desc>
         <style><![CDATA[
 /*
 JetBrains Mono variable WOFF2 subsets from Google Fonts service revision v24.

@@ -10,15 +10,25 @@
     "repository": {
       "url": "https://github.com/arrry-07/chaoxing-journal.git",
       "provider": "github",
-      "revision": "a33f066cc5e82e07050e15c6844172b68bd787e0"
+      "revision": "e12c75c7ebbdf20d519812bc3eed854d98c31309"
     }
   },
   "stages": [
-    { "label": "触发与输入源" },
-    { "label": "采集与门禁" },
-    { "label": "时间信任与规划" },
-    { "label": "双存储提交" },
-    { "label": "消费与原生投递" }
+    {
+      "label": "触发与输入源"
+    },
+    {
+      "label": "采集与门禁"
+    },
+    {
+      "label": "时间信任与规划"
+    },
+    {
+      "label": "双存储提交"
+    },
+    {
+      "label": "消费与原生投递"
+    }
   ],
   "nodes": [
     {
@@ -30,7 +40,9 @@
       "stage": 0,
       "row": 0,
       "sources": [
-        { "path": "study_assistant-1.1.0/local_app/lib/src/local" }
+        {
+          "path": "study_assistant-1.1.0/local_app/lib/src/local"
+        }
       ]
     },
     {
@@ -48,7 +60,9 @@
           "end_line": 50,
           "label": "学习通通知信号监听"
         },
-        { "path": "study_assistant-1.1.0/local_app/lib/src/features" }
+        {
+          "path": "study_assistant-1.1.0/local_app/lib/src/features"
+        }
       ]
     },
     {
@@ -62,19 +76,22 @@
       "row": 0,
       "sources": [
         {
-          "path": "study_assistant-1.1.0/local_app/lib/src/local"
+          "path": "study_assistant-1.1.0/local_app/lib/src/local/chaoxing_coursework_client.dart",
+          "line": 214,
+          "label": "正式作业与 35/42/77 活动采集"
         },
         {
-          "path": "study_assistant-1.1.0/local_app/lib/src/services/assignment_store_sync.dart",
-          "line": 1037,
-          "label": "课业同步与多源合并编排"
+          "path": "study_assistant-1.1.0/local_app/lib/src/local/chaoxing_assignment_parser.dart",
+          "line": 475,
+          "label": "签名作业页大文本解析"
         },
         {
-          "path": "study_assistant-1.1.0/local_app/lib/src/services/assignment_sync_coordinator.dart",
-          "line": 12,
-          "label": "同步选课、补扫与报告策略"
+          "path": "study_assistant-1.1.0/local_app/lib/src/local/chaoxing_exam_parser.dart",
+          "line": 283,
+          "label": "共享通知页一次解码"
         }
-      ]
+      ],
+      "explanation": "课业逐条校验与按身份归并。签名作业大文本移入 isolate，同一通知页解码一次后分流。"
     },
     {
       "id": "session_lease_gate",
@@ -87,22 +104,22 @@
       "sources": [
         {
           "path": "study_assistant-1.1.0/local_app/lib/src/services/assignment_store_sync.dart",
-          "line": 449,
+          "line": 553,
           "label": "同步触发与租约获取"
-        },
-        {
-          "path": "study_assistant-1.1.0/local_app/lib/src/services/background_reminder_gateway.dart",
-          "line": 62,
-          "end_line": 115,
-          "label": "租约与计划版本契约"
         },
         {
           "path": "study_assistant-1.1.0/local_app/android/app/src/main/kotlin/com/example/studyassistant/BackgroundReminderBridge.kt",
           "line": 63,
           "end_line": 139,
           "label": "账号切换与代次轮转"
+        },
+        {
+          "path": "study_assistant-1.1.0/local_app/lib/src/local/chaoxing_request_policy.dart",
+          "line": 8,
+          "label": "请求分类、退避、9010 与 Cookie 规则"
         }
-      ]
+      ],
+      "explanation": "Store 守卫跨引擎租约，采集守卫请求代次。9010 立即暂停下游，退回的旧浏览器 Cookie 不进入新会话。"
     },
     {
       "id": "time_trust_query",
@@ -122,11 +139,16 @@
         },
         {
           "path": "study_assistant-1.1.0/local_app/lib/src/services/assignment_query.dart",
-          "line": 90,
-          "end_line": 120,
-          "label": "时间轴分层与逾期置底"
+          "line": 361,
+          "label": "无可信截止及 30 天边界"
+        },
+        {
+          "path": "study_assistant-1.1.0/local_app/lib/src/services/course_term_catalog.dart",
+          "line": 1544,
+          "label": "无课键记录三层学期归属"
         }
-      ]
+      ],
+      "explanation": "无课程键的学期归属按证据分层推断，未确认截止留在待核实范围。"
     },
     {
       "id": "reminder_planner",
@@ -138,20 +160,19 @@
       "row": 2,
       "sources": [
         {
-          "path": "study_assistant-1.1.0/local_app/lib/src/services/assignment_store_reminders.dart",
-          "line": 446,
-          "label": "提醒计划刷新与投递编排"
-        },
-        {
           "path": "study_assistant-1.1.0/local_app/lib/src/services/assignment_reminder_coordinator.dart",
           "line": 124,
           "label": "提醒判断、取消结果与解释"
         },
         {
-          "path": "study_assistant-1.1.0/local_app/lib/src/services/local_notification_service.dart",
-          "line": 76,
-          "end_line": 138,
-          "label": "v3 有声渠道定义"
+          "path": "study_assistant-1.1.0/local_app/lib/src/services/local_notification_schedulers.dart",
+          "line": 448,
+          "label": "Flutter 通知排期与投递"
+        },
+        {
+          "path": "study_assistant-1.1.0/local_app/lib/src/services/notification_schedule_policy.dart",
+          "line": 7,
+          "label": "纯排期、渠道及隐私规则"
         }
       ]
     },
@@ -166,9 +187,14 @@
       "sources": [
         {
           "path": "study_assistant-1.1.0/local_app/lib/src/local/local_assignment_repository.dart",
-          "line": 50,
-          "end_line": 140,
+          "line": 146,
+          "end_line": 237,
           "label": "按账号存储与恢复备份"
+        },
+        {
+          "path": "study_assistant-1.1.0/local_app/lib/src/local/local_assignment_repository.dart",
+          "line": 115,
+          "label": "大快照编码与回读校验"
         }
       ]
     },
@@ -198,12 +224,21 @@
       "stage": 4,
       "row": 0,
       "sources": [
-        { "path": "study_assistant-1.1.0/local_app/lib/src/features" },
         {
           "path": "study_assistant-1.1.0/local_app/lib/src/services/widget_snapshot_service.dart",
           "line": 55,
           "end_line": 100,
           "label": "桌面小组件快照同步"
+        },
+        {
+          "path": "study_assistant-1.1.0/local_app/lib/src/features/widgets/home_timeline_list.dart",
+          "line": 261,
+          "label": "首页课业单槽投影缓存"
+        },
+        {
+          "path": "study_assistant-1.1.0/local_app/android/app/src/main/kotlin/com/example/studyassistant/AssignmentWidgetProvider.kt",
+          "line": 462,
+          "label": "小组件北京时间自然日差"
         }
       ]
     },
@@ -232,44 +267,92 @@
     }
   ],
   "flows": [
-    { "id": "raw_coursework", "from": "chaoxing_api", "to": "parsers_merge", "label": "原始课业响应", "variant": "emphasis" },
-    { "id": "signals_edits", "from": "signal_and_manual", "to": "session_lease_gate", "label": "通知信号与编辑", "variant": "security" },
-    { "id": "lease_permit", "from": "session_lease_gate", "to": "parsers_merge", "label": "代次与租约放行", "variant": "security" },
-    { "id": "normalized_items", "from": "parsers_merge", "to": "time_trust_query", "label": "归一化课业集", "variant": "emphasis" },
-    { "id": "trusted_deadlines", "from": "time_trust_query", "to": "reminder_planner", "label": "可信截止时间", "variant": "default" },
-    { "id": "merged_snapshot", "from": "time_trust_query", "to": "prefs_snapshot", "label": "合并课业快照", "variant": "emphasis" },
-    { "id": "plan_snapshot", "from": "reminder_planner", "to": "sqlite_reminder_db", "label": "提醒计划快照", "variant": "security" },
-    { "id": "version_commit", "from": "prefs_snapshot", "to": "sqlite_reminder_db", "label": "版本号提交确认", "variant": "dashed" },
-    { "id": "ui_widget_feed", "from": "prefs_snapshot", "to": "home_and_widget", "label": "已校验展示快照", "variant": "emphasis" },
-    { "id": "due_events", "from": "sqlite_reminder_db", "to": "native_alarm_pub", "label": "到期事件与复核", "variant": "default" }
+    {
+      "id": "raw_coursework",
+      "from": "chaoxing_api",
+      "to": "parsers_merge",
+      "label": "原始课业响应",
+      "variant": "emphasis"
+    },
+    {
+      "id": "signals_edits",
+      "from": "signal_and_manual",
+      "to": "session_lease_gate",
+      "label": "通知信号与编辑",
+      "variant": "security"
+    },
+    {
+      "id": "lease_permit",
+      "from": "session_lease_gate",
+      "to": "parsers_merge",
+      "label": "代次与租约放行",
+      "variant": "security"
+    },
+    {
+      "id": "normalized_items",
+      "from": "parsers_merge",
+      "to": "time_trust_query",
+      "label": "归一化课业集",
+      "variant": "emphasis"
+    },
+    {
+      "id": "trusted_deadlines",
+      "from": "time_trust_query",
+      "to": "reminder_planner",
+      "label": "可信截止时间",
+      "variant": "default"
+    },
+    {
+      "id": "merged_snapshot",
+      "from": "time_trust_query",
+      "to": "prefs_snapshot",
+      "label": "合并课业快照",
+      "variant": "emphasis"
+    },
+    {
+      "id": "plan_snapshot",
+      "from": "reminder_planner",
+      "to": "sqlite_reminder_db",
+      "label": "提醒计划快照",
+      "variant": "security"
+    },
+    {
+      "id": "version_commit",
+      "from": "prefs_snapshot",
+      "to": "sqlite_reminder_db",
+      "label": "版本号提交确认",
+      "variant": "dashed"
+    },
+    {
+      "id": "ui_widget_feed",
+      "from": "prefs_snapshot",
+      "to": "home_and_widget",
+      "label": "已校验展示快照",
+      "variant": "emphasis"
+    },
+    {
+      "id": "due_events",
+      "from": "sqlite_reminder_db",
+      "to": "native_alarm_pub",
+      "label": "到期事件与复核",
+      "variant": "default"
+    }
   ],
   "cards": [
     {
       "dot": "emerald",
       "title": "时间信任隔离契约",
-      "items": [
-        "考试展示范围文案绝不写回可信截止时间、日历、提醒或备份",
-        "官方可信截止一旦出现即自动接管，防止旧手动截止时间复活",
-        "读取失败与未知时间独立保留，严禁折叠为无截止或零作业"
-      ]
+      "items": ["考试展示范围文案绝不写回可信截止时间、日历、提醒或备份", "官方可信截止一旦出现即自动接管，防止旧手动截止时间复活", "读取失败与未知时间独立保留，严禁折叠为无截止或零作业"]
     },
     {
       "dot": "rose",
       "title": "两阶段版本化提醒提交",
-      "items": [
-        "写盘前先在 SQLite 标记 pendingUpdate，再写入 SharedPreferences",
-        "随后凭读取时的 mutationVersion 与 sessionEpoch 提交提醒计划",
-        "版本或账号代次失配立即拒绝并重排，杜绝前后台引擎互相覆盖"
-      ]
+      "items": ["写盘前先在 SQLite 标记 pendingUpdate，再写入 SharedPreferences", "随后凭读取时的 mutationVersion 与 sessionEpoch 提交提醒计划", "版本或账号代次失配立即拒绝并重排，杜绝前后台引擎互相覆盖"]
     },
     {
       "dot": "amber",
       "title": "原生投递前二次校验",
-      "items": [
-        "闹钟唤醒后在原生侧复核完成、隐藏、关注、归档与夜间静音窗",
-        "夜间 [23:30, 07:30) 默认静音顺延，支持按账号开启 <=1h 紧急穿透",
-        "个人日程与每日摘要走独立补偿式通知事务，不与作业闹钟混清"
-      ]
+      "items": ["闹钟唤醒后在原生侧复核完成、隐藏、关注、归档与夜间静音窗", "夜间 [23:30, 07:30) 默认静音顺延，支持按账号开启 <=1h 紧急穿透", "个人日程与每日摘要走独立补偿式通知事务，不与作业闹钟混清"]
     }
   ]
 }

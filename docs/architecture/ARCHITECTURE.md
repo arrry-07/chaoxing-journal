@@ -1,6 +1,6 @@
 # 学习通课业手记 · 架构导航（人机共用）
 
-- **基线 Commit**：图谱与 ERD 仍锚定 `a33f066` / `d8b7f47`（`architecture.json` 与 `sync-reminder.dataflow.json` 锚定 `a33f066`，`reminder-db.erd.json` 与 `architecture-tour.story.json` 锚定 `d8b7f47`）；最新正式代码基线已推进至 `e7e3408`（`v1.93.0+136`，新增 `Isolate.run` 大文本解析与主快照编码/校验、`HomeTimelineList` 单槽重投影缓存、无 `courseKey` 三层学期推导、`ClawdTitleStage` 屋顶舞台及 Gitee 两步同步）。可用 `git log a33f066..HEAD --stat` 核对图文之后的代码演进。
+- **基线 Commit**　架构总图、同步数据流及漫游源码定位锚定 `e12c75c`（`v1.93.1+137` Wave B）。SQLite v10 物理表图锚定 `d8b7f47`。正式版本 `v1.93.0+136` 对应 `e7e3408`。
 - **更新日期**：2026-11-28
 - **适用范围**：`study_assistant-1.1.0/local_app/`（Flutter 业务层与 Android 原生宿主/后台层）、`scripts/` 与 `.github/workflows/` 门禁及分发链路；`references/xuexitong-cli/` 仅作只读上游协议参考
 
@@ -49,14 +49,16 @@
 | 应用入口与双引擎启动 | `study_assistant-1.1.0/local_app/lib/main.dart` | 承载前台 `main` 与后台无界面 `backgroundMain` 双入口；前台先恢复本机快照再挂载界面，后台通过 `MethodChannel` 与原生 Worker 协同执行自动检查 |
 | 导航壳、主题与动效基础 | `study_assistant-1.1.0/local_app/lib/src/app/`（入口 `app_shell.dart`） | 管理 `GoRouter` 路由与 4 Tab 主壳、浅/深双主题设计系统、页面转场与预测性返回策略、Clawd 伴侣周期协调 |
 | 业务页面与公共组件 | `study_assistant-1.1.0/local_app/lib/src/features/`、`features/widgets/` | 覆盖首页、日历、统计、个人页、登录与设置。页面消费领域投影状态，不直连网络或原生存储 |
-| 首页交互与列表 | `features/assignment_list_screen.dart`、同层 `widgets/` 下的 `home_action_bar.dart`、`home_filter_sheet.dart`、`home_list_sections.dart`、`home_timeline_list.dart`、`journal_modal_sheet.dart` | `AssignmentListScreen` 持有页面状态与事件编排，组件分别负责操作栏与排序菜单、搜索筛选、首页分区、时间线列表。筛选面板经共享弹窗入口使用统一动效 |
+| 首页交互与列表 | `features/assignment_list_screen.dart`、同层 `widgets/` 下的 `home_action_bar.dart`、`home_filter_sheet.dart`、`home_list_sections.dart`、`home_timeline_list.dart`、`clawd_title_stage.dart` | 单槽缓存复用首页投影。置顶拖拽暂存顺序并按账号持久化。Clawd 屋顶标题舞台复用文字测量结果 |
 | 课业协调中枢与领域模型 | `study_assistant-1.1.0/local_app/lib/src/services/assignment_store.dart`、`.../services/`、`.../models/` | `AssignmentStore` 保留公共接口、共享状态与事务协调，使用 `CourseworkDeadline` 和 `AssignmentQuery` 处理时间信任与排序投影 |
 | Store · 个人状态 | `assignment_store_personal.dart`、`assignment_personal_state_coordinator.dart` | 编排个人待办、置顶、手动截止及课程设置的读写。协调器计算个人状态变更 |
 | Store · 提醒 | `assignment_store_reminders.dart`、`assignment_reminder_coordinator.dart` | 编排提醒计划、历史、通知补偿和桌面小组件刷新。协调器提供提醒判断、取消结果和提醒解释 |
 | Store · 同步 | `assignment_store_sync.dart`、`assignment_sync_coordinator.dart` | 编排多源同步与跨引擎同步租约。协调器计算同步选课、历史补扫、服务端退避和报告 |
 | Store · 会话 | `assignment_store_session.dart`、`assignment_session_coordinator.dart` | 编排恢复、登录、账号切换、退出和备份恢复。协调器提供会话转换及恢复决策 |
-| 学习通采集与多源解析层 | `study_assistant-1.1.0/local_app/lib/src/local/chaoxing_local_client.dart`、`.../local/*_parser.dart` | 封装超星学习通会话请求、取消令牌与熔断重试，将课程、作业、考试、章节、课堂任务、AI 练习与通知归一化为稳定领域模型 |
-| 本机课业与安全凭据仓 | `study_assistant-1.1.0/local_app/lib/src/local/local_assignment_repository.dart`、`.../services/secure_session_store.dart` | 基于 `SharedPreferences` 维护按账号隔离的课业/待办/课程设置快照与损坏恢复副本；通过 `FlutterSecureStorage` 与 WebView 清理保管登录凭据 |
+| 学习通公共接口与采集 | `lib/src/local/chaoxing_local_client.dart`、`chaoxing_coursework_client.dart`、`chaoxing_exam_client.dart`、`chaoxing_*_parser.dart` | 公共类持有状态并保留可覆写接口。采集实现读取正式作业、课程章节、课堂活动、考试与通知。签名作业大文本交给 `Isolate.run`，同页通知共享解码 |
+| 学习通会话与传输 | `lib/src/local/chaoxing_session_client.dart`、`chaoxing_transport_client.dart`、`chaoxing_request_policy.dart` | 处理登录和验证回写、请求取消和熔断。纯策略判定 `9010` 与退避，安全验证返回时校对会话代次和 Cookie 域 |
+| 本机课业与安全凭据仓 | `lib/src/local/local_assignment_repository.dart`、`lib/src/services/secure_session_store.dart` | 按账号保存课业、待办、课程设置快照与恢复副本。大快照在 isolate 中编码并校验。登录凭据由安全存储管理 |
+| Flutter 本地通知 | `lib/src/services/local_notification_service.dart`、`local_notification_channels.dart`、`local_notification_transactions.dart`、`local_notification_schedulers.dart`、`notification_schedule_policy.dart` | 公共类保留渠道与排期入口。渠道负责迁移和系统兼容，事务通过两代 Journal 执行补偿恢复，纯策略负责时间窗、类别和隐私规则 |
 | Android 原生宿主与安全桥 | `study_assistant-1.1.0/local_app/android/app/src/main/kotlin/com/example/studyassistant/MainActivity.kt`、`.../java/com/example/studyassistant/` | 暴露安全验证 WebView、外部链接、APK 原签名/ABI 校验安装、SAF 口令加解密备份（`BackupCrypto`）、通知权限体检与音效等 `MethodChannel` |
 | 后台检查与原生提醒引擎 | `study_assistant-1.1.0/local_app/android/app/src/main/kotlin/com/example/studyassistant/`（`FlutterCheckWorker.kt`、`BackgroundReminderBridge.kt`、`ReminderDatabase.kt`、`AssignmentAlarmScheduler.kt`、`AssignmentNotificationPublisher.kt`、`ChaoxingNotificationListener.kt`） | 统筹 WorkManager 后台检查、通知信号监听、跨引擎租约、SQLite 账号代次与提醒快照库、AlarmManager 精确闹钟与多版本有声通知渠道投递 |
 | 桌面小组件 | `.../services/widget_snapshot_service.dart`、`.../android/.../AssignmentWidgetProvider.kt` | 同步账号认证态与待办范围快照，并在系统字号、暗黑模式或尺寸变化时渲染 Android 原生桌面小组件 |
@@ -72,11 +74,13 @@
    - 前台 `main` 初始化通知服务与 `AssignmentStore` 后，**先完成本机会话与快照恢复**，再挂载 `StudyAssistantApp` 与 `AppShell`（`GoRouter` + 4 主 Tab），保证通知点击深链与首页渲染不会读取到未恢复的空白状态。
 2. **学习通多源采集、时间信任裁决与排序投影链路**
    - `AssignmentStore` 驱动 `ChaoxingLocalClient` 拉取课程、作业、考试、课堂与通知等接口响应 → 经各 `Parser` 与 `AssignmentGrouping` 归并 → `CourseworkDeadline` 与 `AssignmentQuery` 裁决官方可信时间、手动截止与展示范围 → 写入按账号隔离的 `LocalAssignmentRepository` 并驱动首页/日历/统计及桌面小组件更新。
+   - `9010` 暂停同批未读来源，既有快照继续可用。单条活动异常时有效兄弟条目继续读取，受影响来源标为不完整。`CourseTermCatalog` 对没有 `courseKey` 的记录分层核对学期证据，普通首页继续使用 `AssignmentQuery` 的 30 天与可信截止规则。
 3. **前后台双引擎检查与版本化原生提醒链路**
    - 触发源包括前台同步、WorkManager 定时检查（`FlutterCheckWorker` 拉起无界面 `backgroundMain`）及系统通知监听（`ChaoxingNotificationListener` 写入增量信号）。
    - 写入前先通过 `BackgroundReminderBridge` 获取跨引擎同步/写租约并校对 `sessionEpoch`，在原生 `ReminderDatabase` 标记挂起更新后再持久化 `SharedPreferences`，随后凭读取时的 `mutationVersion` 提交提醒计划并调度 `AssignmentAlarmScheduler`；闹钟到期后经原生二次校验资格与夜间静音窗，再通过版本化有声渠道投递或延后。
 4. **双源应用更新与口令加密备份链路**
    - 更新模块在冷启动仅查稳定清单，手动检查则并行合并 Gitee 清单与 GitHub Release，下载后经原生宿主校验包名、原体验签名指纹、递增版本码、SDK 与双 ABI（`arm64-v8a` / `x86_64`）再拉起安装；备份模块经原生 `BackupCrypto` 与系统文件选择器完成口令加密快照导入导出。
+   - GitHub Release 触发 Gitee 小索引同步。镜像 APK 完整回下载并核对签名与哈希后，更新清单才将 Gitee 设为主链。
 
 ---
 
@@ -99,9 +103,9 @@
 | 个人待办、置顶、手动截止或课程设置写入 | `lib/src/services/assignment_store_personal.dart`、`assignment_personal_state_coordinator.dart` |
 | 课业同步、自动检查、选课范围或退避 | `lib/src/services/assignment_store_sync.dart`、`assignment_sync_coordinator.dart` |
 | 学习通登录、会话失效或账号切换 | `lib/src/services/assignment_store_session.dart`、`assignment_session_coordinator.dart`、`lib/src/local/chaoxing_local_client.dart` |
-| 验证码或某类任务解析漏抓 | `lib/src/local/chaoxing_local_client.dart`、`lib/src/local/chaoxing_*_parser.dart`、`references/xuexitong-cli/` |
+| 验证码或某类任务解析漏抓 | `lib/src/local/chaoxing_session_client.dart`、`chaoxing_transport_client.dart`、`chaoxing_request_policy.dart`、`chaoxing_coursework_client.dart`、`chaoxing_classroom_parser.dart` |
 | 截止时间显示、改期冲突、手动截止或考试范围 | `lib/src/services/coursework_deadline.dart`、`exam_wall_time.dart`、`exam_schedule_presentation.dart` |
-| 后台检查调度、通知漏响/误响、静音时段或历史记录 | `lib/src/services/assignment_store_reminders.dart`、`assignment_reminder_coordinator.dart`、`background_reminder_gateway.dart`、`local_notification_service.dart`、`android/.../FlutterCheckWorker.kt`、`ReminderDatabase.kt`、`AssignmentNotificationPublisher.kt` |
+| 后台检查调度、通知漏响/误响、静音时段或历史记录 | `lib/src/services/assignment_store_reminders.dart`、`background_reminder_gateway.dart`、`local_notification_channels.dart`、`local_notification_transactions.dart`、`local_notification_schedulers.dart`、`notification_schedule_policy.dart`、`android/.../FlutterCheckWorker.kt`、`ReminderDatabase.kt`、`AssignmentNotificationPublisher.kt` |
 | 界面主题配色、转场动画、悬浮顶栏或 Clawd 像素伙伴 | `lib/src/app/app_shell.dart`、`journal.dart`、`lib/src/services/clawd_companion_controller.dart`、`lib/src/features/widgets/` |
 | 检查更新、双源清单回退或 APK 校验安装 | `lib/src/services/app_update_service.dart`、`app_update_controller.dart`、`android/.../UpdateApkPolicy.java`、`MainActivity.kt` |
 | 加密备份与个人附件/工作区 | `lib/src/services/backup_service.dart`、`android/.../BackupCrypto.java`、`BackupBridge.kt`、`PersonalFileBridge.kt` |
