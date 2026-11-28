@@ -435,41 +435,45 @@ extension _ExamCollection on ChaoxingLocalClient {
               collectCourseNotices && !courseNoticeWindowDone && page < 5;
           checkWindow();
           ParsedNoticePage? noticePage;
-          await _safeGet<dynamic>(
-              'https://notice.chaoxing.com/pc/notice/getNoticeList',
-              method: 'POST',
-              requestKind: '考试通知',
-              form: {
-                'type': '0',
-                'notice_type': '0',
-                'lastValue': cursor,
-                'sort': '0',
-                'folderUUID': '',
-                'kw': '',
-                'startTime': '',
-                'endTime': '',
-                'gKw': '',
-                'gName': '',
-                'year': '',
-                'tag': '',
-                'fidsCode': '',
-                'filterSenderPuids': '',
-                'filterTags': ''
-              }, classify: (response, uri) async {
-            final result = await ChaoxingExamParser.evaluateNoticeResponseAsync(
-              data: response.data,
-              uri: uri,
-              status: response.statusCode ?? 0,
-              location: response.headers.value('location') ?? '',
-              retryAfterRaw: response.headers['retry-after']?.singleOrNull,
-              courses: pageFeedsCourseNotices ? (noticeCatalog ?? refs) : null,
-            );
-            noticePage = result.page;
-            return result.decision;
-          },
-              verificationProbe:
-                  Uri.parse('https://notice.chaoxing.com/pc/notice/myNotice'));
-          if (!current()) return const [];
+          final response = await _safeGet<dynamic>(
+            'https://notice.chaoxing.com/pc/notice/getNoticeList',
+            method: 'POST',
+            requestKind: '考试通知',
+            form: {
+              'type': '0',
+              'notice_type': '0',
+              'lastValue': cursor,
+              'sort': '0',
+              'folderUUID': '',
+              'kw': '',
+              'startTime': '',
+              'endTime': '',
+              'gKw': '',
+              'gName': '',
+              'year': '',
+              'tag': '',
+              'fidsCode': '',
+              'filterSenderPuids': '',
+              'filterTags': '',
+            },
+            classify: (response, uri) async {
+              final result =
+                  await ChaoxingExamParser.evaluateNoticeResponseAsync(
+                data: response.data,
+                uri: uri,
+                status: response.statusCode ?? 0,
+                location: response.headers.value('location') ?? '',
+                retryAfterRaw: response.headers['retry-after']?.singleOrNull,
+                courses:
+                    pageFeedsCourseNotices ? (noticeCatalog ?? refs) : null,
+              );
+              noticePage = result.page;
+              return result.decision;
+            },
+            verificationProbe:
+                Uri.parse('https://notice.chaoxing.com/pc/notice/myNotice'),
+          );
+          if (!current() || response == null) return const [];
           final parsed = noticePage;
           if (parsed == null) throw StateError('examNoticeSchema');
           for (final a in parsed.rows) {
